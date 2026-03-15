@@ -102,6 +102,11 @@ const state = {
 
   // Timer for generation simulation
   generationTimer: null,
+
+  // Real data (from Electron backend)
+  importedPrompts: [],       // [{id, prompt}] from CSV/XLSX
+  importedFilePath: null,
+  progressCleanup: null,     // cleanup function for progress listener
 };
 
 // ── Navigation ──
@@ -199,14 +204,64 @@ function showProjectsList() {
 }
 
 // ── Connection ──
-function connectAccount() {
-  state.isConnected = true;
-  updateConnectionUI();
+async function connectAccount() {
+  const api = window.electronAPI;
+  if (!api) {
+    // Mock mode (browser)
+    state.isConnected = true;
+    updateConnectionUI();
+    setTimeout(() => navigateTo('settings'), 1200);
+    return;
+  }
 
-  // Auto-advance after brief delay
-  setTimeout(() => {
-    navigateTo('settings');
-  }, 1200);
+  // Show connecting state
+  const btn = document.querySelector('#connection-disconnected .btn-primary');
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span> Запуск Chrome...';
+  }
+
+  try {
+    // 1. Launch Chrome
+    const launchResult = await api.chrome.launch();
+    if (!launchResult.success) {
+      alert(`❌ ${launchResult.error}`);
+      if (btn) { btn.disabled = false; btn.innerHTML = '🔗 Подключиться к Higgsfield'; }
+      return;
+    }
+
+    if (btn) btn.innerHTML = '<span class="spinner"></span> Залогиньтесь в Chrome...';
+
+    // 2. Wait for user to login (poll every 3s for up to 3 min)
+    let connected = false;
+    for (let i = 0; i < 60; i++) {
+      await new Promise(r => setTimeout(r, 3000));
+
+      const connectResult = await api.chrome.connect();
+      if (connectResult.success) {
+        const auth = await api.chrome.checkAuth();
+        if (auth.authenticated) {
+          // Save session
+          await api.chrome.saveSession();
+          connected = true;
+          break;
+        }
+      }
+    }
+
+    if (connected) {
+      state.isConnected = true;
+      updateConnectionUI();
+      setTimeout(() => navigateTo('settings'), 800);
+    } else {
+      alert('⚠️ Таймаут подключения. Попробуйте снова.');
+      if (btn) { btn.disabled = false; btn.innerHTML = '🔗 Подключиться к Higgsfield'; }
+    }
+
+  } catch (err) {
+    alert(`❌ Ошибка: ${err.message}`);
+    if (btn) { btn.disabled = false; btn.innerHTML = '🔗 Подключиться к Higgsfield'; }
+  }
 }
 
 // FIX: Separate function to sync UI with connection state
@@ -217,6 +272,14 @@ function updateConnectionUI() {
   if (state.isConnected) {
     if (disconnectedEl) disconnectedEl.style.display = 'none';
     if (connectedEl) connectedEl.style.display = 'block';
+    // Update sidebar nav status for connection
+    const connNav = document.querySelector('.nav-item[data-screen="connection"] .nav-status');
+    if (connNav) connNav.textContent = '✓';
+    // Update footer to show connected state
+    const footer = document.querySelector('.sidebar-footer-text');
+    if (footer && !footer.textContent.includes('●')) {
+      footer.textContent = '● Подключено  ·  ' + footer.textContent;
+    }
   } else {
     if (disconnectedEl) disconnectedEl.style.display = 'block';
     if (connectedEl) connectedEl.style.display = 'none';
@@ -224,11 +287,51 @@ function updateConnectionUI() {
 }
 
 // ── Settings ──
-function simulateImport() {
+async function simulateImport() {
   if (state.fileImported) return; // FIX: Prevent double-import
-  state.fileImported = true;
-  document.getElementById('drop-zone').style.display = 'none';
-  document.getElementById('file-info').style.display = 'flex';
+
+  const api = window.electronAPI;
+  if (!api) {
+    // Mock mode (browser)
+    state.fileImported = true;
+    state.importedPrompts = MOCK_PROMPTS.map(p => ({ id: String(p.id), prompt: p.text }));
+    state.promptCount = state.importedPrompts.length;
+    document.getElementById('drop-zone').style.display = 'none';
+    document.getElementById('file-info').style.display = 'flex';
+    const countEl = document.getElementById('file-prompt-count');
+    if (countEl) countEl.textContent = `${state.promptCount} промптов`;
+    return;
+  }
+
+  try {
+    // 1. Open native file dialog
+    const filePath = await api.file.select();
+    if (!filePath) return; // Cancelled
+
+    // 2. Parse file
+    const result = await api.file.import(filePath);
+    if (!result.success) {
+      alert(`❌ ${result.error}`);
+      return;
+    }
+
+    // 3. Update state
+    state.fileImported = true;
+    state.importedPrompts = result.rows;
+    state.importedFilePath = filePath;
+    state.promptCount = result.count;
+
+    // 4. Update UI
+    document.getElementById('drop-zone').style.display = 'none';
+    document.getElementById('file-info').style.display = 'flex';
+    const countEl = document.getElementById('file-prompt-count');
+    if (countEl) countEl.textContent = `${result.count} промптов`;
+    const nameEl = document.getElementById('file-name');
+    if (nameEl) nameEl.textContent = filePath.split('/').pop();
+
+  } catch (err) {
+    alert(`❌ Ошибка импорта: ${err.message}`);
+  }
 }
 
 function selectModel(modelId) {
@@ -296,7 +399,7 @@ function updateSettingsSummary() {
 }
 
 // ── Generation ──
-function startGeneration() {
+async function startGeneration() {
   // FIX: Clear any existing timer first
   if (state.generationTimer) {
     clearInterval(state.generationTimer);
@@ -311,9 +414,15 @@ function startGeneration() {
   state.generationFinished = false;
   state.selectionInitialized = false; // Reset selection for new generation
 
+  // Use real prompts if available, else mock
+  const prompts = state.importedPrompts.length > 0
+    ? state.importedPrompts
+    : MOCK_PROMPTS.map(p => ({ id: String(p.id), prompt: p.text }));
+
   // Init prompt statuses
-  state.promptStatuses = MOCK_PROMPTS.map((p, i) => ({
-    ...p,
+  state.promptStatuses = prompts.map((p, i) => ({
+    id: p.id,
+    text: p.prompt,
     status: i === 0 ? 'in-progress' : 'pending',
     imagesGenerated: 0,
   }));
@@ -336,7 +445,82 @@ function startGeneration() {
 
   navigateTo('progress');
   renderPromptStatusList();
-  startGenerationSimulation();
+
+  const api = window.electronAPI;
+  if (!api) {
+    // Mock mode — use simulation
+    startGenerationSimulation();
+    return;
+  }
+
+  // ── Real generation via Electron backend ──
+  // Listen for progress events
+  if (state.progressCleanup) state.progressCleanup();
+  state.progressCleanup = api.generate.onProgress((data) => {
+    handleGenerationProgress(data);
+  });
+
+  try {
+    const result = await api.generate.start(prompts, {
+      model: state.selectedModel,
+      aspect: state.selectedRatio,
+      quality: state.selectedQuality,
+    });
+
+    if (!result.success) {
+      alert(`❌ ${result.error}`);
+      state.isGenerating = false;
+    }
+  } catch (err) {
+    alert(`❌ Ошибка генерации: ${err.message}`);
+    state.isGenerating = false;
+  }
+}
+
+// Handle real-time progress events from backend
+function handleGenerationProgress(data) {
+  if (data.status === 'complete') {
+    finishGeneration();
+    return;
+  }
+
+  if (data.status === 'auth_error') {
+    alert(`🔒 ${data.message}`);
+    state.isGenerating = false;
+    return;
+  }
+
+  if (data.current && data.total) {
+    const idx = data.current - 1;
+
+    // Update prompt statuses
+    for (let i = 0; i < state.promptStatuses.length; i++) {
+      if (i < idx) {
+        state.promptStatuses[i].status = 'done';
+        state.promptStatuses[i].imagesGenerated = 4;
+      } else if (i === idx) {
+        state.promptStatuses[i].status = 'in-progress';
+        if (data.status === 'downloading') {
+          state.promptStatuses[i].imagesGenerated = 3;
+        }
+      }
+    }
+
+    state.currentPromptIndex = idx;
+
+    // Calculate progress
+    const doneCount = state.promptStatuses.filter(p => p.status === 'done').length;
+    state.generationProgress = Math.round((doneCount / data.total) * 100);
+
+    // Update current prompt text
+    const promptTextEl = document.getElementById('current-prompt-text');
+    const imageSubEl = document.getElementById('current-image-sub');
+    if (promptTextEl && data.prompt) promptTextEl.textContent = data.prompt;
+    if (imageSubEl && data.message) imageSubEl.textContent = data.message;
+
+    updateProgressUI();
+    renderPromptStatusList();
+  }
 }
 
 function startGenerationSimulation() {
@@ -446,7 +630,7 @@ function togglePause() {
   if (btn) btn.innerHTML = state.isPaused ? '▶ Продолжить' : '⏸ Пауза';
 }
 
-function stopGeneration() {
+async function stopGeneration() {
   // FIX: Prevent double-call
   if (state.generationFinished) return;
 
@@ -455,6 +639,12 @@ function stopGeneration() {
     state.generationTimer = null;
   }
   state.isGenerating = false;
+
+  // Tell backend to stop
+  const api = window.electronAPI;
+  if (api) {
+    try { await api.generate.stop(); } catch {}
+  }
 
   // Mark remaining as done
   state.promptStatuses.forEach(p => {
@@ -625,8 +815,14 @@ function finishSelection() {
 }
 
 // ── Results ──
-function openResultsFolder() {
-  alert('В реальном приложении здесь бы открылась папка с результатами');
+async function openResultsFolder() {
+  const api = window.electronAPI;
+  if (api) {
+    const info = await api.app.info();
+    await api.fs.openFolder(info.outputDir);
+  } else {
+    alert('В реальном приложении здесь бы открылась папка с результатами');
+  }
 }
 
 // ── Helper ──
@@ -643,7 +839,7 @@ function lightenColor(hex, percent) {
 }
 
 // ── Init ──
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
   // Nav click handlers
   document.querySelectorAll('.nav-item').forEach(item => {
     item.addEventListener('click', () => {
@@ -669,4 +865,41 @@ document.addEventListener('DOMContentLoaded', () => {
   if (fillEl) fillEl.style.width = '0%';
   if (doneEl) doneEl.textContent = '0';
   if (imagesEl) imagesEl.textContent = '0';
+
+  // ── Electron: Check existing connection on startup ──
+  const api = window.electronAPI;
+  if (api) {
+    try {
+      const status = await api.chrome.status();
+      console.log('[app] Chrome status:', JSON.stringify(status));
+
+      if (status.chromeRunning) {
+        // Chrome is running — try to connect CDP
+        const connectResult = await api.chrome.connect();
+        console.log('[app] CDP connect result:', JSON.stringify(connectResult));
+
+        if (connectResult.success) {
+          // Save/refresh session
+          const saveResult = await api.chrome.saveSession();
+          console.log('[app] Session save result:', JSON.stringify(saveResult));
+
+          state.isConnected = true;
+          updateConnectionUI();
+          console.log('[app] ✅ Auto-connected!');
+        }
+      } else if (status.hasSession) {
+        // Has saved session but Chrome not running — show hint
+        console.log('[app] Session exists but Chrome not running');
+      }
+    } catch (err) {
+      console.error('[app] Auto-connect error:', err);
+    }
+
+    // Show app version
+    try {
+      const info = await api.app.info();
+      const versionEl = document.querySelector('.sidebar-footer-text');
+      if (versionEl) versionEl.textContent = `Higgsfield Studio v${info.version}`;
+    } catch {}
+  }
 });

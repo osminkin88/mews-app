@@ -1,0 +1,25 @@
+{
+  "name": "higgsfield-studio",
+  "version": "1.0.0",
+  "description": "Higgsfield Studio — AI Image Generation Desktop App",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev"
+  },
+  "keywords": [
+    "higgsfield",
+    "ai",
+    "image-generation"
+  ],
+  "author": "Antigravity",
+  "license": "MIT",
+  "type": "commonjs",
+  "devDependencies": {
+    "electron": "^41.0.2"
+  },
+  "dependencies": {
+    "puppeteer-core": "^24.39.1",
+    "xlsx": "^0.18.5"
+  }
+}

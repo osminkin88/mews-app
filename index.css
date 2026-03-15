@@ -162,6 +162,17 @@ body::before {
   width: 100vw;
 }
 
+/* ── Electron: macOS titlebar drag region ── */
+.sidebar-brand {
+  -webkit-app-region: drag;
+}
+.sidebar-brand * {
+  -webkit-app-region: no-drag;
+}
+.sidebar-brand .sidebar-logo {
+  -webkit-app-region: drag;
+}
+
 /* ── Sidebar ── */
 .sidebar {
   width: var(--sidebar-width);
@@ -174,6 +185,7 @@ body::before {
   display: flex;
   flex-direction: column;
   padding: var(--space-lg) 0;
+  padding-top: 42px; /* Space for macOS traffic lights */
   z-index: 10;
 }
 
@@ -1414,4 +1426,21 @@ body::before {
 
 .quality-option.active .quality-label {
   color: var(--accent-hover);
+}
+
+/* ── Spinner (for loading states) ── */
+.spinner {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(0, 0, 0, 0.15);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  vertical-align: middle;
+  margin-right: 6px;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
 }

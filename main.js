@@ -187,11 +187,13 @@ ipcMain.handle('generate:start', async (event, { prompts, settings, projectId })
 
   // Process each prompt sequentially
   console.log(`[main] ═══ GENERATE:START received ═══`);
-  console.log(`[main] Prompts received: ${prompts.length}`);
+  console.log(`[main] Prompts to process: ${prompts.length}`);
   console.log(`[main] projectId: ${projectId || 'NONE'}`);
   console.log(`[main] baseOutputDir: ${baseOutputDir}`);
+  console.log(`[main] imagesPerPrompt: ${imagesCount || 4}`);
   prompts.forEach((p, i) => {
-    console.log(`[main] Prompt ${i + 1}: id=${p.id}, text="${(p.prompt || 'EMPTY!').substring(0, 80)}"`);
+    const absIdx = p.originalIndex !== undefined ? p.originalIndex : i;
+    console.log(`[main]   #${i + 1}: id=${p.id}, absIndex=${absIdx}, folder=${String(absIdx + 1).padStart(3, '0')}, text="${(p.prompt || 'EMPTY!').substring(0, 80)}"`);
   });
 
   // Reset stop flag for this entire batch
@@ -212,10 +214,16 @@ ipcMain.handle('generate:start', async (event, { prompts, settings, projectId })
     const prompt = prompts[i];
     const runIndex = i + 1; // Index in the current generation batch (1-based) for UI sync
     const folderIndex = prompt.originalIndex !== undefined ? prompt.originalIndex + 1 : runIndex; // Absolute index for folder mapping
+    const targetCount = imagesCount || 4;
     
     const promptDir = path.join(baseOutputDir, String(folderIndex).padStart(3, '0'));
-    console.log(`[main] ─── Processing prompt ${runIndex}/${prompts.length}: "${(prompt.prompt || 'EMPTY!').substring(0, 60)}" ───`);
-    console.log(`[main] ─── Output dir: ${promptDir} ───`);
+    console.log(`\n[main] ┌── PROMPT ${runIndex}/${prompts.length} ──────────────────────────────`);
+    console.log(`[main] │ id=${prompt.id}, absIndex=${folderIndex - 1} (folder: ${String(folderIndex).padStart(3, '0')})`);
+    console.log(`[main] │ target: ${targetCount} images`);
+    console.log(`[main] │ projectId: ${projectId || 'NONE'}`);
+    console.log(`[main] │ outputDir: ${promptDir}`);
+    console.log(`[main] │ text: "${(prompt.prompt || 'EMPTY!').substring(0, 60)}"`);
+    console.log(`[main] └──────────────────────────────────────────────────`);
 
     if (!fs.existsSync(promptDir)) {
       fs.mkdirSync(promptDir, { recursive: true });
@@ -223,13 +231,15 @@ ipcMain.handle('generate:start', async (event, { prompts, settings, projectId })
 
     // ── Build initial meta ──
     const meta = {
+
       id: prompt.id,
       prompt: prompt.prompt,
       status: 'preparing',
-      target_count: imagesCount || 4,
-      generated_count: 0,
-      in_flight_count: 0,
+      target_count: targetCount,
+      saved_count: 0,
+      failed_count: 0,
       files: [],
+      slots: [], // Per-slot detail (populated after engine returns)
       selected: null,
       error: null,
       model,
@@ -244,7 +254,7 @@ ipcMain.handle('generate:start', async (event, { prompts, settings, projectId })
 
     saveMeta(promptDir, meta);
 
-    // Send progress
+    // Send progress to renderer
     sendToRenderer('generate:progress', {
       current: runIndex,
       total: prompts.length,
@@ -253,86 +263,99 @@ ipcMain.handle('generate:start', async (event, { prompts, settings, projectId })
       message: `Промпт ${runIndex}/${prompts.length}...`,
     });
 
-    // ── Try generation (with 1 auto-retry) ──
-    let succeeded = false;
-    for (let attempt = 1; attempt <= 2 && !succeeded; attempt++) {
-      if (attempt === 2) {
-        console.log(`[main] Retry for prompt ${runIndex}...`);
+    // ── Single call to engine (engine handles per-slot retries internally) ──
+    try {
+      meta.status = 'generating';
+      saveMeta(promptDir, meta);
+
+      const result = await engine.generatePrompt(prompt.prompt, {
+        model,
+        aspect,
+        quality,
+        imagesCount: targetCount,
+        outputDir: promptDir,
+        onProgress: (progress) => {
+          sendToRenderer('generate:progress', {
+            current: runIndex,
+            total: prompts.length,
+            prompt: prompt.prompt,
+            ...progress,
+          });
+        },
+      });
+
+      // Engine returns { images, savedCount, failedCount, stoppedCount, total, promptStatus }
+      const savedImages = (result.images || []).filter(r => r.state === 'saved' && r.file);
+      const files = savedImages.map(r => path.basename(r.file));
+      const promptStatus = result.promptStatus || (files.length >= targetCount ? 'done' : files.length > 0 ? 'partial' : 'error');
+
+      // Build slot detail for meta.json
+      const slots = (result.images || []).map(img => ({
+        slot: img.index,
+        state: img.state,           // saved | failed | stopped
+        file: img.file || null,
+        attempts: img.attempts || 1,
+        errorReason: img.errorReason || null,
+        size: img.size || null,
+      }));
+
+      // Update meta.json with full slot detail
+      meta.status = promptStatus;
+      meta.saved_count = result.savedCount || files.length;
+      meta.failed_count = result.failedCount || 0;
+      meta.files = files;
+      meta.slots = slots;
+      meta.timestamps.completed = new Date().toISOString();
+      meta.error = promptStatus !== 'done' ? `Saved ${files.length}/${targetCount}` : null;
+      saveMeta(promptDir, meta);
+
+      // Push enriched result for finishGeneration() in app.js
+      results.push({
+        idx: folderIndex,
+        id: prompt.id,
+        status: promptStatus,
+        savedCount: result.savedCount || files.length,
+        failedCount: result.failedCount || 0,
+        totalSlots: targetCount,
+        slots,
+      });
+
+      console.log(`[main] ┌── RESULT PROMPT ${runIndex} ─────────────────────────`);
+      console.log(`[main] │ status: ${promptStatus.toUpperCase()} → saved ${files.length}/${targetCount}`);
+      console.log(`[main] │ failed: ${result.failedCount || 0} slots`);
+      console.log(`[main] │ files: [${files.join(', ')}]`);
+      console.log(`[main] │ folder: ${promptDir}`);
+      console.log(`[main] └──────────────────────────────────────────────────`);
+
+    } catch (err) {
+      // Engine throws only for fatal errors (isFatal=true) or 0-saved non-stop case
+      const isFatal = err.isFatal === true;
+      const reason = err.errorReason || 'unknown';
+
+      console.error(`[main] Prompt ${runIndex} FAILED [fatal=${isFatal}, reason=${reason}]: ${err.message}`);
+
+      meta.status = 'error';
+      meta.error = err.message;
+      meta.error_reason = reason;
+      meta.timestamps.completed = new Date().toISOString();
+      saveMeta(promptDir, meta);
+
+      results.push({ idx: folderIndex, id: prompt.id, status: 'error', error: err.message, errorReason: reason });
+
+      console.log(`[main] ┌── RESULT PROMPT ${runIndex} ─────────────────────────`);
+      console.log(`[main] │ status: ERROR [${reason}]`);
+      console.log(`[main] │ fatal: ${isFatal}`);
+      console.log(`[main] │ error: ${err.message}`);
+      console.log(`[main] └──────────────────────────────────────────────────`);
+
+      if (isFatal) {
+        // Fatal error (auth expired, credits exhausted) — stop entire batch
         sendToRenderer('generate:progress', {
-          current: runIndex,
-          total: prompts.length,
-          prompt: prompt.prompt,
-          status: 'retrying',
-          message: `Повторяю промпт ${runIndex}...`,
+          status: reason === 'auth_error' ? 'auth_error' : 'fatal_error',
+          message: err.message,
+          errorReason: reason,
         });
-      }
-
-      try {
-        meta.status = 'generating';
-        meta.in_flight_count = imagesCount || 4;
-        saveMeta(promptDir, meta);
-
-        // Generate via Engine
-        const result = await engine.generatePrompt(prompt.prompt, {
-          model,
-          aspect,
-          quality,
-          imagesCount: imagesCount || 4,
-          outputDir: promptDir,
-          onProgress: (progress) => {
-            sendToRenderer('generate:progress', {
-              current: runIndex,
-              total: prompts.length,
-              prompt: prompt.prompt,
-              ...progress,
-            });
-          },
-        });
-
-        // Engine returns { images, savedCount, errorCount, total }
-        const savedImages = (result.images || []).filter(r => r.state === 'saved' && r.file);
-        const files = savedImages.map(r => path.basename(r.file));
-        console.log(`[main] Engine returned: savedCount=${result.savedCount}, files=[${files.join(', ')}]`);
-
-        if (files.length > 0) {
-          // Success!
-          meta.status = 'ready_for_selection';
-          meta.generated_count = files.length;
-          meta.in_flight_count = 0;
-          meta.files = files;
-          meta.timestamps.completed = new Date().toISOString();
-          meta.error = null;
-          saveMeta(promptDir, meta);
-
-          results.push({ idx: folderIndex, id: prompt.id, status: 'done', files: files.length });
-          succeeded = true;
-        } else {
-          throw new Error('Ни одно изображение не сохранено');
-        }
-
-      } catch (err) {
-        console.error(`[main] Prompt ${runIndex} attempt ${attempt} error: ${err.message}`);
-
-        if (attempt === 2 || err.message.includes('Сессия истекла') || err.message.includes('не поддерживает Unlimited')) {
-          // Final failure
-          meta.status = 'error';
-          meta.error = err.message;
-          meta.in_flight_count = 0;
-          meta.timestamps.completed = new Date().toISOString();
-          saveMeta(promptDir, meta);
-
-          results.push({ idx: folderIndex, id: prompt.id, status: 'error', error: err.message });
-
-          // Fatal auth error — stop all
-          if (err.message.includes('Сессия истекла')) {
-            sendToRenderer('generate:progress', {
-              status: 'auth_error',
-              message: err.message,
-            });
-            break;
-          }
-        }
-        // else: will retry on next iteration
+        break; // Break the prompts loop
       }
     }
 

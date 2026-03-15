@@ -1030,8 +1030,71 @@ async function appReplacePrompts() {
   renderProjectPrompts();
 }
 
+// ── Retry Failed Slots ──
+/**
+ * Retry only prompts that didn't fully succeed (partial, error, stopped).
+ * Each retried prompt keeps its originalIndex so it writes to the correct folder.
+ * Done prompts are never retried.
+ */
+async function retryFailedSlots() {
+  if (!state.currentProject) {
+    console.warn('[app] retryFailedSlots: no current project');
+    return;
+  }
+
+  // Collect non-done prompts
+  const failedPromptIds = new Set(
+    (state.lastBackendResults || [])
+      .filter(r => r.status !== 'done')
+      .map(r => String(r.id))
+  );
+
+  if (failedPromptIds.size === 0) {
+    console.log('[app] retryFailedSlots: nothing to retry');
+    return;
+  }
+
+  // Find the original prompt objects (with their data)
+  const allPrompts = state.currentProject.prompts || [];
+  const promptsToRetry = allPrompts
+    .map((p, idx) => ({
+      ...p,
+      originalIndex: p.originalIndex !== undefined ? p.originalIndex : idx,
+    }))
+    .filter(p => failedPromptIds.has(String(p.id)));
+
+  if (promptsToRetry.length === 0) {
+    console.log('[app] retryFailedSlots: no matching prompts found');
+    return;
+  }
+
+  console.log(`[app] retryFailedSlots: ${promptsToRetry.length} prompts to retry`);
+
+  // Reset generation state for a fresh run with only the failed prompts
+  state.generationFinished = false;
+  state.isGenerating = false;
+  state.promptStatuses = promptsToRetry.map(p => ({
+    id: p.id,
+    text: p.prompt,
+    status: 'pending',
+    imagesGenerated: 0,
+    savedCount: 0,
+    failedCount: 0,
+    totalSlots: state.imagesPerPrompt || 4,
+    slots: [],
+    originalIndex: p.originalIndex,
+  }));
+
+  // Store for the generation start
+  state._retryPrompts = promptsToRetry;
+
+  // Kick off generation
+  await startGeneration(promptsToRetry);
+}
+
 // ── Generation ──
-async function startGeneration() {
+async function startGeneration(promptOverride) {
+
   // FIX: Clear any existing timer first
   if (state.generationTimer) {
     clearInterval(state.generationTimer);
@@ -1047,24 +1110,41 @@ async function startGeneration() {
   state.selectionInitialized = false; // Reset selection for new generation
 
   // ── Engine Overwrite Protection (Step 4) ──
-  let promptsToGenerate = state.importedPrompts.length > 0
-    ? [...state.importedPrompts]
-    : MOCK_PROMPTS.map(p => ({ id: String(p.id), prompt: p.text, status: 'pending' }));
+  let promptsToGenerate;
 
-  const completedPrompts = promptsToGenerate.filter(p => p.status === 'completed');
-  if (completedPrompts.length > 0) {
-    const skipOld = confirm(`Внимание: ${completedPrompts.length} промптов уже успешно сгенерированы.\n\n[ОК] - Пропустить готовые и генерировать только новые/ожидающие\n[Отмена] - Перегенерировать ВСЁ заново (старые результаты будут удалены)`);
-    if (skipOld) {
-      promptsToGenerate = promptsToGenerate.filter(p => p.status !== 'completed');
-      if (promptsToGenerate.length === 0) {
-        alert('✅ Все промпты в этом проекте уже сгенерированы! Переходите к отбору.');
-        return;
+  if (promptOverride && promptOverride.length > 0) {
+    // ── Retry mode: use the provided list directly (originalIndex already set) ──
+    promptsToGenerate = promptOverride;
+    console.log(`[app] 🔄 Retry mode: ${promptsToGenerate.length} prompts to retry`);
+  } else {
+    // ── Normal mode: build from importedPrompts or mock data ──
+    promptsToGenerate = state.importedPrompts.length > 0
+      ? [...state.importedPrompts]
+      : MOCK_PROMPTS.map(p => ({ id: String(p.id), prompt: p.text, status: 'pending' }));
+
+    // ── FIX: Tag every prompt with its ABSOLUTE index BEFORE any filtering ──
+    // This ensures partial reruns write to the correct folder (e.g. prompt #3 → 003/)
+    promptsToGenerate.forEach((p, i) => {
+      p.originalIndex = i;
+    });
+
+    const completedPrompts = promptsToGenerate.filter(p => p.status === 'completed');
+    if (completedPrompts.length > 0) {
+      const skipOld = confirm(`Внимание: ${completedPrompts.length} промптов уже успешно сгенерированы.\n\n[ОК] - Пропустить готовые и генерировать только новые/ожидающие\n[Отмена] - Перегенерировать ВСЁ заново (старые результаты будут удалены)`);
+      if (skipOld) {
+        promptsToGenerate = promptsToGenerate.filter(p => p.status !== 'completed');
+        if (promptsToGenerate.length === 0) {
+          alert('✅ Все промпты в этом проекте уже сгенерированы! Переходите к отбору.');
+          return;
+        }
+      } else {
+        // Force rewrite — mark locally as pending
+        promptsToGenerate.forEach(p => p.status = 'pending');
       }
-    } else {
-      // Force rewrite — mark locally as pending
-      promptsToGenerate.forEach(p => p.status = 'pending');
     }
   }
+
+
 
   // ── DIAGNOSTIC: Log what prompts we're sending ──
   console.log(`[app] ═══ GENERATION START ═══`);
@@ -1137,7 +1217,8 @@ async function startGeneration() {
 // Handle real-time progress events from backend
 function handleGenerationProgress(data) {
   if (data.status === 'complete') {
-    finishGeneration();
+    // ── FIX: Pass backend results to finishGeneration for honest completion ──
+    finishGeneration(data.results || []);
     return;
   }
 
@@ -1150,11 +1231,14 @@ function handleGenerationProgress(data) {
   if (data.current && data.total) {
     const idx = data.current - 1;
 
-    // Update prompt statuses
+    // ── FIX: Only mark prior prompts as done if they aren't already error/partial ──
     for (let i = 0; i < state.promptStatuses.length; i++) {
       if (i < idx) {
-        state.promptStatuses[i].status = 'done';
-        state.promptStatuses[i].imagesGenerated = state.imagesPerPrompt || 4;
+        // Don't overwrite error/partial — they were set by the backend
+        if (state.promptStatuses[i].status !== 'error' && state.promptStatuses[i].status !== 'partial') {
+          state.promptStatuses[i].status = 'done';
+          state.promptStatuses[i].imagesGenerated = state.imagesPerPrompt || 4;
+        }
       } else if (i === idx) {
         state.promptStatuses[i].status = 'in-progress';
         if (data.status === 'downloading') {
@@ -1165,9 +1249,11 @@ function handleGenerationProgress(data) {
 
     state.currentPromptIndex = idx;
 
-    // Calculate progress
-    const doneCount = state.promptStatuses.filter(p => p.status === 'done').length;
-    state.generationProgress = Math.round((doneCount / data.total) * 100);
+    // Calculate progress — count done + error + partial as "processed"
+    const processedCount = state.promptStatuses.filter(p => 
+      p.status === 'done' || p.status === 'error' || p.status === 'partial'
+    ).length;
+    state.generationProgress = Math.round((processedCount / data.total) * 100);
 
     // Update current prompt text
     const promptTextEl = document.getElementById('current-prompt-text');
@@ -1260,13 +1346,16 @@ function renderPromptStatusList() {
       'pending': '<div class="status-icon pending">○</div>',
       'in-progress': '<div class="status-icon in-progress">◉</div>',
       'done': '<div class="status-icon done">🐾</div>',
+      'partial': '<div class="status-icon error">◐</div>',
       'error': '<div class="status-icon error">✗</div>',
       'stopped': '<div class="status-icon pending">■</div>',
     };
+    const target = state.imagesPerPrompt || 4;
     const statusTexts = {
       'pending': 'Ожидание',
-      'in-progress': `Генерация… ${p.imagesGenerated}/${state.imagesPerPrompt || 4} · Unlimited 🆓`,
-      'done': 'Готово ✓',
+      'in-progress': `Генерация… ${p.imagesGenerated}/${target} · Unlimited 🆓`,
+      'done': `Готово ✓ (${target}/${target})`,
+      'partial': `Частично: ${p.imagesGenerated}/${target}`,
       'error': 'Ошибка',
       'stopped': 'Остановлен',
     };
@@ -1317,7 +1406,7 @@ async function stopGeneration() {
   finishGeneration();
 }
 
-function finishGeneration() {
+function finishGeneration(backendResults) {
   // FIX: Prevent double finishing
   if (state.generationFinished) return;
   state.generationFinished = true;
@@ -1327,56 +1416,120 @@ function finishGeneration() {
     state.generationTimer = null;
   }
   state.isGenerating = false;
-  state.generationProgress = 100;
 
-  // Update progress UI to show 100%
+  // ── Sync prompt statuses from REAL backend results ──
+  if (backendResults && backendResults.length > 0) {
+    const resultMap = new Map();
+    for (const r of backendResults) {
+      resultMap.set(String(r.id), r);
+    }
+    for (const ps of state.promptStatuses) {
+      const br = resultMap.get(String(ps.id));
+      if (br) {
+        ps.status = br.status;
+        ps.savedCount = br.savedCount || 0;
+        ps.failedCount = br.failedCount || 0;
+        ps.totalSlots = br.totalSlots || (state.imagesPerPrompt || 4);
+        ps.slots = br.slots || [];
+        ps.imagesGenerated = br.savedCount || 0;
+      }
+    }
+    // Save backendResults for Retry failed
+    state.lastBackendResults = backendResults;
+  }
+
+  // ── Compute REAL slot-level counts ──
+  const totalSlots = state.promptStatuses.reduce((sum, p) => sum + (p.totalSlots || state.imagesPerPrompt || 4), 0);
+  const savedSlots = state.promptStatuses.reduce((sum, p) => sum + (p.savedCount || 0), 0);
+  const failedSlots = state.promptStatuses.reduce((sum, p) => sum + (p.failedCount || 0), 0);
+
+  const doneCount = state.promptStatuses.filter(p => p.status === 'done').length;
+  const partialCount = state.promptStatuses.filter(p => p.status === 'partial').length;
+  const errorCount = state.promptStatuses.filter(p => p.status === 'error').length;
+  const stoppedCount = state.promptStatuses.filter(p => p.status === 'stopped').length;
+  const totalCount = state.promptStatuses.length;
+  const processedCount = doneCount + partialCount + errorCount + stoppedCount;
+
+  state.generationProgress = totalCount > 0 ? Math.round((processedCount / totalCount) * 100) : 100;
+
+  // Update progress UI
   const pctEl = document.getElementById('progress-percent');
   const fillEl = document.getElementById('progress-bar-fill');
   const etaEl = document.getElementById('eta-text');
   const doneEl = document.getElementById('stat-done');
+  const errEl = document.getElementById('stat-errors');
 
-  if (pctEl) pctEl.textContent = '100%';
-  if (fillEl) fillEl.style.width = '100%';
+  if (pctEl) pctEl.textContent = `${state.generationProgress}%`;
+  if (fillEl) fillEl.style.width = `${state.generationProgress}%`;
   if (etaEl) etaEl.textContent = 'Генерация завершена!';
-  if (doneEl) doneEl.textContent = state.promptStatuses.length;
+  if (doneEl) doneEl.textContent = savedSlots;
+  if (errEl) errEl.textContent = failedSlots;
 
-  // Show completion banner
+  // ── Honest banner based on real slot counts ──
   const controls = document.querySelector('.progress-controls');
   if (controls) {
+    const allPerfect = doneCount === totalCount && totalCount > 0;
+    const hasProblems = errorCount > 0 || partialCount > 0;
+    const wasStopped = stoppedCount > 0;
+    const hasFailedSlots = failedSlots > 0;
+
+    let bannerClass = 'banner-success';
+    let bannerIcon = '🐾';
+    let bannerText = '';
+
+    if (allPerfect) {
+      bannerText = `Мур! Все ${savedSlots}/${totalSlots} изображений сохранены!`;
+    } else if (wasStopped && !hasProblems) {
+      bannerClass = 'banner-warning';
+      bannerIcon = '⏹';
+      bannerText = `Остановлено: сохранено ${savedSlots}/${totalSlots} изображений.`;
+    } else if (hasProblems || hasFailedSlots) {
+      bannerClass = 'banner-warning';
+      bannerIcon = '⚠️';
+      bannerText = `Сохранено ${savedSlots}/${totalSlots} изображений, не удалось: ${failedSlots}.`;
+    } else {
+      bannerText = `Готово: ${savedSlots}/${totalSlots} изображений.`;
+    }
+
+    const retryBtn = hasFailedSlots || hasProblems
+      ? `<button class="btn btn-secondary" onclick="retryFailedSlots()" style="margin-left:8px">🔄 Добить упавшие (${failedSlots})</button>`
+      : '';
+
     controls.innerHTML = `
-      <div class="banner banner-success" style="width: 100%; margin: 0;">
-        <span class="banner-icon">🐾</span>
-        <span class="banner-text">Мур! Все изображения сгенерированы. Переходите к отбору лучших →</span>
+      <div class="banner ${bannerClass}" style="width: 100%; margin: 0; display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+        <span class="banner-icon">${bannerIcon}</span>
+        <span class="banner-text" style="flex:1">${bannerText}</span>
         <button class="btn btn-primary" onclick="goToSelection()">Перейти к отбору</button>
+        ${retryBtn}
       </div>
     `;
   }
 
-  // Sync finished statuses to project json
+  renderPromptStatusList();
+
+  // ── Sync finished statuses to project json — HONEST mapping ──
   const statusMap = new Map();
   state.promptStatuses.forEach(p => statusMap.set(String(p.id), p.status));
 
   let needsSave = false;
   state.importedPrompts.forEach(p => {
     const newStatus = statusMap.get(String(p.id));
-    if (newStatus && (newStatus === 'done' || newStatus === 'completed')) {
-      if (p.status !== 'completed') {
-        p.status = 'completed';
-        needsSave = true;
-      }
+    if (newStatus === 'done') {
+      if (p.status !== 'completed') { p.status = 'completed'; needsSave = true; }
+    } else if (newStatus === 'partial') {
+      // FIX: partial ≠ completed — leave as 'pending' so re-run picks it up
+      if (p.status !== 'pending') { p.status = 'pending'; needsSave = true; }
     } else if (newStatus === 'error') {
-      if (p.status !== 'error') {
-        p.status = 'error';
-        needsSave = true;
-      }
+      if (p.status !== 'error') { p.status = 'error'; needsSave = true; }
     }
+    // 'stopped' prompts stay as-is (pending)
   });
 
   if (needsSave && activeProjectId && window.electronAPI) {
     window.electronAPI.projects.savePrompts(activeProjectId, state.importedPrompts, state.importedFilePath).catch(console.error);
   }
 
-  // FIX: Populate results screen counters
+  // Populate results screen counters
   updateResultsCounters();
 }
 

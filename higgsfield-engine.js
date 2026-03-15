@@ -129,199 +129,310 @@ async function generatePrompt(prompt, options = {}) {
     await setAspectRatio(page, aspect);
 
     // ── Step 9: SEQUENTIAL STATE MACHINE — generate + download + validate per image ──
+    // Each slot (i) is an independent unit with its own 2-attempt retry loop.
+    // Error classification:
+    //   fatal       → throw immediately, stops entire batc (model changed, auth error, credits exhausted)
+    //   recoverable → retry same slot (click failed, timeout, download failed) — up to 2 attempts
+    //   partial     → mark slot failed, continue to next slot
     const imageResults = [];
+    let fatalError = null; // Set if a fatal error stops the entire batch
 
-    for (let i = 0; i < imagesCount && !shouldStop; i++) {
-      const img = { index: i + 1, state: 'generating', url: null, file: null, size: 0, quality: null, error: null };
-      console.log(`\n[engine] ═══ IMAGE ${img.index}/${imagesCount} — STATE: generating ═══`);
+    for (let i = 0; i < imagesCount && !shouldStop && !fatalError; i++) {
+      const img = {
+        index: i + 1,
+        state: 'pending',
+        url: null,
+        file: null,
+        size: 0,
+        quality: null,
+        error: null,
+        errorReason: null,   // site_failed | click_failed | timeout | download_failed | validation_failed | auth_error | credits_exhausted | stopped
+        attempts: 0,
+      };
 
-      onProgress({
-        step: 'generate',
-        message: `Проверяю → Generate ${img.index}/${imagesCount}...`,
-        current: img.index,
-        total: imagesCount,
-        state: img.state,
-      });
+      console.log(`\n[engine] ═══ SLOT ${img.index}/${imagesCount} — starting ═══`);
 
-      // ═══ PRE-CLICK CHECKS: verify conditions before EVERY click ═══
-      // NOTE: We do NOT re-click Extra free gens or Unlimited here!
-      // Those toggles were set in the preflight section above.
-      // Re-clicking them triggers a form submission on Higgsfield = double generation.
+      // ── Per-slot retry loop: up to 2 attempts ──
+      let slotSucceeded = false;
 
-      // Check 1: Model must be the selected one
-      const modelOkNow = await verifyActiveModel(page, modelInfo);
-      if (!modelOkNow) {
-        throw new Error(`Модель изменилась! Ожидалась "${modelInfo.name}". Генерация остановлена.`);
-      }
+      for (let attempt = 1; attempt <= 2 && !slotSucceeded && !shouldStop && !fatalError; attempt++) {
+        img.attempts = attempt;
+        img.state = 'in_progress';
 
-      // Check 2: Batch MUST be 1/4 (safe to re-click, it doesn't submit)
-      const batchNow = await getBatchSize(page);
-      if (!batchNow || batchNow.current !== 1) {
-        console.log(`[engine] ⚠️ Batch = ${batchNow ? batchNow.current : '?'} перед кликом ${img.index}! Исправляю...`);
-        const batchFixed = await ensureBatchSize1(page);
-        if (!batchFixed) {
-          throw new Error(`Batch не 1/4 перед кликом ${img.index}. Генерация остановлена.`);
+        if (attempt === 2) {
+          console.log(`[engine] 🔄 SLOT ${img.index} — retry attempt (2/2)...`);
+          onProgress({ step: 'retry', message: `Повторяю слот ${img.index}/${imagesCount} (попытка 2)...`, state: 'retrying' });
+          await chrome.sleep(3000);
+        } else {
+          onProgress({
+            step: 'generate',
+            message: `Слот ${img.index}/${imagesCount} — генерирую...`,
+            current: img.index,
+            total: imagesCount,
+            state: 'generating',
+          });
         }
-      }
 
-      // Check 3 & 4: Only LOG toggle state, do NOT click (would trigger generation)
-      const extraOn = await isExtraFreeGensOn(page);
-      if (extraOn) {
-        console.log(`[engine] ⚠️ Extra free gens ON перед кликом ${img.index} (не трогаем — preflight уже настроил)`);
-      }
-      const unlimitedNow = await isUnlimitedOn(page);
-      if (!unlimitedNow) {
-        console.log(`[engine] ⚠️ Unlimited OFF перед кликом ${img.index} (не трогаем — preflight уже настроил)`);
-      }
+        try {
+          // ═══ PRE-CLICK: verify conditions before EVERY click ═══
+          // Check 1: Model must be the selected one (FATAL if changed)
+          const modelOkNow = await verifyActiveModel(page, modelInfo);
+          if (!modelOkNow) {
+            const err = new Error(`Модель изменилась! Ожидалась "${modelInfo.name}". Генерация остановлена.`);
+            err.errorClass = 'fatal';
+            err.errorReason = 'model_changed';
+            throw err;
+          }
 
-      await dismissOverlays(page);
-      console.log(`[engine] ✓ Click ${img.index}: model=${modelInfo.name}, unlimited=ON, batch=1/4, extraFree=OFF`);
+          // Check 2: Batch MUST be 1/4 (safe to fix, doesn't submit)
+          const batchNow = await getBatchSize(page);
+          if (!batchNow || batchNow.current !== 1) {
+            console.log(`[engine] ⚠️ Batch = ${batchNow ? batchNow.current : '?'} перед слотом ${img.index}! Исправляю...`);
+            const batchFixed = await ensureBatchSize1(page);
+            if (!batchFixed) {
+              const err = new Error(`Batch не 1/4 перед слотом ${img.index}. Генерация остановлена.`);
+              err.errorClass = 'fatal';
+              err.errorReason = 'batch_setup_failed';
+              throw err;
+            }
+          }
 
-      // Save feed image COUNT before click (more reliable than URL comparison)
-      const feedCountBefore = await countFeedImages(page);
-      console.log(`[engine] 📊 Feed images before click: ${feedCountBefore}`);
+          // Check 3&4: LOG toggle state only, do NOT click (would trigger generation)
+          const extraOn = await isExtraFreeGensOn(page);
+          if (extraOn) console.log(`[engine] ⚠️ Extra free gens ON перед слотом ${img.index} (не трогаем)`);
+          const unlimitedNow = await isUnlimitedOn(page);
+          if (!unlimitedNow) console.log(`[engine] ⚠️ Unlimited OFF перед слотом ${img.index} (не трогаем)`);
 
-      // Click Generate
-      const clicked = await clickGenerate(page);
-      if (!clicked) {
-        console.log(`[engine] ⚠️ Generate click ${img.index} failed, retrying...`);
-        await chrome.sleep(2000);
-        await dismissOverlays(page);
-        const retryClicked = await clickGenerate(page);
-        if (!retryClicked) {
-          img.state = 'error';
-          img.error = `Generate click failed for image ${img.index}`;
-          imageResults.push(img);
-          console.log(`[engine] ❌ IMAGE ${img.index} — STATE: error (${img.error})`);
-          continue;
-        }
-      }
-      console.log(`[engine] ✅ Generate ${img.index}/${imagesCount} clicked`);
-
-      // Give the site time to process the click before we start polling
-      await chrome.sleep(2000);
-
-      // Wait for this ONE image to appear (using count-based detection)
-      onProgress({ step: 'waiting', message: `Ожидаю изображение ${img.index}/${imagesCount}...`, state: 'generating' });
-      const imageUrl = await waitForSingleImage(page, feedCountBefore, img.index, imagesCount, onProgress);
-
-      if (!imageUrl) {
-        img.state = 'error';
-        img.error = 'generation_timeout';
-        imageResults.push(img);
-        console.log(`[engine] ❌ IMAGE ${img.index} — STATE: error (timeout)`);
-        await dismissOverlays(page);
-        continue;
-      }
-
-      img.url = imageUrl;
-      console.log(`[engine] ✅ Image ${img.index} generated: ${imageUrl.substring(0, 80)}...`);
-
-      // ═══ STATE: downloading ═══
-      img.state = 'downloading';
-      console.log(`[engine] ═══ IMAGE ${img.index} — STATE: downloading ═══`);
-      onProgress({ step: 'downloading', message: `Скачиваю изображение ${img.index}/${imagesCount}...`, state: 'downloading' });
-
-      const destPath = outputDir
-        ? path.join(outputDir, `gen_${img.index}.jpg`)
-        : path.join(__dirname, 'output', 'temp', `gen_${img.index}.jpg`);
-
-      // Ensure directory exists
-      const destDir = path.dirname(destPath);
-      if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
-
-      let dlResult = await downloadImage(imageUrl, destPath, (p) => {
-        onProgress({ step: 'downloading', message: p.message, state: 'downloading' });
-      });
-
-      // ═══ STATE: validating_download ═══
-      img.state = 'validating_download';
-      console.log(`[engine] ═══ IMAGE ${img.index} — STATE: validating_download ═══`);
-      let validation = validateDownload(destPath, dlResult);
-
-      if (!validation.ok) {
-        console.log(`[engine] ⚠️ Validation failed: ${validation.reason}. Retrying download...`);
-        onProgress({ step: 'downloading', message: `Повторное скачивание ${img.index}/${imagesCount}...`, state: 'downloading' });
-
-        // RETRY: one more attempt
-        dlResult = await downloadImage(imageUrl, destPath, (p) => {
-          onProgress({ step: 'downloading', message: `(retry) ${p.message}`, state: 'downloading' });
-        });
-        validation = validateDownload(destPath, dlResult);
-
-        if (!validation.ok) {
-          img.state = 'error';
-          img.error = `download_validation_failed: ${validation.reason}`;
-          imageResults.push(img);
-          console.log(`[engine] ❌ IMAGE ${img.index} — STATE: error (${validation.reason})`);
-          saveIntermediateMeta(outputDir, prompt, model, aspect, quality, imageResults, imagesCount);
           await dismissOverlays(page);
-          continue;
+
+          // ═══ SNAPSHOT FEED ═══
+          const feedCountBefore = await countFeedImages(page);
+          const fingerprintsBefore = await snapshotFeedFingerprints(page, 10);
+          console.log(`[engine] 📊 Slot ${img.index} pre-click: feedCount=${feedCountBefore}, fingerprints=${fingerprintsBefore.length}`);
+
+          // ═══ CLICK GENERATE ═══
+          const clicked = await clickGenerate(page);
+          if (!clicked) {
+            console.log(`[engine] ⚠️ Generate click failed for slot ${img.index}, trying once more...`);
+            await chrome.sleep(2000);
+            await dismissOverlays(page);
+            const retryClicked = await clickGenerate(page);
+            if (!retryClicked) {
+              const err = new Error(`Generate click failed for slot ${img.index}`);
+              err.errorClass = 'recoverable';
+              err.errorReason = 'click_failed';
+              throw err;
+            }
+          }
+          console.log(`[engine] ✅ Slot ${img.index} — Generate clicked`);
+
+          // Give the site time to process before polling
+          await chrome.sleep(2000);
+
+          // ═══ WAIT FOR NEW IMAGE (fingerprint primary detection) ═══
+          onProgress({ step: 'waiting', message: `Слот ${img.index}/${imagesCount}: жду результат...`, state: 'generating' });
+          const imageUrl = await waitForSingleImage(page, feedCountBefore, fingerprintsBefore, img.index, imagesCount, onProgress);
+
+          if (!imageUrl) {
+            // Check if feed shows a site-side failure
+            const siteErr = await detectSiteError(page);
+            if (siteErr === 'credits_exhausted') {
+              const err = new Error('Все кредиты использованы (All credits used)');
+              err.errorClass = 'fatal';
+              err.errorReason = 'credits_exhausted';
+              throw err;
+            } else if (siteErr === 'auth_error') {
+              const err = new Error('Сессия истекла. Перезайдите через Chrome.');
+              err.errorClass = 'fatal';
+              err.errorReason = 'auth_error';
+              throw err;
+            } else if (siteErr === 'site_failed') {
+              const err = new Error('Сайт показал Failed / Credits refunded');
+              err.errorClass = 'recoverable';
+              err.errorReason = 'site_failed';
+              throw err;
+            } else {
+              const err = new Error(`Timeout: новое изображение не появилось (слот ${img.index})`);
+              err.errorClass = 'recoverable';
+              err.errorReason = 'timeout';
+              throw err;
+            }
+          }
+
+          img.url = imageUrl;
+          console.log(`[engine] ✅ Slot ${img.index} image URL acquired: ${imageUrl.substring(0, 80)}...`);
+
+          // ═══ DOWNLOAD ═══
+          img.state = 'downloading';
+          console.log(`[engine] ═══ SLOT ${img.index} — downloading ═══`);
+          onProgress({ step: 'downloading', message: `Слот ${img.index}/${imagesCount}: скачиваю...`, state: 'downloading' });
+
+          const destPath = outputDir
+            ? path.join(outputDir, `gen_${img.index}.jpg`)
+            : path.join(__dirname, 'output', 'temp', `gen_${img.index}.jpg`);
+
+          const destDir = path.dirname(destPath);
+          if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
+
+          let dlResult = await downloadImage(imageUrl, destPath, (p) => {
+            onProgress({ step: 'downloading', message: p.message, state: 'downloading' });
+          });
+
+          // ═══ VALIDATE ═══
+          img.state = 'validating';
+          let validation = validateDownload(destPath, dlResult);
+
+          if (!validation.ok) {
+            console.log(`[engine] ⚠️ Slot ${img.index} validation failed: ${validation.reason}. Retrying download...`);
+            dlResult = await downloadImage(imageUrl, destPath, (p) => {
+              onProgress({ step: 'downloading', message: `(retry dl) ${p.message}`, state: 'downloading' });
+            });
+            validation = validateDownload(destPath, dlResult);
+
+            if (!validation.ok) {
+              const err = new Error(`Validation failed: ${validation.reason}`);
+              err.errorClass = 'recoverable';
+              err.errorReason = 'validation_failed';
+              throw err;
+            }
+          }
+
+          // ═══ SAVED ✅ ═══
+          img.state = 'saved';
+          img.file = `gen_${img.index}.jpg`;
+          img.size = validation.size;
+          img.quality = validation.quality;
+          slotSucceeded = true;
+
+          console.log(`[engine] ✅ SLOT ${img.index} — SAVED (${Math.round(img.size / 1024)}KB, ${img.quality})`);
+          onProgress({
+            step: 'saved',
+            message: `✅ Слот ${img.index}/${imagesCount} сохранён (${Math.round(img.size / 1024)}KB)`,
+            state: 'saved',
+            savedSlot: img.index,
+          });
+
+        } catch (slotErr) {
+          const errClass = slotErr.errorClass || 'recoverable';
+          const errReason = slotErr.errorReason || 'unknown';
+
+          console.log(`[engine] ❌ SLOT ${img.index} attempt ${attempt} FAILED [${errClass}|${errReason}]: ${slotErr.message}`);
+
+          if (errClass === 'fatal') {
+            // Fatal: stop the entire batch immediately
+            fatalError = { message: slotErr.message, reason: errReason };
+            img.state = 'failed';
+            img.error = slotErr.message;
+            img.errorReason = errReason;
+            break; // Exit per-slot retry loop
+          }
+
+          if (attempt === 2) {
+            // All retries exhausted → mark slot failed, continue batch
+            img.state = 'failed';
+            img.error = slotErr.message;
+            img.errorReason = errReason;
+            console.log(`[engine] ⚠️ SLOT ${img.index} — all retries exhausted, marking FAILED [${errReason}]`);
+            await dismissOverlays(page);
+          }
+          // else: attempt < 2 → loop continues to retry this slot
         }
+      } // end per-slot retry loop
+
+      if (shouldStop && !slotSucceeded && img.state !== 'failed') {
+        img.state = 'stopped';
+        img.errorReason = 'stopped';
       }
-
-      // ═══ STATE: saved ═══
-      img.state = 'saved';
-      img.file = `gen_${img.index}.jpg`;
-      img.size = validation.size;
-      img.quality = validation.quality;
-      console.log(`[engine] ✅ IMAGE ${img.index} — STATE: saved (${Math.round(img.size / 1024)}KB, ${img.quality})`);
-
-      onProgress({
-        step: 'saved',
-        message: `✅ Изображение ${img.index}/${imagesCount} сохранено (${Math.round(img.size / 1024)}KB)`,
-        state: 'saved',
-      });
 
       imageResults.push(img);
 
-      // Save intermediate meta.json
+      // Save intermediate meta after every slot
       saveIntermediateMeta(outputDir, prompt, model, aspect, quality, imageResults, imagesCount);
 
-      // Dismiss overlays before next iteration
+      // Dismiss overlays between slots
       await dismissOverlays(page);
 
-      // Wait before next generation
-      if (i < imagesCount - 1) {
+      // Wait before next slot (except after last)
+      if (i < imagesCount - 1 && !fatalError) {
         await chrome.sleep(3000);
+      }
+    } // end slot loop
+
+    // ── Handle fatal error propagation ──
+    if (fatalError) {
+      // Save remaining slots as stopped
+      for (let j = imageResults.length; j < imagesCount; j++) {
+        imageResults.push({ index: j + 1, state: 'stopped', errorReason: 'stopped', url: null, file: null });
+      }
+      saveIntermediateMeta(outputDir, prompt, model, aspect, quality, imageResults, imagesCount);
+
+      const fatalErr = new Error(fatalError.message);
+      fatalErr.errorReason = fatalError.reason;
+      fatalErr.isFatal = true;
+      throw fatalErr;
+    }
+
+    // ── Handle user stop ──
+    if (shouldStop) {
+      for (let j = imageResults.length; j < imagesCount; j++) {
+        imageResults.push({ index: j + 1, state: 'stopped', errorReason: 'stopped', url: null, file: null });
       }
     }
 
     // ── Final summary ──
     const savedCount = imageResults.filter(r => r.state === 'saved').length;
-    const errorCount = imageResults.filter(r => r.state === 'error').length;
-    console.log(`\n[engine] ═══ SUMMARY: ${savedCount} saved, ${errorCount} errors out of ${imagesCount} ═══`);
+    const failedCount = imageResults.filter(r => r.state === 'failed').length;
+    const stoppedCount = imageResults.filter(r => r.state === 'stopped').length;
 
-    if (savedCount === 0) {
-      throw new Error('Ни одно изображение не скачано и не сохранено.');
+    let promptStatus;
+    if (savedCount === imagesCount) {
+      promptStatus = 'done';
+    } else if (savedCount > 0) {
+      promptStatus = 'partial';
+    } else if (stoppedCount > 0 && savedCount === 0) {
+      promptStatus = 'stopped';
+    } else {
+      promptStatus = 'error';
+    }
+
+    console.log(`\n[engine] ═══ SUMMARY: ${savedCount} saved, ${failedCount} failed, ${stoppedCount} stopped out of ${imagesCount} → promptStatus=${promptStatus} ═══`);
+
+    if (savedCount === 0 && !shouldStop) {
+      throw new Error(`Ни одного изображения не сохранено (${failedCount} failed)`);
     }
 
     onProgress({
       step: 'done',
-      message: `✅ Сохранено ${savedCount}/${imagesCount} изображений`,
-      state: 'done',
+      message: `${savedCount}/${imagesCount} слотов сохранено`,
+      state: promptStatus,
+      savedCount,
+      failedCount,
     });
 
     return {
       images: imageResults,
       savedCount,
-      errorCount,
+      failedCount,
+      stoppedCount,
       total: imagesCount,
+      promptStatus,
     };
 
   } finally {
     // NOTE: Do NOT set isGenerating = false here!
     // This function handles ONE prompt. The batch loop in main.js
-    // manages the overall lifecycle. Setting isGenerating=false here
-    // would make main.js think the user pressed Stop after every prompt.
-    // isGenerating is reset by stopGeneration() or by main.js after the batch.
+    // manages the overall lifecycle. isGenerating is reset by
+    // stopGeneration() or by main.js after the entire batch.
   }
 }
+
 
 
 // ══════════════════════════════════════════════════════════════
 //  MODEL VERIFICATION — Strict single-model enforcement
 // ══════════════════════════════════════════════════════════════
+
+
 
 /**
  * Verify that the active model in Higgsfield matches the expected one.
@@ -710,22 +821,68 @@ async function preflight(page) {
  * no image will be generated from the accidental submit.
  */
 async function clearPromptField(page) {
-  try {
-    const selectors = [
-      'div[id="hf:tour-image-prompt"]',
-      'div[role="textbox"][contenteditable="true"]',
-      'div[contenteditable="true"][class*="cursor-text"]'
-    ];
-    for (const sel of selectors) {
-      const el = await page.$(sel);
+  const selectors = [
+    'div[id="hf:tour-image-prompt"]',
+    'div[role="textbox"][contenteditable="true"]',
+    'div[contenteditable="true"][class*="cursor-text"]',
+  ];
+
+  // Method 1: Direct DOM mutation — set innerText to empty string
+  const cleared = await page.evaluate((sels) => {
+    for (const sel of sels) {
+      const el = document.querySelector(sel);
       if (el) {
-        await el.click({ clickCount: 3 }); // Select all
-        await page.keyboard.press('Backspace');
-        await chrome.sleep(200);
-        return;
+        el.focus();
+        // Clear via execCommand (triggers React/Vue reactivity)
+        document.execCommand('selectAll', false, null);
+        document.execCommand('delete', false, null);
+        // Belt-and-suspenders: also set innerText directly
+        if (el.innerText.trim().length > 0) {
+          el.innerText = '';
+          el.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+        return true;
       }
     }
-  } catch {}
+    return false;
+  }, selectors);
+
+  if (cleared) {
+    await chrome.sleep(300);
+  }
+
+  // Method 2: Keyboard Ctrl+A → Delete (works even if DOM mutation missed React state)
+  for (const sel of selectors) {
+    const el = await page.$(sel);
+    if (el) {
+      await el.click();
+      await chrome.sleep(100);
+      await page.keyboard.down('Meta'); // Cmd on Mac
+      await page.keyboard.press('a');
+      await page.keyboard.up('Meta');
+      await chrome.sleep(100);
+      await page.keyboard.press('Delete');
+      await chrome.sleep(200);
+      await page.keyboard.press('Backspace'); // Extra safety
+      await chrome.sleep(200);
+      break;
+    }
+  }
+
+  // Verify it's empty
+  const remaining = await page.evaluate((sels) => {
+    for (const sel of sels) {
+      const el = document.querySelector(sel);
+      if (el) return el.innerText.trim();
+    }
+    return '';
+  }, selectors);
+
+  if (remaining.length > 0) {
+    console.log(`[engine] ⚠️ clearPromptField: field still has ${remaining.length} chars after clear attempt`);
+  } else {
+    console.log('[engine] ✅ clearPromptField: field is empty');
+  }
 }
 
 
@@ -733,64 +890,123 @@ async function enterPrompt(page, prompt) {
   console.log(`[engine] === enterPrompt called ===`);
   console.log(`[engine] Prompt text: "${prompt.substring(0, 100)}..."`);
 
-  // 1. Focus the element using Puppeteer native click
-  try {
-    const selectors = [
-      'div[id="hf:tour-image-prompt"]',
-      'div[role="textbox"][contenteditable="true"]',
-      'div[contenteditable="true"][class*="cursor-text"]'
-    ];
-    let clicked = false;
+  const selectors = [
+    'div[id="hf:tour-image-prompt"]',
+    'div[role="textbox"][contenteditable="true"]',
+    'div[contenteditable="true"][class*="cursor-text"]',
+  ];
+
+  const sanitized = prompt.replace(/[\r\n]+/g, ' ').trim();
+
+  // ── Method 1: React fiber trick — set innerText + dispatch React synthetic events ──
+  // This forces React to update its internal state, unlike .value= or innerText= alone.
+  const method1Success = await page.evaluate((text, sels) => {
+    let el = null;
+    for (const sel of sels) {
+      el = document.querySelector(sel);
+      if (el) break;
+    }
+    if (!el) return false;
+
+    try {
+      el.focus();
+
+      // Select all and delete existing content first
+      document.execCommand('selectAll', false, null);
+      document.execCommand('delete', false, null);
+
+      // Insert new text via execCommand (triggers React's onInput)
+      const inserted = document.execCommand('insertText', false, text);
+      if (inserted) return true;
+
+      // Fallback: set innerText and dispatch events React understands
+      el.innerText = text;
+
+      // Fire input event with React's expected nativeEvent structure
+      const inputEvent = new InputEvent('input', {
+        bubbles: true,
+        cancelable: true,
+        inputType: 'insertText',
+        data: text,
+      });
+      el.dispatchEvent(inputEvent);
+
+      const changeEvent = new Event('change', { bubbles: true });
+      el.dispatchEvent(changeEvent);
+
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }, sanitized, selectors);
+
+  console.log(`[engine] Method 1 (React execCommand): ${method1Success ? 'ok' : 'failed'}`);
+  await chrome.sleep(400);
+
+  // Verify after method 1
+  let check = await page.evaluate((expected, sels) => {
+    let el = null;
+    for (const sel of sels) {
+      el = document.querySelector(sel);
+      if (el) break;
+    }
+    if (!el) return { ok: false, actual: '', actualLen: 0 };
+    const actual = el.innerText.trim();
+    return {
+      ok: actual.length > 0 && actual.includes(expected.substring(0, 30).trim()),
+      actual: actual.substring(0, 100),
+      actualLen: actual.length,
+    };
+  }, sanitized, selectors);
+
+  console.log(`[engine] Verify (m1): ok=${check.ok}, actual="${check.actual}"`);
+
+  if (!check.ok) {
+    // ── Method 2: Focus field → Cmd+A → CDP Input.insertText (bypasses browser input event chain) ──
+    console.log(`[engine] ⚠️ Method 1 failed, trying CDP Input.insertText...`);
+
     for (const sel of selectors) {
       const el = await page.$(sel);
       if (el) {
-        // Click 3 times to select all text inside
-        await el.click({ clickCount: 3 });
-        clicked = true;
+        await el.click();
+        await chrome.sleep(200);
+        // Select all
+        await page.keyboard.down('Meta');
+        await page.keyboard.press('a');
+        await page.keyboard.up('Meta');
+        await chrome.sleep(150);
+        // Use CDP to insert text (bypasses keyboard simulation issues)
+        const session = await page.target().createCDPSession();
+        await session.send('Input.insertText', { text: sanitized });
+        await session.detach();
+        await chrome.sleep(400);
         break;
       }
     }
-    if (!clicked) throw new Error('Not found');
 
-    // 2. Clear native way
-    await page.keyboard.press('Backspace');
-    await chrome.sleep(100);
+    // Re-verify
+    check = await page.evaluate((expected, sels) => {
+      let el = null;
+      for (const sel of sels) {
+        el = document.querySelector(sel);
+        if (el) break;
+      }
+      if (!el) return { ok: false, actual: '', actualLen: 0 };
+      const actual = el.innerText.trim();
+      return {
+        ok: actual.length > 0 && actual.includes(expected.substring(0, 30).trim()),
+        actual: actual.substring(0, 100),
+        actualLen: actual.length,
+      };
+    }, sanitized, selectors);
 
-    // 3. Type native way — MUST sanitize newlines!
-    // CRITICAL: page.keyboard.type() converts \n to Enter keypress,
-    // which submits the Higgsfield form and starts a generation BEFORE
-    // our explicit clickGenerate(). This caused queued=2.
-    const sanitized = prompt.replace(/[\r\n]+/g, ' ').trim();
-    await page.keyboard.type(sanitized, { delay: 0 });
-    await chrome.sleep(300);
-
-  } catch (err) {
-    throw new Error(`Поле ввода промпта не найдено или недоступно: ${err.message}`);
+    console.log(`[engine] Verify (m2): ok=${check.ok}, actual="${check.actual}"`);
   }
 
-  await chrome.sleep(500);
-
-  // VERIFY prompt in field
-  const check = await page.evaluate((expected) => {
-    let el = document.querySelector('div[id="hf:tour-image-prompt"]');
-    if (!el) el = document.querySelector('div[role="textbox"][contenteditable="true"]');
-    if (!el) return { ok: false };
-    
-    const actual = el.innerText.trim();
-    // Use first 30 chars for verification (robust against trailing spaces)
-    const prefix = expected.substring(0, 30).trim();
-    return { 
-      ok: actual.length > 0 && actual.includes(prefix), 
-      actual: actual.substring(0, 100), 
-      actualLen: actual.length 
-    };
-  }, prompt);
-
-  console.log(`[engine] Verify: ok=${check.ok}, actual="${check.actual}"`);
   if (!check.ok) {
-    throw new Error(`Промпт НЕ вставлен! В поле осталось: "${check.actual}". Ожидалось: "${prompt.substring(0, 30)}"`);
+    throw new Error(`Промпт НЕ вставлен! В поле осталось: "${check.actual}". Ожидалось: "${sanitized.substring(0, 30)}"`);
   }
-  
+
   console.log(`[engine] ✅ Prompt VERIFIED (${check.actualLen} chars)`);
 }
 
@@ -798,6 +1014,7 @@ async function enterPrompt(page, prompt) {
 // ══════════════════════════════════════════════════════════════
 //  ASPECT RATIO
 // ══════════════════════════════════════════════════════════════
+
 
 async function setAspectRatio(page, aspect) {
   try {
@@ -907,7 +1124,84 @@ async function clickGenerate(page) {
 /**
  * Count current images in the feed container
  */
+/**
+ * Detect site-side errors after a generation attempt.
+ * Called when waitForSingleImage returns null (timeout).
+ * Checks DOM for error/status banners.
+ * 
+ * Returns:
+ *   'credits_exhausted' — fatal, stop batch
+ *   'auth_error'        — fatal, stop batch (login page)
+ *   'site_failed'       — recoverable, retry slot
+ *   null                — no specific error detected (generic timeout)
+ */
+async function detectSiteError(page) {
+  try {
+    // Check for login redirect (auth_error)
+    const pageUrl = page.url();
+    if (pageUrl.includes('sign-in') || pageUrl.includes('login') || pageUrl.includes('auth')) {
+      console.log('[engine] 🔐 detectSiteError: auth redirect detected');
+      return 'auth_error';
+    }
+
+    return await page.evaluate(() => {
+      const bodyText = document.body ? document.body.innerText.toLowerCase() : '';
+
+      // Credits exhausted (fatal)
+      if (
+        bodyText.includes('all credits used') ||
+        bodyText.includes('no credits remaining') ||
+        bodyText.includes('upgrade your plan')
+      ) {
+        return 'credits_exhausted';
+      }
+
+      // Find any toast/notification/banner elements
+      const toastSelectors = [
+        '[class*="toast"]', '[class*="notification"]', '[class*="alert"]',
+        '[class*="error"]', '[role="alert"]', '[class*="banner"]',
+        '[class*="message"]', '[class*="snack"]',
+      ];
+
+      for (const sel of toastSelectors) {
+        const els = document.querySelectorAll(sel);
+        for (const el of els) {
+          const text = (el.textContent || '').toLowerCase();
+          if (
+            text.includes('all credits used') ||
+            text.includes('no credits') ||
+            text.includes('upgrade')
+          ) {
+            return 'credits_exhausted';
+          }
+          if (
+            text.includes('failed') ||
+            text.includes('credits refunded') ||
+            text.includes('generation failed') ||
+            text.includes('try again')
+          ) {
+            return 'site_failed';
+          }
+          if (
+            text.includes('session expired') ||
+            text.includes('sign in') ||
+            text.includes('log in')
+          ) {
+            return 'auth_error';
+          }
+        }
+      }
+
+      return null; // No specific error detected
+    });
+  } catch (err) {
+    console.log(`[engine] detectSiteError failed: ${err.message}`);
+    return null;
+  }
+}
+
 async function countFeedImages(page) {
+
   return await page.evaluate(() => {
     const feed = document.querySelector('#soul-feed-scroll');
     if (!feed) return 0;
@@ -915,6 +1209,48 @@ async function countFeedImages(page) {
     const imgs = feed.querySelectorAll('img');
     return imgs.length;
   });
+}
+
+/**
+ * Extract UUID from a feed image URL.
+ * Pattern: hf_YYYYMMDD_HHMMSS_{uuid}_min.webp
+ */
+function extractUUID(url) {
+  if (!url) return null;
+  const match = url.match(/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i);
+  return match ? match[1] : null;
+}
+
+/**
+ * Snapshot the UUIDs of the top-N images in the feed.
+ * Used to detect whether a "new" image is actually old.
+ */
+async function snapshotFeedFingerprints(page, n = 10) {
+  const urls = await page.evaluate((count) => {
+    const feed = document.querySelector('#soul-feed-scroll');
+    if (!feed) return [];
+    const result = [];
+    const imgs = feed.querySelectorAll('img');
+    for (let i = 0; i < Math.min(imgs.length, count); i++) {
+      const img = imgs[i];
+      if (img.src && img.src.startsWith('http') && !img.src.includes('avatar')) {
+        // Extract inner URL from proxy wrapper
+        try {
+          const u = new URL(img.src);
+          const inner = u.searchParams.get('url');
+          result.push(inner || img.src);
+        } catch {
+          result.push(img.src);
+        }
+      }
+    }
+    return result;
+  }, n);
+
+  // Extract UUIDs
+  const uuids = urls.map(u => extractUUID(u)).filter(Boolean);
+  console.log(`[engine] 📸 Feed fingerprint snapshot: ${uuids.length} UUIDs captured`);
+  return uuids;
 }
 
 /**
@@ -983,17 +1319,26 @@ async function countQueuedItems(page) {
 /**
  * Wait for 1 new image to appear after a single Generate click.
  * 
- * Strategy: count images in feed BEFORE clicking. Poll until count increases.
- * When feed has more images → new generation is ready at position 0.
+ * PRIMARY DETECTION: UUID fingerprinting.
+ * Higgsfield often REMOVES old feed images when adding new ones,
+ * so feed count may stay the same (e.g. 9 → 8 during Queued → 9 when done).
+ * Count-based detection (9 > 9) fails in this case.
+ * 
+ * Strategy:
+ * 1. Snapshot UUIDs of top feed images BEFORE clicking Generate.
+ * 2. Poll: on each cycle check the TOP feed image's UUID.
+ * 3. If top UUID is NOT in the pre-click snapshot → it's genuinely new → accept.
+ * 4. Count-based check is kept as a SECONDARY fast path (count increased AND UUID is new).
  * 
  * @param {Object} page - Puppeteer page
  * @param {number} feedCountBefore - Number of images in feed before Generate click
+ * @param {string[]} fingerprintsBefore - UUIDs of top images before Generate click
  * @param {number} index - Current image index (1-based)
  * @param {number} total - Total images expected
  * @param {Function} onProgress - Progress callback
  * @returns {string|null} - New image URL or null if timeout
  */
-async function waitForSingleImage(page, feedCountBefore, index, total, onProgress) {
+async function waitForSingleImage(page, feedCountBefore, fingerprintsBefore, index, total, onProgress) {
   const startTime = Date.now();
   const deadline = startTime + GENERATION_TIMEOUT;
   let generationDetected = false;
@@ -1017,16 +1362,43 @@ async function waitForSingleImage(page, feedCountBefore, index, total, onProgres
       await chrome.sleep(2000); // Wait for DOM update
     }
 
-    // Count-based detection: check if feed has more images than before
     const feedCountNow = await countFeedImages(page);
 
-    // If feed count increased → new image appeared!
-    if (feedCountNow > feedCountBefore) {
-      // New image is at position 0 (newest first)
-      await chrome.sleep(2000); // Wait for full resolution to load
-      const newImgUrl = await getFirstFeedImgUrl(page);
-      console.log(`[engine] ✅ Image ${index} ready (${elapsed}s, feedCount: ${feedCountBefore}→${feedCountNow}): ${(newImgUrl || '').substring(0, 80)}...`);
-      return newImgUrl;
+    // ── PRIMARY DETECTION: Check if the TOP feed image has a NEW UUID ──
+    // This works even when Higgsfield removes old images (count stays same)
+    // We only check after either:
+    //   a) Queued has disappeared (generation done), OR
+    //   b) Feed count increased (image just appeared), OR
+    //   c) Enough time passed that we should keep checking anyway (> 10s)
+    const shouldCheckUUID = queuedGone || feedCountNow > feedCountBefore || elapsed > 10;
+
+    if (shouldCheckUUID && queued === 0) {
+      const topUrl = await getFirstFeedImgUrl(page);
+      const topUUID = extractUUID(topUrl);
+
+      if (topUUID && !fingerprintsBefore.includes(topUUID)) {
+        // This is a GENUINELY NEW image — not in pre-click snapshot!
+        await chrome.sleep(1500); // Let it fully render
+        // Re-fetch to get potentially better URL after render
+        const finalUrl = await getFirstFeedImgUrl(page);
+        console.log(`[engine] ✅ Image ${index} ready via UUID detection (${elapsed}s, feedCount: ${feedCountBefore}→${feedCountNow}, uuid=${topUUID}): ${(finalUrl || '').substring(0, 80)}...`);
+        return finalUrl;
+      }
+
+      // Top UUID matches a pre-existing image — the new one hasn't rendered yet
+      if (queuedGone && elapsed > 5) {
+        // After Queued disappeared, also check 2nd/3rd position (sometimes new image
+        // doesn't appear at position 0 immediately)
+        const allCurrentFingerprints = await snapshotFeedFingerprints(page, 5);
+        const newFingerprints = allCurrentFingerprints.filter(fp => !fingerprintsBefore.includes(fp));
+        if (newFingerprints.length > 0) {
+          // Found a new UUID somewhere in the top-5
+          await chrome.sleep(1500);
+          const finalUrl = await getFirstFeedImgUrl(page);
+          console.log(`[engine] ✅ Image ${index} ready via deep UUID scan (${elapsed}s, newUUIDs=${newFingerprints.length}): ${(finalUrl || '').substring(0, 80)}...`);
+          return finalUrl;
+        }
+      }
     }
 
     // Status update
@@ -1038,7 +1410,10 @@ async function waitForSingleImage(page, feedCountBefore, index, total, onProgres
 
     // Debug log every 15 seconds
     if (elapsed % 15 === 0 && elapsed > 0) {
-      console.log(`[engine] DEBUG: queued=${queued}, queuedGone=${queuedGone}, feedCount=${feedCountNow}/${feedCountBefore}, elapsed=${elapsed}s`);
+      const topUrl = await getFirstFeedImgUrl(page);
+      const topUUID = extractUUID(topUrl);
+      const isKnown = topUUID ? fingerprintsBefore.includes(topUUID) : 'N/A';
+      console.log(`[engine] DEBUG: queued=${queued}, queuedGone=${queuedGone}, feedCount=${feedCountNow}/${feedCountBefore}, topUUID=${topUUID || 'none'}, isKnown=${isKnown}, elapsed=${elapsed}s`);
     }
 
     // Dismiss overlays periodically

@@ -1225,6 +1225,12 @@ body::before {
   color: var(--text-primary);
 }
 
+.banner-unlimited {
+  background: linear-gradient(135deg, rgba(139, 199, 0, 0.08), rgba(52, 199, 89, 0.06));
+  border: 1px solid rgba(139, 199, 0, 0.2);
+  color: var(--text-primary);
+}
+
 .banner-warning {
   background: rgba(255, 159, 10, 0.08);
   border: 1px solid rgba(255, 159, 10, 0.15);
@@ -1314,6 +1320,7 @@ body::before {
 .ratio-options {
   display: flex;
   gap: var(--space-sm);
+  flex-wrap: wrap;
 }
 
 .ratio-option {
@@ -1321,12 +1328,12 @@ body::before {
   flex-direction: column;
   align-items: center;
   gap: var(--space-xs);
-  padding: var(--space-md);
+  padding: var(--space-sm) var(--space-md);
   border: 2px solid var(--border-light);
   border-radius: var(--radius-md);
   cursor: pointer;
   transition: all var(--transition-fast);
-  min-width: 80px;
+  min-width: 58px;
 }
 
 .ratio-option:hover {
@@ -1351,5 +1358,60 @@ body::before {
 }
 
 .ratio-option.active .ratio-label {
+  color: var(--accent-hover);
+}
+
+/* ── Badge Unlimited ── */
+.badge-unlimited {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 8px;
+  background: linear-gradient(135deg, rgba(139, 199, 0, 0.15), rgba(52, 199, 89, 0.1));
+  color: var(--accent-hover);
+  font-size: 10px;
+  font-weight: 700;
+  border-radius: var(--radius-full);
+  text-transform: none;
+  letter-spacing: 0;
+  vertical-align: middle;
+  margin-left: var(--space-xs);
+}
+
+/* ── Quality Options ── */
+.quality-options {
+  display: flex;
+  gap: var(--space-sm);
+}
+
+.quality-option {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-sm) var(--space-lg);
+  border: 2px solid var(--border-light);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  min-width: 72px;
+}
+
+.quality-option:hover {
+  border-color: var(--border-medium);
+  background: rgba(0,0,0,0.02);
+}
+
+.quality-option.active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.quality-label {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-secondary);
+}
+
+.quality-option.active .quality-label {
   color: var(--accent-hover);
 }

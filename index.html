@@ -236,33 +236,79 @@
       <!-- Model selection -->
       <div class="settings-grid mt-lg">
         <div class="card settings-card">
-          <div class="settings-card-label">Модель</div>
-          <select class="form-select" id="model-select">
-            <option>Higgsfield Standard</option>
-            <option>Higgsfield HD</option>
-            <option>Higgsfield Ultra</option>
+          <div class="settings-card-label">Модель <span class="badge-unlimited">∞ Unlimited</span></div>
+          <select class="form-select" id="model-select" onchange="selectModel(this.value)">
+            <option value="nano_banana_pro" selected>Nano Banana Pro</option>
+            <option value="seedream_5_lite">Seedream 5.0 lite</option>
+            <option value="seedream_4_5">Seedream 4.5</option>
+            <option value="nano_banana">Nano Banana</option>
+            <option value="seedream_4_0">Seedream 4.0</option>
           </select>
-          <div class="settings-card-hint">Общая модель для всех промптов</div>
+          <div class="settings-card-hint">Все модели — Unlimited (бесплатно)</div>
         </div>
 
         <div class="card settings-card">
+          <div class="settings-card-label">Качество <span class="badge-unlimited">∞ Unlimited</span></div>
+          <div class="quality-options mt-sm">
+            <div class="quality-option" onclick="selectQuality(this, '1K')">
+              <span class="quality-label">1K</span>
+            </div>
+            <div class="quality-option active" onclick="selectQuality(this, '2K')">
+              <span class="quality-label">2K</span>
+            </div>
+          </div>
+          <div class="settings-card-hint">1K и 2K — без ограничений</div>
+        </div>
+      </div>
+
+      <!-- Aspect Ratio -->
+      <div class="settings-grid mt-md">
+        <div class="card settings-card" style="grid-column: 1 / -1;">
           <div class="settings-card-label">Соотношение сторон</div>
           <div class="ratio-options mt-sm">
+            <div class="ratio-option" onclick="selectRatio(this, 'auto')">
+              <div class="ratio-box" style="width: 28px; height: 28px; border-radius: 50%;"></div>
+              <span class="ratio-label">Auto</span>
+            </div>
             <div class="ratio-option active" onclick="selectRatio(this, '1:1')">
               <div class="ratio-box" style="width: 28px; height: 28px;"></div>
               <span class="ratio-label">1:1</span>
             </div>
-            <div class="ratio-option" onclick="selectRatio(this, '16:9')">
-              <div class="ratio-box" style="width: 36px; height: 20px;"></div>
-              <span class="ratio-label">16:9</span>
+            <div class="ratio-option" onclick="selectRatio(this, '3:4')">
+              <div class="ratio-box" style="width: 24px; height: 32px;"></div>
+              <span class="ratio-label">3:4</span>
+            </div>
+            <div class="ratio-option" onclick="selectRatio(this, '4:3')">
+              <div class="ratio-box" style="width: 32px; height: 24px;"></div>
+              <span class="ratio-label">4:3</span>
+            </div>
+            <div class="ratio-option" onclick="selectRatio(this, '2:3')">
+              <div class="ratio-box" style="width: 22px; height: 34px;"></div>
+              <span class="ratio-label">2:3</span>
+            </div>
+            <div class="ratio-option" onclick="selectRatio(this, '3:2')">
+              <div class="ratio-box" style="width: 34px; height: 22px;"></div>
+              <span class="ratio-label">3:2</span>
             </div>
             <div class="ratio-option" onclick="selectRatio(this, '9:16')">
               <div class="ratio-box" style="width: 20px; height: 36px;"></div>
               <span class="ratio-label">9:16</span>
             </div>
-            <div class="ratio-option" onclick="selectRatio(this, '4:3')">
-              <div class="ratio-box" style="width: 32px; height: 24px;"></div>
-              <span class="ratio-label">4:3</span>
+            <div class="ratio-option" onclick="selectRatio(this, '16:9')">
+              <div class="ratio-box" style="width: 36px; height: 20px;"></div>
+              <span class="ratio-label">16:9</span>
+            </div>
+            <div class="ratio-option" onclick="selectRatio(this, '5:4')">
+              <div class="ratio-box" style="width: 30px; height: 24px;"></div>
+              <span class="ratio-label">5:4</span>
+            </div>
+            <div class="ratio-option" onclick="selectRatio(this, '4:5')">
+              <div class="ratio-box" style="width: 24px; height: 30px;"></div>
+              <span class="ratio-label">4:5</span>
+            </div>
+            <div class="ratio-option" onclick="selectRatio(this, '21:9')">
+              <div class="ratio-box" style="width: 40px; height: 18px;"></div>
+              <span class="ratio-label">21:9</span>
             </div>
           </div>
         </div>
@@ -277,13 +323,22 @@
         <div class="card settings-card">
           <div class="settings-card-label">Изображений на промпт</div>
           <div class="settings-card-value">4</div>
-          <div class="settings-card-hint">Фиксированное значение</div>
+          <div class="settings-card-hint">4 генерации × 1 картинка (Unlimited)</div>
         </div>
+      </div>
+
+      <!-- Unlimited info banner -->
+      <div class="banner banner-unlimited mt-md">
+        <span class="banner-icon">🆓</span>
+        <span class="banner-text">
+          <strong>Режим Unlimited:</strong> генерация бесплатна. Каждый промпт = 4 отдельных запроса по 1 картинке. Стандартная очередь.
+        </span>
       </div>
 
       <div class="card mt-lg" style="display: flex; align-items: center; justify-content: space-between; padding: var(--space-lg) var(--space-xl);">
         <div>
           <div class="text-heading">Всё готово к генерации</div>
+          <div class="text-secondary mt-sm" id="settings-model-info">Nano Banana Pro · 2K · Unlimited 🆓</div>
           <div class="text-secondary mt-sm">Будет создано <strong>48 изображений</strong> для 12 промптов</div>
         </div>
         <button class="btn btn-primary btn-large" onclick="startGeneration()">

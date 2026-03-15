@@ -1,6 +1,36 @@
 /* ============================================================
-   HIGGSFIELD STUDIO — App Logic (Bug-fixed version)
+   HIGGSFIELD STUDIO — App Logic (v2 · Unlimited Models)
    ============================================================ */
+
+// ── Higgsfield Models (Unlimited text-to-image only) ──
+const MODELS = [
+  { id: 'nano_banana_pro', name: 'Nano Banana Pro', desc: 'Google — flagship generation model', badge: 'Unlimited' },
+  { id: 'seedream_5_lite', name: 'Seedream 5.0 lite', desc: 'Intelligent visual reasoning', badge: 'Unlimited' },
+  { id: 'seedream_4_5', name: 'Seedream 4.5', desc: 'ByteDance — next-gen 4K image model', badge: 'Unlimited' },
+  { id: 'nano_banana', name: 'Nano Banana', desc: 'Google — standard generation model', badge: 'Unlimited' },
+  { id: 'seedream_4_0', name: 'Seedream 4.0', desc: 'Предыдущее поколение', badge: 'Unlimited' },
+];
+
+// ── Quality Options ──
+const QUALITY_OPTIONS = [
+  { id: '1K', label: '1K', badge: 'Unlimited' },
+  { id: '2K', label: '2K', badge: 'Unlimited' },
+];
+
+// ── Aspect Ratios ──
+const ASPECT_RATIOS = [
+  { id: 'auto', label: 'Auto', w: 28, h: 28 },
+  { id: '1:1', label: '1:1', w: 28, h: 28 },
+  { id: '3:4', label: '3:4', w: 24, h: 32 },
+  { id: '4:3', label: '4:3', w: 32, h: 24 },
+  { id: '2:3', label: '2:3', w: 22, h: 34 },
+  { id: '3:2', label: '3:2', w: 34, h: 22 },
+  { id: '9:16', label: '9:16', w: 20, h: 36 },
+  { id: '16:9', label: '16:9', w: 36, h: 20 },
+  { id: '5:4', label: '5:4', w: 30, h: 24 },
+  { id: '4:5', label: '4:5', w: 24, h: 30 },
+  { id: '21:9', label: '21:9', w: 40, h: 18 },
+];
 
 // ── Mock Data ──
 const MOCK_PROMPTS = [
@@ -53,7 +83,8 @@ const state = {
   hasProjects: true,
   isConnected: false,
   fileImported: false,
-  selectedModel: 'Higgsfield Standard',
+  selectedModel: 'nano_banana_pro',
+  selectedQuality: '2K',
   selectedRatio: '1:1',
   promptCount: 12,
 
@@ -197,10 +228,30 @@ function simulateImport() {
   document.getElementById('file-info').style.display = 'flex';
 }
 
+function selectModel(modelId) {
+  state.selectedModel = modelId;
+  updateSettingsSummary();
+}
+
+function selectQuality(el, quality) {
+  document.querySelectorAll('.quality-option').forEach(q => q.classList.remove('active'));
+  el.classList.add('active');
+  state.selectedQuality = quality;
+  updateSettingsSummary();
+}
+
 function selectRatio(el, ratio) {
   document.querySelectorAll('.ratio-option').forEach(r => r.classList.remove('active'));
   el.classList.add('active');
   state.selectedRatio = ratio;
+}
+
+function updateSettingsSummary() {
+  const model = MODELS.find(m => m.id === state.selectedModel);
+  const modelInfoEl = document.getElementById('settings-model-info');
+  if (modelInfoEl && model) {
+    modelInfoEl.textContent = `${model.name} · ${state.selectedQuality} · Unlimited 🆓`;
+  }
 }
 
 // ── Generation ──
@@ -309,7 +360,7 @@ function updateProgressUI() {
     const promptTextEl = document.getElementById('current-prompt-text');
     const imageSubEl = document.getElementById('current-image-sub');
     if (promptTextEl) promptTextEl.textContent = cp.text;
-    if (imageSubEl) imageSubEl.textContent = `Изображение ${cp.imagesGenerated + 1} из 4`;
+    if (imageSubEl) imageSubEl.textContent = `Генерация ${cp.imagesGenerated + 1} из 4 · Unlimited 🆓`;
   }
 
   // ETA
@@ -331,8 +382,8 @@ function renderPromptStatusList() {
     };
     const statusTexts = {
       'pending': 'Ожидание',
-      'in-progress': `Генерация… ${p.imagesGenerated}/4`,
-      'done': 'Готово',
+      'in-progress': `Генерация… ${p.imagesGenerated}/4 · Unlimited 🆓`,
+      'done': 'Готово ✓',
       'error': 'Ошибка',
     };
 

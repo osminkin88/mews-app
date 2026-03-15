@@ -1012,13 +1012,31 @@ async function waitForNewImages(page, beforeCount, expected, onProgress) {
 // ══════════════════════════════════════════════════════════════
 
 /**
- * Download an image from a URL using JS fetch in Chrome context
+ * Download an image from a URL using multiple strategies
  */
 async function downloadImage(previewUrl, destPath, onProgress = () => {}) {
   const page = chrome.getActivePage();
   if (!page) throw new Error('Chrome не подключён');
 
-  // Build candidate URLs (full-res variants)
+  // Strategy 0: Get full-res URL via Higgsfield API (click image → detail → raw.url)
+  try {
+    onProgress({ message: 'Получаю full-res URL...' });
+    const fullResUrl = await getFullResUrlViaAPI(page);
+    if (fullResUrl) {
+      console.log(`[engine] Full-res URL: ${fullResUrl.substring(0, 100)}...`);
+      const data = await nodeFetch(fullResUrl);
+      if (data && data.length > 50_000) {
+        fs.writeFileSync(destPath, data);
+        const kb = Math.round(data.length / 1024);
+        console.log(`[engine] ✅ Downloaded FULL-RES: ${path.basename(destPath)} (${kb}KB)`);
+        return { success: true, size: data.length, method: 'api_fullres' };
+      }
+    }
+  } catch (err) {
+    console.log(`[engine] API fullres failed: ${err.message}`);
+  }
+
+  // Build candidate URLs (full-res variants from preview URL)
   const candidates = buildDownloadCandidates(previewUrl);
 
   // Strategy 1: Node.js native HTTPS download (bypasses CORS)
@@ -1026,7 +1044,7 @@ async function downloadImage(previewUrl, destPath, onProgress = () => {}) {
     onProgress({ message: `Скачиваю...` });
     try {
       const data = await nodeFetch(url);
-      if (data && data.length > 50_000) { // >50KB = likely real image
+      if (data && data.length > 50_000) {
         fs.writeFileSync(destPath, data);
         const kb = Math.round(data.length / 1024);
         console.log(`[engine] ✅ Downloaded: ${path.basename(destPath)} (${kb}KB) via Node.js`);
@@ -1041,7 +1059,7 @@ async function downloadImage(previewUrl, destPath, onProgress = () => {}) {
     }
   }
 
-  // Strategy 2: JS fetch in Chrome context (uses CloudFront cookies)
+  // Strategy 2: JS fetch in Chrome context (uses cookies)
   for (const url of candidates) {
     onProgress({ message: `Скачиваю через браузер...` });
     try {
@@ -1053,7 +1071,6 @@ async function downloadImage(previewUrl, destPath, onProgress = () => {}) {
         return { success: true, size: data.length, method: 'browser_fetch' };
       } else if (data && data.length > 5_000) {
         fs.writeFileSync(destPath, data);
-        console.log(`[engine] ⚠️ Small image: ${path.basename(destPath)} (${Math.round(data.length / 1024)}KB)`);
         return { success: true, size: data.length, method: 'browser_fetch_small' };
       }
     } catch (err) {
@@ -1061,7 +1078,7 @@ async function downloadImage(previewUrl, destPath, onProgress = () => {}) {
     }
   }
 
-  // Strategy 3: Save preview as last resort
+  // Strategy 3: Save preview via Node.js as last resort
   try {
     onProgress({ message: 'Сохраняю preview...' });
     const data = await nodeFetch(previewUrl);
@@ -1072,6 +1089,133 @@ async function downloadImage(previewUrl, destPath, onProgress = () => {}) {
   } catch {}
 
   return { success: false, error: 'Все методы скачивания не сработали' };
+}
+
+/**
+ * Get full-res URL by clicking first feed image and calling Higgsfield detail API
+ */
+async function getFullResUrlViaAPI(page) {
+  // Step 1: Click on the first image in feed to open detail view
+  const clicked = await page.evaluate(() => {
+    const feed = document.querySelector('#soul-feed-scroll');
+    if (!feed) return false;
+    const firstImg = feed.querySelector('img');
+    if (firstImg) {
+      firstImg.click();
+      return true;
+    }
+    return false;
+  });
+  
+  if (!clicked) {
+    console.log('[engine] Could not click first feed image');
+    return null;
+  }
+  
+  console.log('[engine] Clicked first feed image, waiting for detail API...');
+  await chrome.sleep(3000);
+  
+  // Step 2: Look for the full-res image URL from the detail view
+  // The detail view loads the full image — find it in the DOM
+  const rawUrl = await page.evaluate(() => {
+    // Look for high-res img in modal/detail overlay
+    const allImgs = document.querySelectorAll('img');
+    let bestUrl = null;
+    let bestSize = 0;
+    
+    for (const img of allImgs) {
+      if (!img.src || !img.src.startsWith('http')) continue;
+      if (img.src.includes('avatar')) continue;
+      
+      // Prefer images with natural dimensions (loaded)
+      const size = img.naturalWidth * img.naturalHeight;
+      
+      // Look for cloudfront URLs (not proxy) — these are fullres
+      if (img.src.includes('cloudfront.net') && !img.src.includes('_min') && size > bestSize) {
+        bestUrl = img.src;
+        bestSize = size;
+      }
+      
+      // Also look for proxy URLs with high quality
+      if (img.src.includes('images.higgs.ai') && size > bestSize) {
+        // Try to extract and upgrade the embedded URL
+        try {
+          const u = new URL(img.src);
+          const embeddedUrl = u.searchParams.get('url');
+          if (embeddedUrl && !embeddedUrl.includes('_min')) {
+            bestUrl = embeddedUrl;
+            bestSize = size;
+          }
+        } catch {}
+      }
+    }
+    
+    return bestUrl;
+  });
+
+  // Step 3: Also try to fetch the download URL via the blob approach
+  // The download button creates a blob from the full-res image
+  let downloadUrl = rawUrl;
+  
+  if (!downloadUrl) {
+    // Try clicking the download button and intercepting
+    downloadUrl = await page.evaluate(async () => {
+      // Find download button in the detail view
+      const buttons = document.querySelectorAll('button');
+      for (const btn of buttons) {
+        const text = btn.textContent.trim().toLowerCase();
+        if (text === 'download' || btn.querySelector('[data-icon="download"]')) {
+          // Don't click — instead look for the image source in the detail view
+          break;
+        }
+      }
+      
+      // Fallback: get the main image src from detail modal
+      const detailImg = document.querySelector('[class*="detail"] img, [class*="modal"] img, [class*="Dialog"] img');
+      if (detailImg && detailImg.src && detailImg.src.startsWith('http')) {
+        return detailImg.src;
+      }
+      return null;
+    });
+  }
+  
+  // Step 4: Close the detail modal
+  await page.evaluate(() => {
+    // Press Escape to close
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true }));
+  });
+  await chrome.sleep(500);
+  // Also try clicking close button
+  await page.evaluate(() => {
+    const closeButtons = document.querySelectorAll('button[aria-label="Close"], button[aria-label="close"], [class*="close"], [class*="Close"]');
+    for (const btn of closeButtons) {
+      if (btn.offsetParent !== null) { // visible
+        btn.click();
+        break;
+      }
+    }
+  });
+  await chrome.sleep(500);
+
+  // If we got a proxy URL, extract the real URL
+  if (downloadUrl && downloadUrl.includes('images.higgs.ai')) {
+    try {
+      const u = new URL(downloadUrl);
+      const embedded = u.searchParams.get('url');
+      if (embedded) {
+        // Convert _min.webp to .jpeg (fullres format)
+        let fullUrl = embedded;
+        if (fullUrl.includes('_min.webp')) {
+          fullUrl = fullUrl.replace('_min.webp', '.jpeg');
+        } else if (fullUrl.includes('_min')) {
+          fullUrl = fullUrl.replace('_min', '');
+        }
+        return fullUrl;
+      }
+    } catch {}
+  }
+
+  return downloadUrl;
 }
 
 /**

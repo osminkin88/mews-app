@@ -1,0 +1,464 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Higgsfield Studio — Генерация изображений</title>
+  <meta name="description" content="Премиальное приложение для генерации и отбора изображений через Higgsfield">
+  <link rel="stylesheet" href="index.css">
+</head>
+<body>
+
+<div class="app">
+  
+  <!-- ════════════════════════════════════════ -->
+  <!-- SIDEBAR -->
+  <!-- ════════════════════════════════════════ -->
+  <aside class="sidebar">
+    
+    <!-- Brand -->
+    <div class="sidebar-brand">
+      <div class="sidebar-logo">
+        <div class="sidebar-logo-icon">✦</div>
+        <div>
+          <div class="sidebar-logo-text">Higgsfield</div>
+          <div class="sidebar-logo-sub">Studio</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Step progress mini-indicator -->
+    <div class="sidebar-progress">
+      <div class="step-indicator">
+        <div class="step-dot active" data-step="0"></div>
+        <div class="step-dot" data-step="1"></div>
+        <div class="step-dot" data-step="2"></div>
+        <div class="step-dot" data-step="3"></div>
+        <div class="step-dot" data-step="4"></div>
+        <div class="step-dot" data-step="5"></div>
+        <span class="step-label">Шаг 1 из 6</span>
+      </div>
+    </div>
+
+    <!-- Navigation -->
+    <nav class="sidebar-nav">
+      <div class="nav-section-label">Рабочий процесс</div>
+      
+      <div class="nav-item active" data-screen="projects" data-step="0">
+        <span class="nav-icon">📁</span>
+        <span>Проекты</span>
+        <span class="nav-status"></span>
+      </div>
+      
+      <div class="nav-item" data-screen="connection" data-step="1">
+        <span class="nav-icon">🔗</span>
+        <span>Подключение</span>
+        <span class="nav-status"></span>
+      </div>
+      
+      <div class="nav-item" data-screen="settings" data-step="2">
+        <span class="nav-icon">⚙️</span>
+        <span>Настройки</span>
+        <span class="nav-status"></span>
+      </div>
+      
+      <div class="nav-item" data-screen="progress" data-step="3">
+        <span class="nav-icon">▶️</span>
+        <span>Прогресс</span>
+        <span class="nav-status"></span>
+      </div>
+      
+      <div class="nav-item" data-screen="selection" data-step="4">
+        <span class="nav-icon">🎨</span>
+        <span>Отбор</span>
+        <span class="nav-status"></span>
+      </div>
+      
+      <div class="nav-item" data-screen="results" data-step="5">
+        <span class="nav-icon">✨</span>
+        <span>Результаты</span>
+        <span class="nav-status"></span>
+      </div>
+    </nav>
+
+    <!-- Footer -->
+    <div class="sidebar-footer">
+      <div class="sidebar-footer-text">Higgsfield Studio v1.0</div>
+    </div>
+  </aside>
+
+  <!-- ════════════════════════════════════════ -->
+  <!-- MAIN CONTENT -->
+  <!-- ════════════════════════════════════════ -->
+  <main class="main">
+
+    <!-- ──────────────────────────────── -->
+    <!-- SCREEN 1: ПРОЕКТЫ -->
+    <!-- ──────────────────────────────── -->
+    <section class="screen active" id="screen-projects">
+      <div class="screen-header">
+        <h1>Проекты</h1>
+        <p>Ваши проекты по генерации изображений</p>
+      </div>
+
+      <!-- Empty state (shown when no projects) -->
+      <div class="empty-state" id="projects-empty">
+        <div class="empty-state-illustration cat-sleeping">😺</div>
+        <div class="empty-state-title">Пока тут пусто…</div>
+        <div class="empty-state-text">Создайте свой первый проект, чтобы начать генерацию красивых изображений 🐾</div>
+        <button class="btn btn-primary btn-large" onclick="createProject()">
+          ✦ Создать проект
+        </button>
+      </div>
+
+      <!-- Project list (shown when projects exist) -->
+      <div id="projects-list" style="display: none;">
+        <div class="section">
+          <div class="section-header">
+            <span class="section-title">Недавние проекты</span>
+            <button class="btn btn-primary" onclick="createProject()">
+              ✦ Создать проект
+            </button>
+          </div>
+
+          <div class="card project-card" onclick="openProject(0)">
+            <div class="project-icon">🎨</div>
+            <div class="project-info">
+              <div class="project-name">Весенняя коллекция</div>
+              <div class="project-meta">12 промптов · Создан 14 марта 2026</div>
+            </div>
+            <span class="badge badge-success">Завершён</span>
+            <span class="project-arrow">›</span>
+          </div>
+
+          <div class="card project-card mt-sm" onclick="openProject(1)">
+            <div class="project-icon">📸</div>
+            <div class="project-info">
+              <div class="project-name">Иконки для приложения</div>
+              <div class="project-meta">8 промптов · Создан 13 марта 2026</div>
+            </div>
+            <span class="badge badge-warning">В процессе</span>
+            <span class="project-arrow">›</span>
+          </div>
+
+          <div class="card project-card mt-sm" onclick="openProject(2)">
+            <div class="project-icon">🌿</div>
+            <div class="project-info">
+              <div class="project-name">Фоны для сторис</div>
+              <div class="project-meta">20 промптов · Создан 10 марта 2026</div>
+            </div>
+            <span class="badge badge-neutral">Черновик</span>
+            <span class="project-arrow">›</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ──────────────────────────────── -->
+    <!-- SCREEN 2: ПОДКЛЮЧЕНИЕ -->
+    <!-- ──────────────────────────────── -->
+    <section class="screen" id="screen-connection">
+      <div class="screen-header">
+        <h1>Подключение</h1>
+        <p>Подключите ваш аккаунт Higgsfield для генерации</p>
+      </div>
+
+      <!-- Not connected state -->
+      <div id="connection-disconnected">
+        <div class="card" style="max-width: 520px;">
+          <div style="text-align: center; padding: var(--space-xl) 0;">
+            <div style="font-size: 56px; margin-bottom: var(--space-lg);">🔐</div>
+            <h2 class="text-title" style="margin-bottom: var(--space-sm);">Подключите аккаунт</h2>
+            <p class="text-secondary" style="max-width: 360px; margin: 0 auto var(--space-xl); line-height: 1.6;">
+              Для генерации изображений нужно один раз войти в ваш аккаунт Higgsfield. Это безопасно и занимает пару секунд.
+            </p>
+            <button class="btn btn-primary btn-large" onclick="connectAccount()">
+              🔗 Подключиться к Higgsfield
+            </button>
+            <p style="font-size: 11px; color: var(--text-tertiary); margin-top: var(--space-md);">
+              Сессия сохраняется автоматически
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Connected state -->
+      <div id="connection-connected" style="display: none;">
+        <div class="card connection-card" style="max-width: 520px;">
+          <div class="connection-status-dot connected"></div>
+          <div style="flex: 1;">
+            <div class="text-heading">Подключено — всё мурчит ✓</div>
+            <div class="text-secondary mt-sm">Сессия активна. Можно приступать к генерации.</div>
+          </div>
+          <span class="badge badge-success">Активно</span>
+        </div>
+
+        <div class="banner banner-success mt-lg" style="max-width: 520px;">
+          <span class="banner-icon">🐾</span>
+          <span class="banner-text">Аккаунт подключён. Переходите к настройкам генерации →</span>
+          <button class="btn btn-ghost" onclick="navigateTo('settings')">Перейти</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ──────────────────────────────── -->
+    <!-- SCREEN 3: НАСТРОЙКИ ГЕНЕРАЦИИ -->
+    <!-- ──────────────────────────────── -->
+    <section class="screen" id="screen-settings">
+      <div class="screen-header">
+        <h1>Настройки генерации</h1>
+        <p>Загрузите промпты и выберите параметры</p>
+      </div>
+
+      <!-- File import -->
+      <div class="section">
+        <div class="section-header">
+          <span class="section-title">Файл с промптами</span>
+        </div>
+
+        <div class="drop-zone" id="drop-zone" onclick="simulateImport()">
+          <div class="drop-zone-icon">📄</div>
+          <div class="drop-zone-title">Перетащите файл сюда</div>
+          <div class="drop-zone-hint">CSV или XLSX · Колонки: id, prompt</div>
+        </div>
+
+        <!-- File info (shown after import) -->
+        <div class="card file-info mt-md" id="file-info" style="display: none;">
+          <span class="file-info-icon">📊</span>
+          <div style="flex: 1;">
+            <div class="file-info-name">prompts_spring.csv</div>
+            <div class="file-info-meta">Загружено 12 промптов</div>
+          </div>
+          <span class="badge badge-success">✓ Готово</span>
+        </div>
+      </div>
+
+      <!-- Model selection -->
+      <div class="settings-grid mt-lg">
+        <div class="card settings-card">
+          <div class="settings-card-label">Модель</div>
+          <select class="form-select" id="model-select">
+            <option>Higgsfield Standard</option>
+            <option>Higgsfield HD</option>
+            <option>Higgsfield Ultra</option>
+          </select>
+          <div class="settings-card-hint">Общая модель для всех промптов</div>
+        </div>
+
+        <div class="card settings-card">
+          <div class="settings-card-label">Соотношение сторон</div>
+          <div class="ratio-options mt-sm">
+            <div class="ratio-option active" onclick="selectRatio(this, '1:1')">
+              <div class="ratio-box" style="width: 28px; height: 28px;"></div>
+              <span class="ratio-label">1:1</span>
+            </div>
+            <div class="ratio-option" onclick="selectRatio(this, '16:9')">
+              <div class="ratio-box" style="width: 36px; height: 20px;"></div>
+              <span class="ratio-label">16:9</span>
+            </div>
+            <div class="ratio-option" onclick="selectRatio(this, '9:16')">
+              <div class="ratio-box" style="width: 20px; height: 36px;"></div>
+              <span class="ratio-label">9:16</span>
+            </div>
+            <div class="ratio-option" onclick="selectRatio(this, '4:3')">
+              <div class="ratio-box" style="width: 32px; height: 24px;"></div>
+              <span class="ratio-label">4:3</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Summary -->
+      <div class="settings-grid mt-md">
+        <div class="card settings-card">
+          <div class="settings-card-label">Всего промптов</div>
+          <div class="settings-card-value" id="prompt-count">12</div>
+        </div>
+        <div class="card settings-card">
+          <div class="settings-card-label">Изображений на промпт</div>
+          <div class="settings-card-value">4</div>
+          <div class="settings-card-hint">Фиксированное значение</div>
+        </div>
+      </div>
+
+      <div class="card mt-lg" style="display: flex; align-items: center; justify-content: space-between; padding: var(--space-lg) var(--space-xl);">
+        <div>
+          <div class="text-heading">Всё готово к генерации</div>
+          <div class="text-secondary mt-sm">Будет создано <strong>48 изображений</strong> для 12 промптов</div>
+        </div>
+        <button class="btn btn-primary btn-large" onclick="startGeneration()">
+          ▶ Запустить генерацию
+        </button>
+      </div>
+    </section>
+
+    <!-- ──────────────────────────────── -->
+    <!-- SCREEN 4: ПРОГРЕСС -->
+    <!-- ──────────────────────────────── -->
+    <section class="screen" id="screen-progress">
+      <div class="screen-header">
+        <h1>Прогресс генерации</h1>
+        <p>Генерируем изображения для ваших промптов</p>
+      </div>
+
+      <!-- Overall progress -->
+      <div class="card mb-lg">
+        <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: var(--space-md);">
+          <span class="text-heading">Общий прогресс</span>
+          <span class="text-heading text-accent" id="progress-percent">0%</span>
+        </div>
+        <div class="progress-bar progress-bar-large">
+          <div class="progress-fill" id="progress-bar-fill" style="width: 0%;"></div>
+        </div>
+        <div class="progress-stats">
+          <div class="progress-stat">
+            <div class="progress-stat-value" id="stat-done">0</div>
+            <div class="progress-stat-label">Готово</div>
+          </div>
+          <div class="progress-stat">
+            <div class="progress-stat-value" id="stat-total">12</div>
+            <div class="progress-stat-label">Всего</div>
+          </div>
+          <div class="progress-stat">
+            <div class="progress-stat-value" id="stat-images">0</div>
+            <div class="progress-stat-label">Изображений</div>
+          </div>
+          <div class="progress-stat">
+            <div class="progress-stat-value" id="stat-errors">0</div>
+            <div class="progress-stat-label">Ошибок</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Current generation -->
+      <div class="card current-gen-card">
+        <div class="current-gen-pulse"></div>
+        <div class="current-gen-info">
+          <div class="current-gen-label">Сейчас генерируется</div>
+          <div class="current-gen-prompt" id="current-prompt-text">Ожидание запуска…</div>
+          <div class="current-gen-sub" id="current-image-sub">—</div>
+        </div>
+      </div>
+
+      <!-- Controls -->
+      <div class="progress-controls">
+        <button class="btn btn-secondary" id="btn-pause" onclick="togglePause()">
+          ⏸ Пауза
+        </button>
+        <button class="btn btn-danger" onclick="stopGeneration()">
+          ⏹ Остановить
+        </button>
+        <div style="flex: 1;"></div>
+        <span class="text-secondary" id="eta-text">—</span>
+      </div>
+
+      <!-- Prompt status list -->
+      <div class="section mt-xl">
+        <div class="section-header">
+          <span class="section-title">Статус промптов</span>
+        </div>
+        <div class="card" style="padding: 0; overflow: hidden;">
+          <ul class="status-list" id="prompt-status-list">
+            <!-- Generated by JS -->
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- ──────────────────────────────── -->
+    <!-- SCREEN 5: ОТБОР -->
+    <!-- ──────────────────────────────── -->
+    <section class="screen" id="screen-selection">
+      <div class="screen-header">
+        <h1>Отбор лучших</h1>
+        <p>Выберите одно лучшее изображение для каждого промпта</p>
+      </div>
+
+      <!-- Navigation between prompts -->
+      <div class="prompt-nav">
+        <div class="prompt-counter">
+          Промпт <span id="sel-current">1</span> из <span id="sel-total">12</span>
+        </div>
+        <div class="prompt-nav-buttons">
+          <button class="btn btn-secondary btn-icon" id="btn-prev-prompt" onclick="prevPrompt()">←</button>
+          <button class="btn btn-secondary btn-icon" id="btn-next-prompt" onclick="nextPrompt()">→</button>
+        </div>
+      </div>
+
+      <!-- Mini-map -->
+      <div class="card mb-lg" style="padding: var(--space-sm);">
+        <div class="mini-map" id="selection-minimap">
+          <!-- Generated by JS -->
+        </div>
+      </div>
+
+      <!-- Prompt text -->
+      <div class="prompt-display">
+        <div class="prompt-display-label">Промпт</div>
+        <div class="prompt-display-text" id="sel-prompt-text">A dreamy watercolor landscape with cherry blossoms and a small cottage</div>
+      </div>
+
+      <!-- Image grid (2x2) -->
+      <div class="image-grid" id="selection-image-grid">
+        <!-- Generated by JS -->
+      </div>
+
+      <!-- Selection footer -->
+      <div class="selection-footer">
+        <div class="selection-counter">
+          Выбрано: <span id="sel-count">0</span> из <span id="sel-count-total">12</span>
+        </div>
+        <button class="btn btn-primary" id="btn-finish-selection" onclick="finishSelection()" disabled>
+          Завершить отбор ✓
+        </button>
+      </div>
+    </section>
+
+    <!-- ──────────────────────────────── -->
+    <!-- SCREEN 6: РЕЗУЛЬТАТЫ -->
+    <!-- ──────────────────────────────── -->
+    <section class="screen" id="screen-results">
+      <div class="completion-hero">
+        <div class="completion-icon">😸</div>
+        <div class="completion-title">Мяу! Всё готово!</div>
+        <div class="completion-text">
+          Все изображения сгенерированы и лучшие отобраны. Ваш проект завершён 🐾
+        </div>
+
+        <div class="results-grid">
+          <div class="card result-stat">
+            <div class="result-stat-value" id="res-prompts">12</div>
+            <div class="result-stat-label">Промптов</div>
+          </div>
+          <div class="card result-stat">
+            <div class="result-stat-value" id="res-generated">48</div>
+            <div class="result-stat-label">Сгенерировано</div>
+          </div>
+          <div class="card result-stat">
+            <div class="result-stat-value" id="res-selected">12</div>
+            <div class="result-stat-label">Отобрано</div>
+          </div>
+        </div>
+
+        <div style="display: flex; gap: var(--space-md); justify-content: center;">
+          <button class="btn btn-primary btn-large" onclick="openResultsFolder()">
+            📂 Открыть папку с результатами
+          </button>
+          <button class="btn btn-secondary btn-large" onclick="navigateTo('projects')">
+            ← К проектам
+          </button>
+        </div>
+
+        <div class="banner banner-success mt-xl" style="max-width: 480px; margin-left: auto; margin-right: auto;">
+          <span class="banner-icon">🐾</span>
+          <span class="banner-text">Все файлы сохранены в папку проекта. Всё мурчит как надо!</span>
+        </div>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

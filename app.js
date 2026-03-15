@@ -210,11 +210,17 @@ function renderProjects() {
   if (projectsList.length === 0) {
     if (emptyEl) emptyEl.style.display = '';
     if (listEl) listEl.style.display = 'none';
+    const counterEl = document.getElementById('projects-counter');
+    if (counterEl) counterEl.textContent = '';
     return;
   }
 
   if (emptyEl) emptyEl.style.display = 'none';
   if (listEl) listEl.style.display = 'block';
+
+  // Update counter
+  const counterEl = document.getElementById('projects-counter');
+  if (counterEl) counterEl.textContent = `(${projectsList.length})`;
 
   const statusConfig = {
     draft:       { label: 'Черновик',    badge: 'badge-neutral', icon: '📝' },
@@ -246,101 +252,70 @@ function renderProjects() {
 
 // ── Project Menu ──
 
-// ── Smart Icon Picker (YouTube Cartoon Production) ──
-//
-// Priority: Characters → Genre/Story → Location → Season → Meta
-// Keywords use longer stems to avoid false positives
-
-const ICON_RULES = [
-  // ─── Персонажи и животные (самый частый кейс) ───
-  { icon: '🐱', match: ['кот', 'кош', 'кити', 'kitty', 'cat', 'мяу', 'мурк', 'барс'] },
-  { icon: '🐶', match: ['собак', 'пёс', 'песик', 'щенок', 'dog', 'puppy', 'хаск', 'корги'] },
-  { icon: '🐰', match: ['заяц', 'зайч', 'зайк', 'кроли', 'bunny', 'rabbit'] },
-  { icon: '🐻', match: ['медвед', 'мишк', 'мишут', 'bear', 'панд', 'panda'] },
-  { icon: '🦊', match: ['лис', 'лисич', 'лисён', 'fox'] },
-  { icon: '🐺', match: ['волк', 'волч', 'wolf'] },
-  { icon: '🦁', match: ['лев', 'львён', 'lion'] },
-  { icon: '🐸', match: ['лягуш', 'жаб', 'frog'] },
-  { icon: '🐧', match: ['пингви', 'penguin'] },
-  { icon: '🦉', match: ['сов', 'совун', 'owl', 'филин'] },
-  { icon: '🐉', match: ['дракон', 'dragon', 'дракош'] },
-  { icon: '🦄', match: ['единорог', 'unicorn', 'пони', 'pony'] },
-  { icon: '🦕', match: ['динозавр', 'dino', 'рекс', 'тирано'] },
-  { icon: '🤖', match: ['робот', 'robot', 'кибер', 'андроид', 'мех'] },
-  { icon: '🧙', match: ['маг', 'волшеб', 'колдун', 'wizard', 'ведьм'] },
-  { icon: '🦸', match: ['супергерой', 'герой', 'hero', 'super'] },
-  { icon: '👻', match: ['привидени', 'призрак', 'ghost', 'привиден'] },
-  { icon: '🧚', match: ['фе', 'fairy', 'эльф', 'elf'] },
-  { icon: '🎅', match: ['дед мороз', 'санта', 'santa', 'клаус'] },
-  { icon: '👸', match: ['принцесс', 'princess', 'корол', 'queen', 'king'] },
-
-  // ─── Жанры и типы историй ───
-  { icon: '⚔️', match: ['битв', 'сражен', 'battle', 'fight', 'воин', 'рыцар', 'knight'] },
-  { icon: '🗺️', match: ['приключ', 'adventure', 'путешеств', 'квест', 'quest', 'поход'] },
-  { icon: '🏎️', match: ['гонк', 'гонок', 'race', 'racing', 'скорост'] },
-  { icon: '😂', match: ['смешн', 'funny', 'комеди', 'comedy', 'юмор', 'шутк'] },
-  { icon: '😱', match: ['страш', 'scary', 'horror', 'ужас', 'хэллоуин', 'жуть'] },
-  { icon: '💕', match: ['любов', 'love', 'романт', 'сердц', 'дружб', 'friend'] },
-  { icon: '🔍', match: ['детектив', 'detective', 'тайн', 'mystery', 'загадк', 'секрет'] },
-  { icon: '🏴‍☠️', match: ['пират', 'pirate', 'сокровищ', 'treasure', 'корабл'] },
-
-  // ─── Локации и сеттинг ───
-  { icon: '🚀', match: ['космос', 'space', 'планет', 'galaxy', 'галакт', 'звёзд', 'ракет'] },
-  { icon: '🏰', match: ['замок', 'castle', 'крепост', 'дворец', 'palace'] },
-  { icon: '🌊', match: ['море', 'океан', 'ocean', 'подвод', 'underwater', 'плав'] },
-  { icon: '🌲', match: ['лес', 'forest', 'чащ', 'дерев', 'джунгл', 'jungle'] },
-  { icon: '🏔️', match: ['гор', 'mountain', 'вершин', 'скал'] },
-  { icon: '🏙️', match: ['город', 'city', 'мегаполис', 'улиц'] },
-  { icon: '🏝️', match: ['остров', 'island', 'пляж', 'beach'] },
-  { icon: '🌋', match: ['вулкан', 'volcano', 'лав'] },
-
-  // ─── Сезоны и праздники ───
-  { icon: '🌸', match: ['весен', 'весна', 'spring'] },
-  { icon: '☀️', match: ['лето', 'летн', 'summer', 'каникул'] },
-  { icon: '🍂', match: ['осен', 'осень', 'autumn', 'fall'] },
-  { icon: '❄️', match: ['зима', 'зимн', 'winter', 'снег', 'snow', 'новогод', 'рождеств'] },
-  { icon: '🎃', match: ['хеллоу', 'halloween'] },
-  { icon: '🎄', match: ['ёлк', 'ёлоч', 'christmas'] },
-
-  // ─── Мета (типы контента) ───
-  { icon: '🎬', match: ['мульт', 'cartoon', 'аним', 'animation', 'серия', 'episode'] },
-  { icon: '📺', match: ['ютуб', 'youtube', 'канал', 'channel'] },
-  { icon: '🖼️', match: ['превью', 'preview', 'thumbnail', 'обложк', 'постер'] },
-  { icon: '🎞️', match: ['сцен', 'scene', 'кадр', 'frame', 'раскадр'] },
-  { icon: '🎨', match: ['фон', 'background', 'арт', 'art', 'концепт'] },
-  { icon: '🎵', match: ['музык', 'music', 'звук', 'sound', 'клип'] },
-  { icon: '📚', match: ['стори', 'story', 'истори', 'сюжет', 'сценар'] },
-  { icon: '🧪', match: ['тест', 'test', 'пробн', 'demo', 'эксперимент'] },
-
-  // ─── Еда (для кулинарных мультиков) ───
-  { icon: '🍕', match: ['еда', 'food', 'кулинар', 'рецепт', 'повар', 'cook'] },
-  { icon: '🍰', match: ['торт', 'cake', 'сладост', 'десерт', 'пирог'] },
-
-  // ─── Спорт и игры ───
-  { icon: '⚽', match: ['спорт', 'sport', 'футбол', 'football'] },
-  { icon: '🎮', match: ['игр', 'game', 'гейм', 'играт'] },
-];
-
-// Яркие, «вкусные» fallback-иконки для проектов без совпадений
-const FALLBACK_ICONS = [
-  '🎬', '🌟', '✨', '🎪', '🪄', '🌈',
-  '🎯', '💫', '🔮', '🦋', '🐾', '🎭',
-];
+const FALLBACK_ICONS = ['🎬', '📺', '🖼️', '🎞️', '🎨', '🎵', '📚', '🧪', '🐱', '😺'];
 
 function pickProjectIcon(name) {
   if (!name) return '🎬';
-  const lower = name.toLowerCase();
-
-  for (const rule of ICON_RULES) {
-    for (const kw of rule.match) {
-      if (lower.includes(kw)) return rule.icon;
-    }
-  }
-
-  // Deterministic but visually varied fallback
   let hash = 0;
   for (let i = 0; i < name.length; i++) hash = (hash * 31 + name.charCodeAt(i)) | 0;
   return FALLBACK_ICONS[Math.abs(hash) % FALLBACK_ICONS.length];
+}
+
+// ── Change Icon (inline in dropdown) ──
+function openChangeIconMenu(id) {
+  const menu = document.getElementById('project-context-menu');
+  if (!menu) return;
+
+  const icons = FALLBACK_ICONS;
+  const project = projectsList.find(p => p.id === id);
+  const currentIcon = project?.icon || '🎬';
+
+  menu.innerHTML = `
+    <div style="padding: 8px 12px; font-size: 12px; color: var(--text-secondary); font-weight: 600;">Выберите иконку</div>
+    <div class="icon-picker" style="padding: 4px 12px 12px;" id="icon-change-grid"></div>
+  `;
+
+  const grid = document.getElementById('icon-change-grid');
+  icons.forEach((ic, idx) => {
+    const btn = document.createElement('button');
+    btn.className = 'icon-pick' + (ic === currentIcon ? ' selected' : '');
+    btn.textContent = ic;
+    btn.style.cssText = 'width:36px; height:36px; font-size:18px; padding:0;';
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      changeProjectIcon(id, icons[idx]);
+    });
+    grid.appendChild(btn);
+  });
+}
+
+async function changeProjectIcon(id, icon) {
+  closeAllMenus();
+  // Restore original menu HTML
+  restoreContextMenu();
+
+  const api = window.electronAPI;
+  if (api) {
+    try {
+      await api.projects.update(id, { icon });
+    } catch (err) {
+      console.error('[app] Change icon error:', err);
+    }
+  }
+  await loadProjectsList();
+}
+
+function restoreContextMenu() {
+  const menu = document.getElementById('project-context-menu');
+  if (!menu) return;
+  menu.innerHTML = `
+    <button class="project-dropdown-item" id="ctx-icon" onclick="openChangeIconMenu(activeMenuProjectId)">🎨 Сменить иконку</button>
+    <button class="project-dropdown-item" id="ctx-rename" onclick="startRenameProject(activeMenuProjectId)">✏️ Переименовать</button>
+    <button class="project-dropdown-item" id="ctx-duplicate" onclick="duplicateProject(activeMenuProjectId)">📋 Дублировать</button>
+    <button class="project-dropdown-item" id="ctx-folder" onclick="openProjectFolder(activeMenuProjectId)">📂 Открыть папку</button>
+    <div class="project-dropdown-sep"></div>
+    <button class="project-dropdown-item danger" id="ctx-delete" onclick="deleteProject(activeMenuProjectId)">🗑 Удалить</button>
+  `;
 }
 
 let activeMenuId = null;
@@ -381,13 +356,14 @@ function closeAllMenus() {
   if (menu) menu.style.display = 'none';
   document.querySelectorAll('.project-card.menu-open').forEach(c => c.classList.remove('menu-open'));
   activeMenuId = null;
-  // Reset delete confirmation
-  const deleteBtn = document.getElementById('ctx-delete');
-  if (deleteBtn) deleteBtn.textContent = '🗑 Удалить';
+  // Restore original menu structure (in case icon picker was shown)
+  restoreContextMenu();
 }
 
 // Close menus on outside click
 document.addEventListener('click', (e) => {
+  // If the target was detached from DOM (e.g. innerHTML replaced), don't close
+  if (!document.body.contains(e.target)) return;
   if (!e.target.closest('.project-menu-btn') && !e.target.closest('.project-dropdown')) {
     closeAllMenus();
   }
@@ -490,7 +466,7 @@ async function duplicateProject(id) {
   const api = window.electronAPI;
   if (api) {
     try {
-      await api.projects.create(`${project.name} (копия)`);
+      await api.projects.create(`${project.name} (копия)`, project.icon || '🎬');
       await loadProjectsList();
     } catch (err) {
       console.error('[app] Duplicate error:', err);
@@ -704,6 +680,24 @@ function updateConnectionUI() {
 }
 
 // ── Settings ──
+async function downloadTemplate() {
+  const api = window.electronAPI;
+  if (!api) {
+    alert('Шаблон доступен в папке приложения: Шаблон_промптов.xlsx');
+    return;
+  }
+  try {
+    const result = await api.file.downloadTemplate();
+    if (result.success) {
+      alert(`✅ Шаблон сохранён на рабочий стол:\n${result.path}`);
+    } else {
+      alert(`❌ ${result.error}`);
+    }
+  } catch (err) {
+    alert(`❌ Ошибка: ${err.message}`);
+  }
+}
+
 async function simulateImport() {
   if (state.fileImported) return; // FIX: Prevent double-import
 
@@ -717,6 +711,7 @@ async function simulateImport() {
     document.getElementById('file-info').style.display = 'flex';
     const countEl = document.getElementById('file-prompt-count');
     if (countEl) countEl.textContent = `${state.promptCount} промптов`;
+    updatePromptSummary(state.promptCount);
     return;
   }
 
@@ -738,13 +733,26 @@ async function simulateImport() {
     state.importedFilePath = filePath;
     state.promptCount = result.count;
 
-    // 4. Update UI
+    // 4. Save prompts to active project folder
+    if (activeProjectId) {
+      try {
+        await api.projects.savePrompts(activeProjectId, result.rows, filePath);
+        console.log(`[app] Saved ${result.count} prompts to project ${activeProjectId}`);
+      } catch (e) {
+        console.error('[app] Failed to save prompts to project:', e);
+      }
+    }
+
+    // 5. Update UI
     document.getElementById('drop-zone').style.display = 'none';
     document.getElementById('file-info').style.display = 'flex';
     const countEl = document.getElementById('file-prompt-count');
     if (countEl) countEl.textContent = `${result.count} промптов`;
     const nameEl = document.getElementById('file-name');
     if (nameEl) nameEl.textContent = filePath.split('/').pop();
+
+    // Update summary cards
+    updatePromptSummary(result.count);
 
   } catch (err) {
     alert(`❌ Ошибка импорта: ${err.message}`);
@@ -811,7 +819,22 @@ function updateSettingsSummary() {
   const modelInfoEl = document.getElementById('settings-model-info');
   if (modelInfoEl && model) {
     const qualityStr = state.selectedQuality ? ` · ${state.selectedQuality}` : '';
-    modelInfoEl.textContent = `${model.name}${qualityStr} · Unlimited \ud83c\udd93`;
+    modelInfoEl.textContent = `${model.name}${qualityStr} · Unlimited 🆓`;
+  }
+  // Also update total if we have prompts
+  if (state.promptCount > 0) {
+    updatePromptSummary(state.promptCount);
+  }
+}
+
+function updatePromptSummary(count) {
+  const promptCountEl = document.getElementById('prompt-count');
+  if (promptCountEl) promptCountEl.textContent = count;
+
+  const totalEl = document.getElementById('settings-total-info');
+  if (totalEl) {
+    const totalImages = count * 4;
+    totalEl.innerHTML = `Будет создано <strong>${totalImages} изображений</strong> для ${count} промпт${pluralRu(count)}`;
   }
 }
 
@@ -835,6 +858,15 @@ async function startGeneration() {
   const prompts = state.importedPrompts.length > 0
     ? state.importedPrompts
     : MOCK_PROMPTS.map(p => ({ id: String(p.id), prompt: p.text }));
+
+  // ── DIAGNOSTIC: Log what prompts we're sending ──
+  console.log(`[app] ═══ GENERATION START ═══`);
+  console.log(`[app] Prompt source: ${state.importedPrompts.length > 0 ? 'IMPORTED FILE' : 'MOCK DATA'}`);
+  console.log(`[app] Total prompts: ${prompts.length}`);
+  console.log(`[app] activeProjectId: ${activeProjectId || 'NONE'}`);
+  prompts.forEach((p, i) => {
+    console.log(`[app] Prompt ${i + 1}: id=${p.id}, text="${(p.prompt || '').substring(0, 80)}..."`);
+  });
 
   // Init prompt statuses
   state.promptStatuses = prompts.map((p, i) => ({
@@ -882,7 +914,7 @@ async function startGeneration() {
       model: state.selectedModel,
       aspect: state.selectedRatio,
       quality: state.selectedQuality,
-    });
+    }, activeProjectId);
 
     if (!result.success) {
       alert(`❌ ${result.error}`);
@@ -1130,7 +1162,7 @@ function renderSelectionMinimap() {
   const minimap = document.getElementById('selection-minimap');
   if (!minimap) return; // FIX: Guard
 
-  minimap.innerHTML = MOCK_PROMPTS.map((p, i) => {
+  minimap.innerHTML = (state.importedPrompts.length > 0 ? state.importedPrompts : MOCK_PROMPTS.map(p => ({ id: String(p.id), prompt: p.text }))).map((p, i) => {
     let cls = 'mini-map-dot';
     if (i === state.selectionCurrentPrompt) cls += ' current';
     else if (state.selections[i] !== undefined) cls += ' selected-done';
@@ -1141,34 +1173,65 @@ function renderSelectionMinimap() {
 
 function renderSelectionContent() {
   const i = state.selectionCurrentPrompt;
-  const prompt = MOCK_PROMPTS[i];
-  if (!prompt) return; // FIX: Guard against invalid index
+  const prompts = state.importedPrompts.length > 0
+    ? state.importedPrompts
+    : MOCK_PROMPTS.map(p => ({ id: String(p.id), prompt: p.text }));
+  const promptData = prompts[i];
+  if (!promptData) return;
 
   const selCurrentEl = document.getElementById('sel-current');
   const selTotalEl = document.getElementById('sel-total');
   const selPromptEl = document.getElementById('sel-prompt-text');
 
   if (selCurrentEl) selCurrentEl.textContent = i + 1;
-  if (selTotalEl) selTotalEl.textContent = MOCK_PROMPTS.length;
-  if (selPromptEl) selPromptEl.textContent = prompt.text;
+  if (selTotalEl) selTotalEl.textContent = prompts.length;
+  if (selPromptEl) selPromptEl.textContent = promptData.prompt || promptData.text || '';
 
   // Update prev/next buttons
   const prevBtn = document.getElementById('btn-prev-prompt');
   const nextBtn = document.getElementById('btn-next-prompt');
   if (prevBtn) prevBtn.disabled = i === 0;
-  if (nextBtn) nextBtn.disabled = i === MOCK_PROMPTS.length - 1;
+  if (nextBtn) nextBtn.disabled = i === prompts.length - 1;
 
-  // Render image grid
+  // Render image grid — try loading real images first
   const grid = document.getElementById('selection-image-grid');
-  if (!grid) return; // FIX: Guard
+  if (!grid) return;
 
-  const colors = IMAGE_COLORS[i] || IMAGE_COLORS[0];
-  const selectedImg = state.selections[i];
+  const api = window.electronAPI;
+  if (api && activeProjectId) {
+    // Load real images from project
+    api.projects.getImages(activeProjectId, i).then(result => {
+      if (result.success && result.images.length > 0) {
+        renderRealImages(grid, i, result.images);
+      } else {
+        renderPlaceholderImages(grid, i);
+      }
+    }).catch(() => renderPlaceholderImages(grid, i));
+  } else {
+    renderPlaceholderImages(grid, i);
+  }
+}
 
+function renderRealImages(grid, promptIdx, images) {
+  const selectedImg = state.selections[promptIdx];
+  grid.innerHTML = images.map((img, imgIdx) => {
+    const isSelected = selectedImg === imgIdx;
+    return `
+      <div class="image-card ${isSelected ? 'selected' : ''}" onclick="selectImage(${promptIdx}, ${imgIdx})">
+        <img src="${img.dataUrl}" alt="Вариант ${imgIdx + 1}" style="width:100%; height:100%; object-fit:cover; border-radius: inherit;">
+        <div class="image-card-number">Вариант ${imgIdx + 1}</div>
+      </div>
+    `;
+  }).join('');
+}
+
+function renderPlaceholderImages(grid, promptIdx) {
+  const colors = IMAGE_COLORS[promptIdx] || IMAGE_COLORS[0];
+  const selectedImg = state.selections[promptIdx];
   grid.innerHTML = colors.map((color, imgIdx) => {
     const isSelected = selectedImg === imgIdx;
     return `
-      <div class="image-card ${isSelected ? 'selected' : ''}" onclick="selectImage(${i}, ${imgIdx})" style="background: linear-gradient(135deg, ${color}, ${lightenColor(color, 30)});">
+      <div class="image-card ${isSelected ? 'selected' : ''}" onclick="selectImage(${promptIdx}, ${imgIdx})" style="background: linear-gradient(135deg, ${color}, ${lightenColor(color, 30)});">
         <div class="image-card-number">Вариант ${imgIdx + 1}</div>
       </div>
     `;
@@ -1181,8 +1244,11 @@ function selectImage(promptIdx, imageIdx) {
   renderSelectionMinimap();
   updateSelectionCounter();
 
+  const totalPrompts = state.importedPrompts.length > 0
+    ? state.importedPrompts.length
+    : MOCK_PROMPTS.length;
   // Auto-advance to next prompt after a short delay
-  if (promptIdx < MOCK_PROMPTS.length - 1) {
+  if (promptIdx < totalPrompts - 1) {
     setTimeout(() => {
       // FIX: Only auto-advance if still on the same prompt (user might have clicked minimap)
       if (state.selectionCurrentPrompt === promptIdx) {
@@ -1199,8 +1265,11 @@ function updateSelectionCounter() {
   const btn = document.getElementById('btn-finish-selection');
 
   if (selCountEl) selCountEl.textContent = count;
-  if (selCountTotalEl) selCountTotalEl.textContent = MOCK_PROMPTS.length;
-  if (btn) btn.disabled = count < MOCK_PROMPTS.length;
+  const totalPrompts = state.importedPrompts.length > 0
+    ? state.importedPrompts.length
+    : MOCK_PROMPTS.length;
+  if (selCountTotalEl) selCountTotalEl.textContent = totalPrompts;
+  if (btn) btn.disabled = count < totalPrompts;
 }
 
 function prevPrompt() {
@@ -1212,7 +1281,10 @@ function prevPrompt() {
 }
 
 function nextPrompt() {
-  if (state.selectionCurrentPrompt < MOCK_PROMPTS.length - 1) {
+  const totalPrompts = state.importedPrompts.length > 0
+    ? state.importedPrompts.length
+    : MOCK_PROMPTS.length;
+  if (state.selectionCurrentPrompt < totalPrompts - 1) {
     state.selectionCurrentPrompt++;
     renderSelectionContent();
     renderSelectionMinimap();
@@ -1220,14 +1292,27 @@ function nextPrompt() {
 }
 
 function jumpToPrompt(index) {
-  if (index >= 0 && index < MOCK_PROMPTS.length) { // FIX: Bounds check
+  const totalPrompts = state.importedPrompts.length > 0
+    ? state.importedPrompts.length
+    : MOCK_PROMPTS.length;
+  if (index >= 0 && index < totalPrompts) { // FIX: Bounds check
     state.selectionCurrentPrompt = index;
     renderSelectionContent();
     renderSelectionMinimap();
   }
 }
 
-function finishSelection() {
+async function finishSelection() {
+  // Save selections to project folder
+  const api = window.electronAPI;
+  if (api && activeProjectId && Object.keys(state.selections).length > 0) {
+    try {
+      const result = await api.projects.saveSelection(activeProjectId, state.selections);
+      console.log(`[app] Saved ${result.copied} selected images`);
+    } catch (err) {
+      console.error('[app] Save selection error:', err);
+    }
+  }
   navigateTo('results');
 }
 

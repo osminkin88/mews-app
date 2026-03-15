@@ -42,11 +42,23 @@ function parseCSVText(text, separator) {
     h.trim().toLowerCase().replace(/^["']|["']$/g, '')
   );
 
-  // Check for required columns
-  const idIdx = headers.findIndex(h => h === 'id');
-  const promptIdx = headers.findIndex(h => h === 'prompt');
+  // Column name mapping
+  const HEADER_MAP = {
+    'id': 'id',
+    'промпт': 'prompt', 'prompt': 'prompt',
+    'категория': 'category', 'category': 'category', 'тег': 'category', 'tag': 'category',
+    'стиль': 'style', 'style': 'style',
+    'комментарий': 'comment', 'comment': 'comment',
+  };
 
-  if (idIdx === -1 || promptIdx === -1) return [];
+  const colMap = {};
+  headers.forEach((h, idx) => {
+    const mapped = HEADER_MAP[h];
+    if (mapped) colMap[mapped] = idx;
+  });
+
+  // Need at least prompt column
+  if (colMap['prompt'] === undefined) return [];
 
   // Parse rows
   const rows = [];
@@ -55,12 +67,18 @@ function parseCSVText(text, separator) {
       c.trim().replace(/^["']|["']$/g, '')
     );
 
-    const id = cols[idIdx] || '';
-    const prompt = cols[promptIdx] || '';
+    const id = colMap['id'] !== undefined ? (cols[colMap['id']] || '') : String(i).padStart(3, '0');
+    let prompt = colMap['prompt'] !== undefined ? (cols[colMap['prompt']] || '') : '';
+    const category = colMap['category'] !== undefined ? (cols[colMap['category']] || '') : '';
+    const style = colMap['style'] !== undefined ? (cols[colMap['style']] || '') : '';
+    const comment = colMap['comment'] !== undefined ? (cols[colMap['comment']] || '') : '';
 
-    if (id && prompt && prompt.toLowerCase() !== 'nan') {
-      rows.push({ id, prompt });
-    }
+    if (!prompt || prompt.toLowerCase() === 'nan') continue;
+
+    // Style is stored as metadata, NOT appended to prompt text
+    // (insertText with \n breaks React contenteditable)
+
+    rows.push({ id: id || String(rows.length + 1).padStart(3, '0'), prompt, category, style, comment });
   }
 
   return rows;
@@ -69,24 +87,45 @@ function parseCSVText(text, separator) {
 // ── Parse XLSX ────────────────────────────────────────────────
 function parseXLSX(filePath) {
   const workbook = XLSX.readFile(filePath);
-  const sheetName = workbook.SheetNames[0];
+  // Use first sheet, but skip "Инструкция" if multiple sheets
+  let sheetName = workbook.SheetNames[0];
+  if (workbook.SheetNames.length > 1) {
+    const dataSheet = workbook.SheetNames.find(n => n.toLowerCase() !== 'инструкция');
+    if (dataSheet) sheetName = dataSheet;
+  }
   const sheet = workbook.Sheets[sheetName];
   const data = XLSX.utils.sheet_to_json(sheet);
 
-  // Normalize headers
+  // Column name mapping (Russian → English)
+  const COLUMN_MAP = {
+    'id': 'id',
+    'промпт': 'prompt', 'prompt': 'prompt',
+    'категория': 'category', 'category': 'category', 'тег': 'category', 'tag': 'category',
+    'стиль': 'style', 'style': 'style',
+    'комментарий': 'comment', 'comment': 'comment', 'заметка': 'comment', 'note': 'comment',
+  };
+
   const rows = [];
-  for (const row of data) {
-    const normalizedRow = {};
+  for (let rowIdx = 0; rowIdx < data.length; rowIdx++) {
+    const row = data[rowIdx];
+    const normalized = {};
     for (const [key, value] of Object.entries(row)) {
-      normalizedRow[key.trim().toLowerCase()] = String(value).trim();
+      const mapped = COLUMN_MAP[key.trim().toLowerCase()];
+      if (mapped) normalized[mapped] = String(value).trim();
     }
 
-    const id = normalizedRow['id'] || '';
-    const prompt = normalizedRow['prompt'] || '';
+    // Auto-generate ID if missing
+    const id = normalized['id'] || String(rowIdx + 1).padStart(3, '0');
+    let prompt = normalized['prompt'] || '';
+    const category = normalized['category'] || '';
+    const style = normalized['style'] || '';
+    const comment = normalized['comment'] || '';
 
-    if (id && prompt && prompt.toLowerCase() !== 'nan') {
-      rows.push({ id, prompt });
-    }
+    if (!prompt || prompt.toLowerCase() === 'nan') continue;
+
+    // Style is stored as metadata, NOT appended to prompt text
+
+    rows.push({ id, prompt, category, style, comment });
   }
 
   return rows;
@@ -109,7 +148,7 @@ function importFile(filePath) {
     if (rows.length === 0) {
       return {
         success: false,
-        error: 'Файл пустой или не содержит колонок "id" и "prompt"',
+        error: 'Файл пустой или не содержит колонки «Промпт» (или «prompt»). Скачайте шаблон для правильного формата.',
       };
     }
 

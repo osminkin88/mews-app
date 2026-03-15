@@ -631,6 +631,27 @@ body::before {
   color: var(--text-tertiary);
 }
 
+.btn-template-download {
+  margin-top: 12px;
+  padding: 8px 20px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent);
+  background: rgba(126, 186, 0, 0.08);
+  border: 1.5px dashed rgba(126, 186, 0, 0.3);
+  border-radius: var(--radius-lg);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  letter-spacing: 0.02em;
+}
+
+.btn-template-download:hover {
+  background: rgba(126, 186, 0, 0.15);
+  border-color: var(--accent);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(126, 186, 0, 0.15);
+}
+
 /* ── Progress Bar ── */
 .progress-bar {
   height: 8px;
@@ -938,6 +959,8 @@ body::before {
   cursor: pointer;
   transition: all 0.15s ease;
   border-left: 3px solid transparent;
+  position: relative;
+  overflow: visible;
 }
 
 .project-card:hover {
@@ -949,12 +972,6 @@ body::before {
 .project-card:active {
   background: rgba(126, 186, 0, 0.1);
   transform: translateX(1px);
-}
-
-/* Project card kebab menu */
-.project-card {
-  position: relative;
-  overflow: visible;
 }
 
 /* When menu is open, card goes above siblings */

@@ -25,6 +25,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   file: {
     select: () => ipcRenderer.invoke('file:select'),
     import: (filePath) => ipcRenderer.invoke('file:import', filePath),
+    downloadTemplate: () => ipcRenderer.invoke('file:download-template'),
   },
 
   // ── Projects ──
@@ -33,12 +34,20 @@ contextBridge.exposeInMainWorld('electronAPI', {
     create: (name, icon) => ipcRenderer.invoke('projects:create', { name, icon }),
     delete: (id) => ipcRenderer.invoke('projects:delete', { id }),
     update: (id, updates) => ipcRenderer.invoke('projects:update', { id, updates }),
+    savePrompts: (projectId, prompts, sourceFile) =>
+      ipcRenderer.invoke('projects:save-prompts', { projectId, prompts, sourceFile }),
+    loadPrompts: (projectId) =>
+      ipcRenderer.invoke('projects:load-prompts', { projectId }),
+    getImages: (projectId, promptIndex) =>
+      ipcRenderer.invoke('projects:get-images', { projectId, promptIndex }),
+    saveSelection: (projectId, selections) =>
+      ipcRenderer.invoke('projects:save-selection', { projectId, selections }),
   },
 
   // ── Generation ──
   generate: {
-    start: (prompts, settings) =>
-      ipcRenderer.invoke('generate:start', { prompts, settings }),
+    start: (prompts, settings, projectId) =>
+      ipcRenderer.invoke('generate:start', { prompts, settings, projectId }),
     stop: () => ipcRenderer.invoke('generate:stop'),
     onProgress: (callback) => {
       const handler = (event, data) => callback(data);

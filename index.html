@@ -216,6 +216,7 @@
 
 <!-- Shared project context menu (body-level to escape overflow clipping) -->
 <div class="project-dropdown" id="project-context-menu">
+  <button class="project-dropdown-item" id="ctx-icon" onclick="openChangeIconMenu(activeMenuProjectId)">🎨 Сменить иконку</button>
   <button class="project-dropdown-item" id="ctx-rename" onclick="startRenameProject(activeMenuProjectId)">✏️ Переименовать</button>
   <button class="project-dropdown-item" id="ctx-duplicate" onclick="duplicateProject(activeMenuProjectId)">📋 Дублировать</button>
   <button class="project-dropdown-item" id="ctx-folder" onclick="openProjectFolder(activeMenuProjectId)">📂 Открыть папку</button>
@@ -321,7 +322,7 @@
         <div class="empty-state-title">Пока тут пусто…</div>
         <div class="empty-state-text">Создайте свой первый проект, чтобы начать генерацию красивых изображений 🐾</div>
         <button class="btn btn-primary btn-large" onclick="createProject()">
-          ✦ Создать проект
+          ✦ Создать первый проект
         </button>
       </div>
 
@@ -329,9 +330,9 @@
       <div id="projects-list" style="display: none;">
         <div class="section">
           <div class="section-header">
-            <span class="section-title">Недавние проекты</span>
+            <span class="section-title">Проекты <span id="projects-counter" class="text-muted"></span></span>
             <button class="btn btn-primary" onclick="createProject()">
-              🐾 Новый проект
+              ✦ Новый проект
             </button>
           </div>
 
@@ -406,7 +407,10 @@
         <div class="drop-zone" id="drop-zone" onclick="simulateImport()">
           <div class="drop-zone-icon">📄</div>
           <div class="drop-zone-title">Перетащите файл сюда</div>
-          <div class="drop-zone-hint">CSV или XLSX · Колонки: id, prompt</div>
+          <div class="drop-zone-hint">CSV или XLSX · Колонки: Промпт (обязательно), Категория, Стиль</div>
+          <button class="btn-template-download" onclick="event.stopPropagation(); downloadTemplate()">
+            🐾 Скачать шаблон промптов
+          </button>
         </div>
 
         <!-- File info (shown after import) -->
@@ -504,7 +508,7 @@
       <div class="settings-grid mt-md">
         <div class="card settings-card">
           <div class="settings-card-label">Всего промптов</div>
-          <div class="settings-card-value" id="prompt-count">12</div>
+          <div class="settings-card-value" id="prompt-count">—</div>
         </div>
         <div class="card settings-card">
           <div class="settings-card-label">Изображений на промпт</div>
@@ -525,7 +529,7 @@
         <div>
           <div class="text-heading">Всё готово к генерации</div>
           <div class="text-secondary mt-sm" id="settings-model-info">Nano Banana Pro · 2K · Unlimited 🆓</div>
-          <div class="text-secondary mt-sm">Будет создано <strong>48 изображений</strong> для 12 промптов</div>
+          <div class="text-secondary mt-sm" id="settings-total-info">Загрузите промпты для начала генерации</div>
         </div>
         <button class="btn btn-primary btn-large" onclick="startGeneration()">
           ▶ Запустить генерацию

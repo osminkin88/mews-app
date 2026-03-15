@@ -134,14 +134,38 @@ ipcMain.handle('file:import', async (event, filePath) => {
   return importFile(filePath);
 });
 
+ipcMain.handle('file:download-template', async () => {
+  try {
+    const templateSrc = path.join(__dirname, 'Шаблон_промптов.xlsx');
+    if (!fs.existsSync(templateSrc)) {
+      return { success: false, error: 'Файл шаблона не найден в папке приложения.' };
+    }
+    const desktopPath = require('electron').app.getPath('desktop');
+    const destPath = path.join(desktopPath, 'Шаблон_промптов.xlsx');
+    fs.copyFileSync(templateSrc, destPath);
+    return { success: true, path: destPath };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
 // =============================================================
 //  IPC HANDLERS — Generation
 // =============================================================
 
-ipcMain.handle('generate:start', async (event, { prompts, settings }) => {
+ipcMain.handle('generate:start', async (event, { prompts, settings, projectId }) => {
   const { model, aspect, quality } = settings;
 
-  const outputDir = config.ensureOutputDir();
+  // Route output to project's generated/ folder if projectId is set
+  let baseOutputDir = config.ensureOutputDir();
+  if (projectId) {
+    const projects = loadProjects();
+    const project = projects.find(p => p.id === projectId);
+    if (project) {
+      baseOutputDir = path.join(config.ensureOutputDir(), project.folderName || projectId, 'generated');
+      if (!fs.existsSync(baseOutputDir)) fs.mkdirSync(baseOutputDir, { recursive: true });
+    }
+  }
 
   // Check Chrome connection
   const status = await chrome.getStatus();
@@ -162,13 +186,23 @@ ipcMain.handle('generate:start', async (event, { prompts, settings }) => {
   }
 
   // Process each prompt sequentially
+  console.log(`[main] ═══ GENERATE:START received ═══`);
+  console.log(`[main] Prompts received: ${prompts.length}`);
+  console.log(`[main] projectId: ${projectId || 'NONE'}`);
+  console.log(`[main] baseOutputDir: ${baseOutputDir}`);
+  prompts.forEach((p, i) => {
+    console.log(`[main] Prompt ${i + 1}: id=${p.id}, text="${(p.prompt || 'EMPTY!').substring(0, 80)}"`);
+  });
+
   const results = [];
   for (let i = 0; i < prompts.length; i++) {
     if (!engine.getIsGenerating() && i > 0) break; // Stopped
 
     const prompt = prompts[i];
     const idx = i + 1;
-    const promptDir = path.join(outputDir, String(idx).padStart(3, '0'));
+    const promptDir = path.join(baseOutputDir, String(idx).padStart(3, '0'));
+    console.log(`[main] ─── Processing prompt ${idx}/${prompts.length}: "${(prompt.prompt || 'EMPTY!').substring(0, 60)}" ───`);
+    console.log(`[main] ─── Output dir: ${promptDir} ───`);
 
     if (!fs.existsSync(promptDir)) {
       fs.mkdirSync(promptDir, { recursive: true });
@@ -225,11 +259,12 @@ ipcMain.handle('generate:start', async (event, { prompts, settings }) => {
         meta.in_flight_count = 4;
         saveMeta(promptDir, meta);
 
-        // ── Generate images ──
+        // ── Generate + download images (engine handles both) ──
         const result = await engine.generatePrompt(prompt.prompt, {
           model,
           aspect,
           quality,
+          outputDir: promptDir, // Engine saves directly here
           onProgress: (progress) => {
             sendToRenderer('generate:progress', {
               current: idx,
@@ -240,34 +275,10 @@ ipcMain.handle('generate:start', async (event, { prompts, settings }) => {
           },
         });
 
-        if (!result.urls || result.urls.length === 0) {
-          throw new Error('Не получены URL изображений');
-        }
-
-        // ── Download images ──
-        meta.status = 'downloading';
-        meta.urls = result.urls;
-        saveMeta(promptDir, meta);
-
-        const files = [];
-        for (let j = 0; j < Math.min(result.urls.length, 4); j++) {
-          const destPath = path.join(promptDir, `gen_${j + 1}.jpg`);
-
-          sendToRenderer('generate:progress', {
-            current: idx,
-            total: prompts.length,
-            prompt: prompt.prompt,
-            status: 'downloading',
-            message: `Скачиваю ${j + 1}/${Math.min(result.urls.length, 4)}...`,
-          });
-
-          const dlResult = await engine.downloadImage(result.urls[j], destPath);
-          if (dlResult.success) {
-            files.push(`gen_${j + 1}.jpg`);
-          } else {
-            console.log(`[main] Download failed for image ${j + 1}: ${dlResult.error}`);
-          }
-        }
+        // Engine returns { images, savedCount, errorCount, total }
+        const savedImages = (result.images || []).filter(r => r.state === 'saved' && r.file);
+        const files = savedImages.map(r => path.basename(r.file));
+        console.log(`[main] Engine returned: savedCount=${result.savedCount}, files=[${files.join(', ')}]`);
 
         if (files.length > 0) {
           // Success!
@@ -282,7 +293,7 @@ ipcMain.handle('generate:start', async (event, { prompts, settings }) => {
           results.push({ idx, id: prompt.id, status: 'done', files: files.length });
           succeeded = true;
         } else {
-          throw new Error('Все скачивания провалились');
+          throw new Error('Ни одно изображение не сохранено');
         }
 
       } catch (err) {
@@ -490,6 +501,121 @@ ipcMain.handle('projects:update', (event, { id, updates }) => {
   Object.assign(projects[idx], updates);
   saveProjects(projects);
   return { success: true, project: projects[idx] };
+});
+
+// ── Save prompts to project folder ──
+ipcMain.handle('projects:save-prompts', (event, { projectId, prompts, sourceFile }) => {
+  const projects = loadProjects();
+  const project = projects.find(p => p.id === projectId);
+  if (!project) return { success: false, error: 'Project not found' };
+
+  const projectDir = path.join(config.ensureOutputDir(), project.folderName || projectId);
+  if (!fs.existsSync(projectDir)) fs.mkdirSync(projectDir, { recursive: true });
+
+  // Copy source CSV if available
+  if (sourceFile && fs.existsSync(sourceFile)) {
+    fs.copyFileSync(sourceFile, path.join(projectDir, 'prompts.csv'));
+  }
+
+  // Save parsed prompts as JSON for easy loading
+  fs.writeFileSync(
+    path.join(projectDir, 'prompts.json'),
+    JSON.stringify(prompts, null, 2),
+    'utf-8'
+  );
+
+  // Update project metadata
+  project.promptCount = prompts.length;
+  saveProjects(projects);
+
+  return { success: true, count: prompts.length };
+});
+
+// ── Load prompts from project ──
+ipcMain.handle('projects:load-prompts', (event, { projectId }) => {
+  const projects = loadProjects();
+  const project = projects.find(p => p.id === projectId);
+  if (!project) return { success: false, prompts: [] };
+
+  const projectDir = path.join(config.ensureOutputDir(), project.folderName || projectId);
+  const promptsFile = path.join(projectDir, 'prompts.json');
+
+  if (!fs.existsSync(promptsFile)) return { success: true, prompts: [] };
+
+  try {
+    const prompts = JSON.parse(fs.readFileSync(promptsFile, 'utf-8'));
+    return { success: true, prompts };
+  } catch {
+    return { success: false, prompts: [] };
+  }
+});
+
+// ── Get generated images for a prompt ──
+ipcMain.handle('projects:get-images', (event, { projectId, promptIndex }) => {
+  const projects = loadProjects();
+  const project = projects.find(p => p.id === projectId);
+  if (!project) return { success: false, images: [] };
+
+  const projectDir = path.join(config.ensureOutputDir(), project.folderName || projectId);
+  const promptDir = path.join(projectDir, 'generated', String(promptIndex + 1).padStart(3, '0'));
+
+  if (!fs.existsSync(promptDir)) return { success: true, images: [] };
+
+  try {
+    const files = fs.readdirSync(promptDir)
+      .filter(f => /\.(png|jpg|jpeg|webp)$/i.test(f))
+      .sort();
+
+    const images = files.map(f => {
+      const filePath = path.join(promptDir, f);
+      const data = fs.readFileSync(filePath);
+      const ext = path.extname(f).slice(1).toLowerCase();
+      const mime = ext === 'jpg' ? 'image/jpeg' : `image/${ext}`;
+      return {
+        name: f,
+        path: filePath,
+        dataUrl: `data:${mime};base64,${data.toString('base64')}`,
+      };
+    });
+
+    return { success: true, images };
+  } catch (err) {
+    console.error('[projects] get-images error:', err);
+    return { success: false, images: [] };
+  }
+});
+
+// ── Save selection ──
+ipcMain.handle('projects:save-selection', (event, { projectId, selections }) => {
+  const projects = loadProjects();
+  const project = projects.find(p => p.id === projectId);
+  if (!project) return { success: false };
+
+  const projectDir = path.join(config.ensureOutputDir(), project.folderName || projectId);
+  const selectedDir = path.join(projectDir, 'selected');
+  if (!fs.existsSync(selectedDir)) fs.mkdirSync(selectedDir, { recursive: true });
+
+  // selections = { promptIndex: imageIndex, ... }
+  let copied = 0;
+  for (const [promptIdx, imageIdx] of Object.entries(selections)) {
+    const promptDir = path.join(projectDir, 'generated', String(Number(promptIdx) + 1).padStart(3, '0'));
+    if (!fs.existsSync(promptDir)) continue;
+
+    const files = fs.readdirSync(promptDir).filter(f => /\.(png|jpg|jpeg|webp)$/i.test(f)).sort();
+    const sourceFile = files[imageIdx];
+    if (!sourceFile) continue;
+
+    const ext = path.extname(sourceFile);
+    const destName = `${String(Number(promptIdx) + 1).padStart(3, '0')}${ext}`;
+    fs.copyFileSync(path.join(promptDir, sourceFile), path.join(selectedDir, destName));
+    copied++;
+  }
+
+  // Update project status
+  project.status = 'completed';
+  saveProjects(projects);
+
+  return { success: true, copied };
 });
 
 // =============================================================

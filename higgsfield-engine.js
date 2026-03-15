@@ -690,52 +690,76 @@ async function preflight(page) {
 // ══════════════════════════════════════════════════════════════
 
 async function enterPrompt(page, prompt) {
-  // Clear and enter text into contenteditable div
-  const entered = await page.evaluate((text) => {
-    // Primary selector
+  console.log(`[engine] === enterPrompt called ===`);
+  console.log(`[engine] Prompt text: "${prompt.substring(0, 100)}..."`);
+
+  const result = await page.evaluate((text) => {
     let el = document.querySelector('div[id="hf:tour-image-prompt"]');
-    // Fallbacks
     if (!el) el = document.querySelector('div[role="textbox"][contenteditable="true"]');
     if (!el) el = document.querySelector('div[contenteditable="true"][class*="cursor-text"]');
+    if (!el) return { error: 'Not found' };
 
-    if (!el) return false;
-
-    // Focus
     el.focus();
+    el.click();
 
-    // Clear existing content
-    el.innerHTML = '';
+    // Select all existing text
+    const sel = window.getSelection();
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    sel.removeAllRanges();
+    sel.addRange(range);
 
-    // Insert text in Higgsfield's expected structure: <p><span>text</span></p>
-    const p = document.createElement('p');
-    const span = document.createElement('span');
-    span.textContent = text;
-    p.appendChild(span);
-    el.appendChild(p);
+    // Overwrite the selection directly with insertText (best for React)
+    const ok = document.execCommand('insertText', false, text);
+    
+    // Fallback if insertText fails
+    if (!ok || el.innerText.trim() === '') {
+      el.innerHTML = '';
+      const p = document.createElement('p');
+      const span = document.createElement('span');
+      span.textContent = text;
+      p.appendChild(span);
+      el.appendChild(p);
 
-    // Dispatch events for React state sync
-    el.dispatchEvent(new Event('input', { bubbles: true }));
-    el.dispatchEvent(new Event('change', { bubbles: true }));
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+      try { el.dispatchEvent(new InputEvent('input', { bubbles: true, cancelable: true, inputType: 'insertText', data: text })); } catch {}
+    }
 
-    // Also try InputEvent for modern React
-    try {
-      el.dispatchEvent(new InputEvent('input', {
-        bubbles: true,
-        cancelable: true,
-        inputType: 'insertText',
-        data: text,
-      }));
-    } catch {}
-
-    return true;
+    return { 
+      success: true, 
+      finalText: el.innerText.trim() 
+    };
   }, prompt);
 
-  if (!entered) {
-    throw new Error('Поле ввода промпта не найдено');
+  if (result.error) {
+    throw new Error(`Поле ввода промпта не найдено: ${result.error}`);
   }
 
   await chrome.sleep(500);
-  console.log(`[engine] Prompt entered: "${prompt.substring(0, 50)}..."`);
+
+  // VERIFY prompt in field
+  const check = await page.evaluate((expected) => {
+    let el = document.querySelector('div[id="hf:tour-image-prompt"]');
+    if (!el) el = document.querySelector('div[role="textbox"][contenteditable="true"]');
+    if (!el) return { ok: false };
+    
+    const actual = el.innerText.trim();
+    // Use first 30 chars for verification (robust against trailing spaces)
+    const prefix = expected.substring(0, 30).trim();
+    return { 
+      ok: actual.length > 0 && actual.includes(prefix), 
+      actual: actual.substring(0, 100), 
+      actualLen: actual.length 
+    };
+  }, prompt);
+
+  console.log(`[engine] Verify: ok=${check.ok}, actual="${check.actual}"`);
+  if (!check.ok) {
+    throw new Error(`Промпт НЕ вставлен! В поле осталось: "${check.actual}". Ожидалось: "${prompt.substring(0, 30)}"`);
+  }
+  
+  console.log(`[engine] ✅ Prompt VERIFIED (${check.actualLen} chars)`);
 }
 
 

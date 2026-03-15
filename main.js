@@ -10,6 +10,7 @@ const fs = require('fs');
 const chrome = require('./chrome-manager');
 const engine = require('./higgsfield-engine');
 const { importFile } = require('./file-importer');
+const config = require('./config-manager');
 
 // ── Constants ────────────────────────────────────────────────
 const IS_DEV = !app.isPackaged;
@@ -20,7 +21,10 @@ const WINDOW_CONFIG = {
   minWidth: 1024,
   minHeight: 700,
 };
-const OUTPUT_DIR = path.join(__dirname, 'output');
+// OUTPUT_DIR is now managed by config-manager
+function getOutputDir() {
+  return config.getOutputDir();
+}
 
 // ── Window ───────────────────────────────────────────────────
 let mainWindow = null;
@@ -137,10 +141,7 @@ ipcMain.handle('file:import', async (event, filePath) => {
 ipcMain.handle('generate:start', async (event, { prompts, settings }) => {
   const { model, aspect, quality } = settings;
 
-  // Ensure output dir exists
-  if (!fs.existsSync(OUTPUT_DIR)) {
-    fs.mkdirSync(OUTPUT_DIR, { recursive: true });
-  }
+  const outputDir = config.ensureOutputDir();
 
   // Check Chrome connection
   const status = await chrome.getStatus();
@@ -167,7 +168,7 @@ ipcMain.handle('generate:start', async (event, { prompts, settings }) => {
 
     const prompt = prompts[i];
     const idx = i + 1;
-    const promptDir = path.join(OUTPUT_DIR, String(idx).padStart(3, '0'));
+    const promptDir = path.join(outputDir, String(idx).padStart(3, '0'));
 
     if (!fs.existsSync(promptDir)) {
       fs.mkdirSync(promptDir, { recursive: true });
@@ -338,6 +339,160 @@ ipcMain.handle('generate:stop', () => {
 });
 
 // =============================================================
+//  IPC HANDLERS — Config
+// =============================================================
+
+ipcMain.handle('config:get', (event, key) => {
+  return config.get(key);
+});
+
+ipcMain.handle('config:set', (event, { key, val }) => {
+  config.set(key, val);
+  return { success: true };
+});
+
+ipcMain.handle('config:get-all', () => {
+  return config.get();
+});
+
+ipcMain.handle('config:select-output-dir', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    properties: ['openDirectory', 'createDirectory'],
+    title: 'Выберите папку для сохранения изображений',
+    defaultPath: config.getOutputDir(),
+  });
+  if (result.canceled) return null;
+  const newDir = result.filePaths[0];
+  config.set('outputDir', newDir);
+  return newDir;
+});
+
+ipcMain.handle('chrome:check-installed', () => {
+  const chromePath = chrome.findChromePath();
+  return {
+    installed: !!chromePath,
+    path: chromePath,
+  };
+});
+
+// =============================================================
+//  IPC HANDLERS — Projects
+// =============================================================
+
+function getProjectsFile() {
+  return path.join(config.getOutputDir(), 'projects.json');
+}
+
+function loadProjects() {
+  const file = getProjectsFile();
+  if (!fs.existsSync(file)) return [];
+  try {
+    return JSON.parse(fs.readFileSync(file, 'utf-8'));
+  } catch {
+    return [];
+  }
+}
+
+function saveProjects(projects) {
+  const dir = config.ensureOutputDir();
+  fs.writeFileSync(path.join(dir, 'projects.json'), JSON.stringify(projects, null, 2), 'utf-8');
+}
+
+ipcMain.handle('projects:list', () => {
+  return loadProjects();
+});
+
+ipcMain.handle('projects:create', (event, { name, icon }) => {
+  const projects = loadProjects();
+  const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  const folderName = sanitizeFolderName(name || 'Новый проект', projects);
+  const project = {
+    id,
+    name: name || 'Новый проект',
+    icon: icon || '🎬',
+    folderName,
+    createdAt: new Date().toISOString(),
+    status: 'draft',        // draft | in_progress | completed
+    model: config.get('selectedModel') || 'nano_banana_pro',
+    promptCount: 0,
+    promptFile: null,
+  };
+  projects.unshift(project);
+  saveProjects(projects);
+
+  // Create project folder structure
+  const projectDir = path.join(config.ensureOutputDir(), folderName);
+  if (!fs.existsSync(projectDir)) {
+    fs.mkdirSync(projectDir, { recursive: true });
+  }
+  // Create subfolders
+  const generatedDir = path.join(projectDir, 'generated');
+  const selectedDir = path.join(projectDir, 'selected');
+  if (!fs.existsSync(generatedDir)) fs.mkdirSync(generatedDir, { recursive: true });
+  if (!fs.existsSync(selectedDir)) fs.mkdirSync(selectedDir, { recursive: true });
+
+  return project;
+});
+
+/**
+ * Sanitize project name for use as folder name.
+ * Preserves Cyrillic, Latin, numbers. Strips unsafe chars.
+ * Adds numeric suffix if name already exists.
+ */
+function sanitizeFolderName(name, existingProjects) {
+  // Replace unsafe filesystem chars, keep Cyrillic/Latin/digits/spaces/hyphens
+  let safe = name
+    .replace(/[<>:"/\\|?*]/g, '')   // remove unsafe
+    .replace(/\s+/g, ' ')           // collapse whitespace
+    .trim()
+    .slice(0, 80);                  // limit length
+
+  if (!safe) safe = 'Проект';
+
+  // Check for collision with existing folder names
+  const existingFolders = new Set(existingProjects.map(p => p.folderName).filter(Boolean));
+  if (!existingFolders.has(safe)) return safe;
+
+  // Add suffix
+  for (let i = 2; i < 100; i++) {
+    const candidate = `${safe} (${i})`;
+    if (!existingFolders.has(candidate)) return candidate;
+  }
+  return `${safe}_${Date.now()}`;
+}
+
+ipcMain.handle('projects:delete', (event, { id }) => {
+  let projects = loadProjects();
+  const project = projects.find(p => p.id === id);
+
+  // Delete project folder from disk
+  if (project) {
+    const folder = project.folderName || id;
+    const projectDir = path.join(config.ensureOutputDir(), folder);
+    try {
+      if (fs.existsSync(projectDir)) {
+        fs.rmSync(projectDir, { recursive: true, force: true });
+      }
+    } catch (err) {
+      console.error('[projects] Failed to delete folder:', err);
+    }
+  }
+
+  projects = projects.filter(p => p.id !== id);
+  saveProjects(projects);
+  return { success: true };
+});
+
+ipcMain.handle('projects:update', (event, { id, updates }) => {
+  const projects = loadProjects();
+  const idx = projects.findIndex(p => p.id === id);
+  if (idx === -1) return { success: false, error: 'Project not found' };
+  Object.assign(projects[idx], updates);
+  saveProjects(projects);
+  return { success: true, project: projects[idx] };
+});
+
+// =============================================================
 //  IPC HANDLERS — File System
 // =============================================================
 
@@ -350,20 +505,21 @@ ipcMain.handle('fs:open-folder', async (event, folderPath) => {
 });
 
 ipcMain.handle('fs:read-output', () => {
-  if (!fs.existsSync(OUTPUT_DIR)) return [];
+  const outputDir = getOutputDir();
+  if (!fs.existsSync(outputDir)) return [];
 
-  const folders = fs.readdirSync(OUTPUT_DIR)
-    .filter(f => fs.statSync(path.join(OUTPUT_DIR, f)).isDirectory())
+  const folders = fs.readdirSync(outputDir)
+    .filter(f => fs.statSync(path.join(outputDir, f)).isDirectory())
     .sort();
 
   const results = [];
   for (const folder of folders) {
-    const metaPath = path.join(OUTPUT_DIR, folder, 'meta.json');
+    const metaPath = path.join(outputDir, folder, 'meta.json');
     if (fs.existsSync(metaPath)) {
       try {
         const meta = JSON.parse(fs.readFileSync(metaPath, 'utf-8'));
         meta._folder = folder;
-        meta._path = path.join(OUTPUT_DIR, folder);
+        meta._path = path.join(outputDir, folder);
         results.push(meta);
       } catch {}
     }
@@ -384,7 +540,7 @@ ipcMain.handle('fs:read-image', (event, imagePath) => {
 });
 
 ipcMain.handle('fs:select-image', async (event, { promptFolder, imageFile }) => {
-  const srcDir = path.join(OUTPUT_DIR, promptFolder);
+  const srcDir = path.join(getOutputDir(), promptFolder);
   const selDir = path.join(srcDir, 'selected');
 
   if (!fs.existsSync(selDir)) fs.mkdirSync(selDir, { recursive: true });
@@ -414,6 +570,7 @@ ipcMain.handle('app:info', () => ({
   version: app.getVersion(),
   platform: process.platform,
   isPackaged: app.isPackaged,
-  outputDir: OUTPUT_DIR,
+  outputDir: getOutputDir(),
   chromePath: chrome.findChromePath(),
+  appData: config.APP_DATA,
 }));

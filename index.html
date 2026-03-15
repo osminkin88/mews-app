@@ -9,6 +9,220 @@
 </head>
 <body>
 
+<!-- ════════════════════════════════════════ -->
+<!-- FIRST LAUNCH WIZARD (overlay) -->
+<!-- ════════════════════════════════════════ -->
+<div class="wizard-overlay" id="wizard-overlay" style="display: none;">
+  <div class="wizard-container">
+
+    <!-- Step dots -->
+    <div class="wizard-dots">
+      <div class="wizard-dot active" data-wizard-step="0"></div>
+      <div class="wizard-dot" data-wizard-step="1"></div>
+      <div class="wizard-dot" data-wizard-step="2"></div>
+      <div class="wizard-dot" data-wizard-step="3"></div>
+    </div>
+
+    <!-- ── Step 0: Welcome ── -->
+    <div class="wizard-step active" id="wizard-step-0">
+      <div class="wizard-icon">🐱</div>
+      <h1 class="wizard-title">Добро пожаловать в<br>Higgsfield Studio</h1>
+      <p class="wizard-text">
+        Генерируйте изображения через Higgsfield AI —<br>
+        автоматически, пакетно и в полном качестве.
+      </p>
+      <div class="wizard-features">
+        <div class="wizard-feature">
+          <span class="wizard-feature-icon">🐾</span>
+          <span>Загрузите CSV/XLSX с промптами</span>
+        </div>
+        <div class="wizard-feature">
+          <span class="wizard-feature-icon">🐾</span>
+          <span>Автоматическая генерация через Chrome</span>
+        </div>
+        <div class="wizard-feature">
+          <span class="wizard-feature-icon">🐾</span>
+          <span>Отбор лучших изображений</span>
+        </div>
+      </div>
+      <button class="btn btn-primary btn-large" onclick="wizardNext()">
+        Мяу, начнём! →
+      </button>
+    </div>
+
+    <!-- ── Step 1: Folder Selection ── -->
+    <div class="wizard-step" id="wizard-step-1">
+      <div class="wizard-icon">📁</div>
+      <h1 class="wizard-title">Куда сохранять изображения?</h1>
+      <p class="wizard-text">
+        Выберите уютное местечко, куда складывать все сгенерированные изображения.
+      </p>
+
+      <div class="wizard-folder-card card" id="wizard-folder-card">
+        <div class="wizard-folder-row">
+          <span class="wizard-folder-icon">📂</span>
+          <div class="wizard-folder-info">
+            <div class="wizard-folder-label">Папка для сохранения</div>
+            <div class="wizard-folder-path" id="wizard-folder-path">~/Documents/Higgsfield Studio</div>
+          </div>
+          <button class="btn btn-secondary" onclick="wizardSelectFolder()">Выбрать другую</button>
+        </div>
+      </div>
+
+      <div class="wizard-buttons">
+        <button class="btn btn-ghost" onclick="wizardBack()">← Назад</button>
+        <button class="btn btn-primary btn-large" onclick="wizardNext()">Далее →</button>
+      </div>
+    </div>
+
+    <!-- ── Step 2: Chrome Check ── -->
+    <div class="wizard-step" id="wizard-step-2">
+      <div class="wizard-icon">🔗</div>
+      <h1 class="wizard-title">Подключение Chrome</h1>
+      <p class="wizard-text">
+        Для генерации нужен Google Chrome.<br>
+        Мы откроем его и вы войдёте в Higgsfield через Google.
+      </p>
+
+      <div class="wizard-chrome-status card" id="wizard-chrome-card">
+        <!-- Chrome status will be filled dynamically -->
+        <div class="wizard-chrome-row">
+          <span class="wizard-chrome-dot" id="wizard-chrome-dot"></span>
+          <div class="wizard-chrome-info">
+            <div class="wizard-chrome-label" id="wizard-chrome-label">Проверяю Chrome...</div>
+            <div class="wizard-chrome-hint" id="wizard-chrome-hint"></div>
+          </div>
+          <button class="btn btn-secondary" id="wizard-chrome-btn" style="display:none;" onclick="wizardConnectChrome()">
+            Подключить
+          </button>
+        </div>
+      </div>
+
+      <div class="wizard-instructions" id="wizard-instructions" style="display:none;">
+        <div class="wizard-instruction-step">
+          <span class="wizard-instruction-num">1</span>
+          <span>Откроется Chrome с Higgsfield.ai</span>
+        </div>
+        <div class="wizard-instruction-step">
+          <span class="wizard-instruction-num">2</span>
+          <span>Войдите через Google аккаунт</span>
+        </div>
+        <div class="wizard-instruction-step">
+          <span class="wizard-instruction-num">3</span>
+          <span>Вернитесь в это окно — подключение подтвердится автоматически</span>
+        </div>
+      </div>
+
+      <div class="wizard-buttons">
+        <button class="btn btn-ghost" onclick="wizardBack()">← Назад</button>
+        <button class="btn btn-ghost" id="wizard-skip-btn" onclick="wizardNext()">Пропустить</button>
+        <button class="btn btn-primary btn-large" id="wizard-next-chrome" onclick="wizardNext()" style="display:none;">Далее →</button>
+      </div>
+    </div>
+
+    <!-- ── Step 3: Done ── -->
+    <div class="wizard-step" id="wizard-step-3">
+      <div class="wizard-icon wizard-icon-success">😺</div>
+      <h1 class="wizard-title">Всё мурчит!</h1>
+      <p class="wizard-text">
+        Higgsfield Studio настроен и готов к работе.<br>
+        Пора создать свой первый проект 🐾
+      </p>
+
+      <div class="wizard-summary card">
+        <div class="wizard-summary-row">
+          <span class="wizard-summary-label">Папка</span>
+          <span class="wizard-summary-value" id="wizard-summary-folder">~/Documents/Higgsfield Studio</span>
+        </div>
+        <div class="wizard-summary-row">
+          <span class="wizard-summary-label">Chrome</span>
+          <span class="wizard-summary-value" id="wizard-summary-chrome">—</span>
+        </div>
+      </div>
+
+      <button class="btn btn-primary btn-large" onclick="wizardFinish()">
+        🐾 Создать первый проект
+      </button>
+    </div>
+
+</div>
+</div>
+
+<!-- ════════════════════════════════════════ -->
+<!-- NEW PROJECT MODAL -->
+<!-- ════════════════════════════════════════ -->
+<div class="modal-overlay" id="modal-new-project" style="display: none;">
+  <div class="modal-card">
+    <div class="modal-header">
+      <h2 class="modal-title">🐾 Новый проект</h2>
+      <button class="modal-close" onclick="closeNewProjectModal()">✕</button>
+    </div>
+
+    <div class="modal-body">
+      <!-- Name input -->
+      <div class="modal-field">
+        <label class="modal-label" for="new-project-name">Название проекта</label>
+        <input class="modal-input" id="new-project-name" type="text"
+               placeholder="Например: Приключения котика"
+               autofocus
+               oninput="updateProjectPreview()">
+      </div>
+
+      <!-- Icon picker -->
+      <div class="modal-field">
+        <label class="modal-label">Иконка проекта</label>
+        <div class="icon-picker" id="icon-picker">
+          <button class="icon-pick" data-icon="🎬" onclick="selectProjectIcon(this)">🎬</button>
+          <button class="icon-pick" data-icon="📺" onclick="selectProjectIcon(this)">📺</button>
+          <button class="icon-pick" data-icon="🖼️" onclick="selectProjectIcon(this)">🖼️</button>
+          <button class="icon-pick" data-icon="🎞️" onclick="selectProjectIcon(this)">🎞️</button>
+          <button class="icon-pick" data-icon="🎨" onclick="selectProjectIcon(this)">🎨</button>
+          <button class="icon-pick" data-icon="🎵" onclick="selectProjectIcon(this)">🎵</button>
+          <button class="icon-pick" data-icon="📚" onclick="selectProjectIcon(this)">📚</button>
+          <button class="icon-pick" data-icon="🧪" onclick="selectProjectIcon(this)">🧪</button>
+          <button class="icon-pick" data-icon="🐱" onclick="selectProjectIcon(this)">🐱</button>
+          <button class="icon-pick" data-icon="😺" onclick="selectProjectIcon(this)">😺</button>
+        </div>
+      </div>
+
+      <!-- Folder structure preview -->
+      <div class="modal-field">
+        <label class="modal-label">Структура папки проекта</label>
+        <div class="modal-folder-tree card">
+          <div class="folder-tree-root" id="project-folder-root">
+            📂 <span id="project-folder-name">Новый проект</span>/
+          </div>
+          <div class="folder-tree-item">├── 📄 prompts.csv <span class="folder-tree-hint">— файл с промптами</span></div>
+          <div class="folder-tree-item">├── 🖼 generated/ <span class="folder-tree-hint">— все сгенерированные</span></div>
+          <div class="folder-tree-item">└── ⭐ selected/ <span class="folder-tree-hint">— отобранные лучшие</span></div>
+        </div>
+      </div>
+
+      <!-- Output dir info -->
+      <div class="modal-hint">
+        <span>📍</span>
+        <span>Папка будет создана в: <strong id="project-output-dir">~/Documents/Higgsfield Studio/</strong></span>
+      </div>
+    </div>
+
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeNewProjectModal()">Отмена</button>
+      <button class="btn btn-primary" id="btn-create-project" onclick="confirmCreateProject()">
+        🐾 Создать проект
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- Shared project context menu (body-level to escape overflow clipping) -->
+<div class="project-dropdown" id="project-context-menu">
+  <button class="project-dropdown-item" id="ctx-rename" onclick="startRenameProject(activeMenuProjectId)">✏️ Переименовать</button>
+  <button class="project-dropdown-item" id="ctx-duplicate" onclick="duplicateProject(activeMenuProjectId)">📋 Дублировать</button>
+  <button class="project-dropdown-item" id="ctx-folder" onclick="openProjectFolder(activeMenuProjectId)">📂 Открыть папку</button>
+  <div class="project-dropdown-sep"></div>
+  <button class="project-dropdown-item danger" id="ctx-delete" onclick="deleteProject(activeMenuProjectId)">🗑 Удалить</button>
+</div>
+
 <div class="app">
   
   <!-- ════════════════════════════════════════ -->
@@ -117,39 +331,12 @@
           <div class="section-header">
             <span class="section-title">Недавние проекты</span>
             <button class="btn btn-primary" onclick="createProject()">
-              ✦ Создать проект
+              🐾 Новый проект
             </button>
           </div>
 
-          <div class="card project-card" onclick="openProject(0)">
-            <div class="project-icon">🎨</div>
-            <div class="project-info">
-              <div class="project-name">Весенняя коллекция</div>
-              <div class="project-meta">12 промптов · Создан 14 марта 2026</div>
-            </div>
-            <span class="badge badge-success">Завершён</span>
-            <span class="project-arrow">›</span>
-          </div>
-
-          <div class="card project-card mt-sm" onclick="openProject(1)">
-            <div class="project-icon">📸</div>
-            <div class="project-info">
-              <div class="project-name">Иконки для приложения</div>
-              <div class="project-meta">8 промптов · Создан 13 марта 2026</div>
-            </div>
-            <span class="badge badge-warning">В процессе</span>
-            <span class="project-arrow">›</span>
-          </div>
-
-          <div class="card project-card mt-sm" onclick="openProject(2)">
-            <div class="project-icon">🌿</div>
-            <div class="project-info">
-              <div class="project-name">Фоны для сторис</div>
-              <div class="project-meta">20 промптов · Создан 10 марта 2026</div>
-            </div>
-            <span class="badge badge-neutral">Черновик</span>
-            <span class="project-arrow">›</span>
-          </div>
+          <!-- Dynamic project cards rendered by JS -->
+          <div id="projects-container"></div>
         </div>
       </div>
     </section>

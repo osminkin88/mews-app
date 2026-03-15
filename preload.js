@@ -18,12 +18,21 @@ contextBridge.exposeInMainWorld('electronAPI', {
     saveSession: () => ipcRenderer.invoke('chrome:save-session'),
     status: () => ipcRenderer.invoke('chrome:status'),
     checkAuth: () => ipcRenderer.invoke('chrome:check-auth'),
+    checkInstalled: () => ipcRenderer.invoke('chrome:check-installed'),
   },
 
   // ── File Import ──
   file: {
     select: () => ipcRenderer.invoke('file:select'),
     import: (filePath) => ipcRenderer.invoke('file:import', filePath),
+  },
+
+  // ── Projects ──
+  projects: {
+    list: () => ipcRenderer.invoke('projects:list'),
+    create: (name, icon) => ipcRenderer.invoke('projects:create', { name, icon }),
+    delete: (id) => ipcRenderer.invoke('projects:delete', { id }),
+    update: (id, updates) => ipcRenderer.invoke('projects:update', { id, updates }),
   },
 
   // ── Generation ──
@@ -46,6 +55,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
     readImage: (imagePath) => ipcRenderer.invoke('fs:read-image', imagePath),
     selectImage: (promptFolder, imageFile) =>
       ipcRenderer.invoke('fs:select-image', { promptFolder, imageFile }),
+  },
+
+  // ── Config ──
+  config: {
+    get: (key) => ipcRenderer.invoke('config:get', key),
+    set: (key, val) => ipcRenderer.invoke('config:set', { key, val }),
+    getAll: () => ipcRenderer.invoke('config:get-all'),
+    selectOutputDir: () => ipcRenderer.invoke('config:select-output-dir'),
   },
 
   // ── App Info ──

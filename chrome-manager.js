@@ -17,10 +17,26 @@ const CHROME_PATHS = [
   '/Applications/Google Chrome Canary.app/Contents/MacOS/Google Chrome Canary',
   '/Applications/Chromium.app/Contents/MacOS/Chromium',
 ];
-const PROFILE_DIR = path.join(__dirname, '.chrome_profile');
-const SESSION_FILE = path.join(__dirname, 'session.json');
 const HIGGSFIELD_URL = 'https://higgsfield.ai';
 const SIGNIN_URL = 'https://higgsfield.ai/sign-in';
+
+// ── Config-managed paths (lazy, set after app.whenReady) ──────
+let _configManager = null;
+
+function getConfig() {
+  if (!_configManager) {
+    _configManager = require('./config-manager');
+  }
+  return _configManager;
+}
+
+function getProfileDir() {
+  return getConfig().ensureChromeProfileDir();
+}
+
+function getSessionFile() {
+  return getConfig().getSessionPath();
+}
 
 // ── State ─────────────────────────────────────────────────────
 let chromeProcess = null;
@@ -76,13 +92,11 @@ async function launchChrome() {
   }
 
   // Ensure profile directory exists
-  if (!fs.existsSync(PROFILE_DIR)) {
-    fs.mkdirSync(PROFILE_DIR, { recursive: true });
-  }
+  const profileDir = getProfileDir();
 
   const args = [
     `--remote-debugging-port=${CDP_PORT}`,
-    `--user-data-dir=${PROFILE_DIR}`,
+    `--user-data-dir=${profileDir}`,
     '--no-first-run',
     '--no-default-browser-check',
     SIGNIN_URL,
@@ -182,7 +196,13 @@ async function saveSession() {
       url: activePage.url(),
     };
 
-    fs.writeFileSync(SESSION_FILE, JSON.stringify(session, null, 2), 'utf-8');
+    const sessionFile = getSessionFile();
+    // Ensure parent dir exists
+    const sessionDir = path.dirname(sessionFile);
+    if (!fs.existsSync(sessionDir)) {
+      fs.mkdirSync(sessionDir, { recursive: true });
+    }
+    fs.writeFileSync(sessionFile, JSON.stringify(session, null, 2), 'utf-8');
 
     console.log(`[chrome-manager] Session saved: ${hfCookies.length} cookies`);
     return {
@@ -197,11 +217,12 @@ async function saveSession() {
 
 // ── Load Session ──────────────────────────────────────────────
 function loadSession() {
-  if (!fs.existsSync(SESSION_FILE)) {
+  const sessionFile = getSessionFile();
+  if (!fs.existsSync(sessionFile)) {
     return null;
   }
   try {
-    return JSON.parse(fs.readFileSync(SESSION_FILE, 'utf-8'));
+    return JSON.parse(fs.readFileSync(sessionFile, 'utf-8'));
   } catch {
     return null;
   }
@@ -342,6 +363,6 @@ module.exports = {
   isCDPRunning,
   sleep,
   CDP_PORT,
-  SESSION_FILE,
+  getSessionFile,
   HIGGSFIELD_URL,
 };

@@ -186,21 +186,438 @@ function updateNavStatuses() {
 }
 
 // ── Projects ──
-function createProject() {
-  state.hasProjects = true;
-  showProjectsList();
-  navigateTo('connection');
+let projectsList = [];
+let activeProjectId = null;
+
+async function loadProjectsList() {
+  const api = window.electronAPI;
+  if (!api) return;
+  try {
+    projectsList = await api.projects.list();
+  } catch (err) {
+    console.error('[app] Failed to load projects:', err);
+    projectsList = [];
+  }
+  renderProjects();
 }
 
-function openProject(index) {
-  navigateTo('connection');
-}
-
-function showProjectsList() {
+function renderProjects() {
   const emptyEl = document.getElementById('projects-empty');
   const listEl = document.getElementById('projects-list');
+  const container = document.getElementById('projects-container');
+  if (!container) return;
+
+  if (projectsList.length === 0) {
+    if (emptyEl) emptyEl.style.display = '';
+    if (listEl) listEl.style.display = 'none';
+    return;
+  }
+
   if (emptyEl) emptyEl.style.display = 'none';
   if (listEl) listEl.style.display = 'block';
+
+  const statusConfig = {
+    draft:       { label: 'Черновик',    badge: 'badge-neutral', icon: '📝' },
+    in_progress: { label: 'В процессе',  badge: 'badge-warning', icon: '⚡' },
+    completed:   { label: 'Завершён',    badge: 'badge-success', icon: '✅' },
+  };
+
+  container.innerHTML = projectsList.map((p, i) => {
+    const cfg = statusConfig[p.status] || statusConfig.draft;
+    const icon = p.icon || pickProjectIcon(p.name);
+    const date = new Date(p.createdAt).toLocaleDateString('ru-RU', {
+      day: 'numeric', month: 'long', year: 'numeric'
+    });
+    const prompts = p.promptCount || 0;
+    const promptText = prompts === 0 ? 'нет промптов' : `${prompts} промпт${pluralRu(prompts)}`;
+    return `
+      <div class="card project-card ${i > 0 ? 'mt-sm' : ''}" data-project-id="${p.id}">
+        <div class="project-icon" onclick="openProject('${p.id}')">${icon}</div>
+        <div class="project-info" onclick="openProject('${p.id}')">
+          <div class="project-name" id="project-name-${p.id}">${escapeHtml(p.name)}</div>
+          <div class="project-meta">${promptText} · ${date}</div>
+        </div>
+        <span class="badge ${cfg.badge}">${cfg.label}</span>
+        <button class="project-menu-btn" onclick="event.stopPropagation(); toggleProjectMenu('${p.id}', this)">⋯</button>
+      </div>
+    `;
+  }).join('');
+}
+
+// ── Project Menu ──
+
+// ── Smart Icon Picker (YouTube Cartoon Production) ──
+//
+// Priority: Characters → Genre/Story → Location → Season → Meta
+// Keywords use longer stems to avoid false positives
+
+const ICON_RULES = [
+  // ─── Персонажи и животные (самый частый кейс) ───
+  { icon: '🐱', match: ['кот', 'кош', 'кити', 'kitty', 'cat', 'мяу', 'мурк', 'барс'] },
+  { icon: '🐶', match: ['собак', 'пёс', 'песик', 'щенок', 'dog', 'puppy', 'хаск', 'корги'] },
+  { icon: '🐰', match: ['заяц', 'зайч', 'зайк', 'кроли', 'bunny', 'rabbit'] },
+  { icon: '🐻', match: ['медвед', 'мишк', 'мишут', 'bear', 'панд', 'panda'] },
+  { icon: '🦊', match: ['лис', 'лисич', 'лисён', 'fox'] },
+  { icon: '🐺', match: ['волк', 'волч', 'wolf'] },
+  { icon: '🦁', match: ['лев', 'львён', 'lion'] },
+  { icon: '🐸', match: ['лягуш', 'жаб', 'frog'] },
+  { icon: '🐧', match: ['пингви', 'penguin'] },
+  { icon: '🦉', match: ['сов', 'совун', 'owl', 'филин'] },
+  { icon: '🐉', match: ['дракон', 'dragon', 'дракош'] },
+  { icon: '🦄', match: ['единорог', 'unicorn', 'пони', 'pony'] },
+  { icon: '🦕', match: ['динозавр', 'dino', 'рекс', 'тирано'] },
+  { icon: '🤖', match: ['робот', 'robot', 'кибер', 'андроид', 'мех'] },
+  { icon: '🧙', match: ['маг', 'волшеб', 'колдун', 'wizard', 'ведьм'] },
+  { icon: '🦸', match: ['супергерой', 'герой', 'hero', 'super'] },
+  { icon: '👻', match: ['привидени', 'призрак', 'ghost', 'привиден'] },
+  { icon: '🧚', match: ['фе', 'fairy', 'эльф', 'elf'] },
+  { icon: '🎅', match: ['дед мороз', 'санта', 'santa', 'клаус'] },
+  { icon: '👸', match: ['принцесс', 'princess', 'корол', 'queen', 'king'] },
+
+  // ─── Жанры и типы историй ───
+  { icon: '⚔️', match: ['битв', 'сражен', 'battle', 'fight', 'воин', 'рыцар', 'knight'] },
+  { icon: '🗺️', match: ['приключ', 'adventure', 'путешеств', 'квест', 'quest', 'поход'] },
+  { icon: '🏎️', match: ['гонк', 'гонок', 'race', 'racing', 'скорост'] },
+  { icon: '😂', match: ['смешн', 'funny', 'комеди', 'comedy', 'юмор', 'шутк'] },
+  { icon: '😱', match: ['страш', 'scary', 'horror', 'ужас', 'хэллоуин', 'жуть'] },
+  { icon: '💕', match: ['любов', 'love', 'романт', 'сердц', 'дружб', 'friend'] },
+  { icon: '🔍', match: ['детектив', 'detective', 'тайн', 'mystery', 'загадк', 'секрет'] },
+  { icon: '🏴‍☠️', match: ['пират', 'pirate', 'сокровищ', 'treasure', 'корабл'] },
+
+  // ─── Локации и сеттинг ───
+  { icon: '🚀', match: ['космос', 'space', 'планет', 'galaxy', 'галакт', 'звёзд', 'ракет'] },
+  { icon: '🏰', match: ['замок', 'castle', 'крепост', 'дворец', 'palace'] },
+  { icon: '🌊', match: ['море', 'океан', 'ocean', 'подвод', 'underwater', 'плав'] },
+  { icon: '🌲', match: ['лес', 'forest', 'чащ', 'дерев', 'джунгл', 'jungle'] },
+  { icon: '🏔️', match: ['гор', 'mountain', 'вершин', 'скал'] },
+  { icon: '🏙️', match: ['город', 'city', 'мегаполис', 'улиц'] },
+  { icon: '🏝️', match: ['остров', 'island', 'пляж', 'beach'] },
+  { icon: '🌋', match: ['вулкан', 'volcano', 'лав'] },
+
+  // ─── Сезоны и праздники ───
+  { icon: '🌸', match: ['весен', 'весна', 'spring'] },
+  { icon: '☀️', match: ['лето', 'летн', 'summer', 'каникул'] },
+  { icon: '🍂', match: ['осен', 'осень', 'autumn', 'fall'] },
+  { icon: '❄️', match: ['зима', 'зимн', 'winter', 'снег', 'snow', 'новогод', 'рождеств'] },
+  { icon: '🎃', match: ['хеллоу', 'halloween'] },
+  { icon: '🎄', match: ['ёлк', 'ёлоч', 'christmas'] },
+
+  // ─── Мета (типы контента) ───
+  { icon: '🎬', match: ['мульт', 'cartoon', 'аним', 'animation', 'серия', 'episode'] },
+  { icon: '📺', match: ['ютуб', 'youtube', 'канал', 'channel'] },
+  { icon: '🖼️', match: ['превью', 'preview', 'thumbnail', 'обложк', 'постер'] },
+  { icon: '🎞️', match: ['сцен', 'scene', 'кадр', 'frame', 'раскадр'] },
+  { icon: '🎨', match: ['фон', 'background', 'арт', 'art', 'концепт'] },
+  { icon: '🎵', match: ['музык', 'music', 'звук', 'sound', 'клип'] },
+  { icon: '📚', match: ['стори', 'story', 'истори', 'сюжет', 'сценар'] },
+  { icon: '🧪', match: ['тест', 'test', 'пробн', 'demo', 'эксперимент'] },
+
+  // ─── Еда (для кулинарных мультиков) ───
+  { icon: '🍕', match: ['еда', 'food', 'кулинар', 'рецепт', 'повар', 'cook'] },
+  { icon: '🍰', match: ['торт', 'cake', 'сладост', 'десерт', 'пирог'] },
+
+  // ─── Спорт и игры ───
+  { icon: '⚽', match: ['спорт', 'sport', 'футбол', 'football'] },
+  { icon: '🎮', match: ['игр', 'game', 'гейм', 'играт'] },
+];
+
+// Яркие, «вкусные» fallback-иконки для проектов без совпадений
+const FALLBACK_ICONS = [
+  '🎬', '🌟', '✨', '🎪', '🪄', '🌈',
+  '🎯', '💫', '🔮', '🦋', '🐾', '🎭',
+];
+
+function pickProjectIcon(name) {
+  if (!name) return '🎬';
+  const lower = name.toLowerCase();
+
+  for (const rule of ICON_RULES) {
+    for (const kw of rule.match) {
+      if (lower.includes(kw)) return rule.icon;
+    }
+  }
+
+  // Deterministic but visually varied fallback
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) hash = (hash * 31 + name.charCodeAt(i)) | 0;
+  return FALLBACK_ICONS[Math.abs(hash) % FALLBACK_ICONS.length];
+}
+
+let activeMenuId = null;
+let activeMenuProjectId = null;
+
+function toggleProjectMenu(id, btnEl) {
+  const wasOpen = activeMenuId === id;
+  closeAllMenus();
+  if (wasOpen) return;
+
+  const menu = document.getElementById('project-context-menu');
+  if (!menu || !btnEl) return;
+
+  // Position dropdown near the button
+  const rect = btnEl.getBoundingClientRect();
+  const menuHeight = 180; // approximate
+  const spaceBelow = window.innerHeight - rect.bottom;
+
+  menu.style.left = `${rect.right - 200}px`; // align right edge
+  if (spaceBelow < menuHeight) {
+    // Open upward
+    menu.style.top = `${rect.top - menuHeight}px`;
+  } else {
+    // Open downward
+    menu.style.top = `${rect.bottom + 4}px`;
+  }
+
+  menu.style.display = 'block';
+  activeMenuId = id;
+  activeMenuProjectId = id;
+
+  const card = document.querySelector(`[data-project-id="${id}"]`);
+  if (card) card.classList.add('menu-open');
+}
+
+function closeAllMenus() {
+  const menu = document.getElementById('project-context-menu');
+  if (menu) menu.style.display = 'none';
+  document.querySelectorAll('.project-card.menu-open').forEach(c => c.classList.remove('menu-open'));
+  activeMenuId = null;
+  // Reset delete confirmation
+  const deleteBtn = document.getElementById('ctx-delete');
+  if (deleteBtn) deleteBtn.textContent = '🗑 Удалить';
+}
+
+// Close menus on outside click
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('.project-menu-btn') && !e.target.closest('.project-dropdown')) {
+    closeAllMenus();
+  }
+});
+
+// ── Rename ──
+function startRenameProject(id) {
+  closeAllMenus();
+  const nameEl = document.getElementById(`project-name-${id}`);
+  if (!nameEl) return;
+
+  const project = projectsList.find(p => p.id === id);
+  if (!project) return;
+
+  const currentName = project.name;
+  nameEl.innerHTML = `<input class="project-name-input" id="rename-input-${id}" 
+    value="${escapeHtml(currentName)}" 
+    onblur="finishRename('${id}')"
+    onkeydown="if(event.key==='Enter'){finishRename('${id}')}if(event.key==='Escape'){cancelRename('${id}','${escapeHtml(currentName)}')}">`;
+
+  const input = document.getElementById(`rename-input-${id}`);
+  if (input) { input.focus(); input.select(); }
+}
+
+async function finishRename(id) {
+  const input = document.getElementById(`rename-input-${id}`);
+  if (!input) return;
+
+  const newName = input.value.trim();
+  if (!newName) {
+    cancelRename(id);
+    return;
+  }
+
+  const api = window.electronAPI;
+  if (api) {
+    try {
+      await api.projects.update(id, { name: newName });
+    } catch (err) {
+      console.error('[app] Rename error:', err);
+    }
+  }
+  await loadProjectsList();
+}
+
+function cancelRename(id, oldName) {
+  const nameEl = document.getElementById(`project-name-${id}`);
+  if (nameEl && oldName) nameEl.textContent = oldName;
+  else loadProjectsList(); // re-render
+}
+
+// ── Delete ──
+let deleteConfirmId = null;
+
+async function deleteProject(id) {
+  const project = projectsList.find(p => p.id === id);
+  if (!project) return;
+
+  const deleteBtn = document.getElementById('ctx-delete');
+
+  // Two-click confirm
+  if (deleteConfirmId !== id) {
+    deleteConfirmId = id;
+    if (deleteBtn) {
+      deleteBtn.textContent = '⚠️ Удалить проект и все файлы';
+      deleteBtn.classList.add('confirm');
+    }
+    setTimeout(() => {
+      if (deleteConfirmId === id) {
+        deleteConfirmId = null;
+        if (deleteBtn) {
+          deleteBtn.textContent = '🗑 Удалить';
+          deleteBtn.classList.remove('confirm');
+        }
+      }
+    }, 3000);
+    return;
+  }
+
+  // Confirmed delete
+  closeAllMenus();
+  deleteConfirmId = null;
+  const api = window.electronAPI;
+  if (api) {
+    try {
+      await api.projects.delete(id);
+    } catch (err) {
+      console.error('[app] Delete error:', err);
+    }
+  }
+  await loadProjectsList();
+}
+
+// ── Duplicate ──
+async function duplicateProject(id) {
+  closeAllMenus();
+  const project = projectsList.find(p => p.id === id);
+  if (!project) return;
+
+  const api = window.electronAPI;
+  if (api) {
+    try {
+      await api.projects.create(`${project.name} (копия)`);
+      await loadProjectsList();
+    } catch (err) {
+      console.error('[app] Duplicate error:', err);
+    }
+  }
+}
+
+// ── Open Folder ──
+async function openProjectFolder(id) {
+  closeAllMenus();
+  const api = window.electronAPI;
+  if (!api) return;
+  try {
+    const project = projectsList.find(p => p.id === id);
+    const folder = project?.folderName || id;
+    const dir = await api.config.get('outputDir');
+    await api.fs.openFolder(`${dir}/${folder}`);
+  } catch (err) {
+    console.error('[app] Open folder error:', err);
+  }
+}
+
+function pluralRu(n) {
+  const mod10 = n % 10;
+  const mod100 = n % 100;
+  if (mod10 === 1 && mod100 !== 11) return '';
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return 'а';
+  return 'ов';
+}
+
+function escapeHtml(str) {
+  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+let selectedIcon = '🎬';
+
+function selectProjectIcon(btn) {
+  document.querySelectorAll('.icon-pick.selected').forEach(b => b.classList.remove('selected'));
+  btn.classList.add('selected');
+  selectedIcon = btn.dataset.icon;
+}
+
+async function createProject() {
+  // Open the new project modal
+  const modal = document.getElementById('modal-new-project');
+  if (!modal) return;
+  modal.style.display = 'flex';
+
+  // Reset input
+  const input = document.getElementById('new-project-name');
+  if (input) {
+    input.value = '';
+    updateProjectPreview();
+    setTimeout(() => input.focus(), 100);
+  }
+
+  // Reset icon picker — select first icon
+  selectedIcon = '🎬';
+  document.querySelectorAll('.icon-pick.selected').forEach(b => b.classList.remove('selected'));
+  const firstIcon = document.querySelector('.icon-pick[data-icon="🎬"]');
+  if (firstIcon) firstIcon.classList.add('selected');
+
+  // Show output dir path
+  const api = window.electronAPI;
+  if (api) {
+    try {
+      const dir = await api.config.get('outputDir');
+      const dirEl = document.getElementById('project-output-dir');
+      if (dirEl) dirEl.textContent = shortenPath(dir);
+    } catch {}
+  }
+}
+
+function closeNewProjectModal() {
+  const modal = document.getElementById('modal-new-project');
+  if (modal) modal.style.display = 'none';
+}
+
+function updateProjectPreview() {
+  const input = document.getElementById('new-project-name');
+  const nameEl = document.getElementById('project-folder-name');
+  const val = (input ? input.value : '').trim() || 'Новый проект';
+  if (nameEl) nameEl.textContent = val;
+}
+
+async function confirmCreateProject() {
+  const input = document.getElementById('new-project-name');
+  const name = (input ? input.value : '').trim() || 'Новый проект';
+
+  const api = window.electronAPI;
+  if (api) {
+    try {
+      const project = await api.projects.create(name, selectedIcon);
+      activeProjectId = project.id;
+      console.log(`[app] Created project: ${project.name} (${project.id}) icon: ${selectedIcon}`);
+      await loadProjectsList();
+    } catch (err) {
+      console.error('[app] Create project error:', err);
+    }
+  }
+
+  closeNewProjectModal();
+  state.hasProjects = true;
+  // Stay on projects screen so user can see the new project
+}
+
+// Handle Enter in project name input
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    const modal = document.getElementById('modal-new-project');
+    if (modal && modal.style.display !== 'none') {
+      e.preventDefault();
+      confirmCreateProject();
+    }
+  }
+  if (e.key === 'Escape') {
+    closeNewProjectModal();
+  }
+});
+
+function openProject(id) {
+  activeProjectId = id;
+  const project = projectsList.find(p => p.id === id);
+  if (project) {
+    console.log(`[app] Opening project: ${project.name} (${id})`);
+  }
+  navigateTo('connection');
 }
 
 // ── Connection ──
@@ -838,8 +1255,229 @@ function lightenColor(hex, percent) {
   return `rgb(${r}, ${g}, ${b})`;
 }
 
+// ══════════════════════════════════════════════════════════════
+// FIRST LAUNCH WIZARD
+// ══════════════════════════════════════════════════════════════
+
+let wizardStep = 0;
+let wizardChromeConnected = false;
+let wizardOutputDir = '';
+
+function wizardGoToStep(step) {
+  wizardStep = step;
+  // Update dots
+  document.querySelectorAll('.wizard-dot').forEach((dot, i) => {
+    dot.classList.remove('active', 'done');
+    if (i < step) dot.classList.add('done');
+    if (i === step) dot.classList.add('active');
+  });
+  // Update steps
+  document.querySelectorAll('.wizard-step').forEach((s, i) => {
+    s.classList.toggle('active', i === step);
+  });
+  // Step-specific init
+  if (step === 1) wizardInitFolder();
+  if (step === 2) wizardCheckChrome();
+  if (step === 3) wizardInitSummary();
+}
+
+function wizardNext() { wizardGoToStep(wizardStep + 1); }
+function wizardBack() { wizardGoToStep(wizardStep - 1); }
+
+async function wizardInitFolder() {
+  const api = window.electronAPI;
+  if (api) {
+    try {
+      const dir = await api.config.get('outputDir');
+      wizardOutputDir = dir || '~/Documents/Higgsfield Studio';
+    } catch {
+      wizardOutputDir = '~/Documents/Higgsfield Studio';
+    }
+  } else {
+    wizardOutputDir = '~/Documents/Higgsfield Studio';
+  }
+  const pathEl = document.getElementById('wizard-folder-path');
+  if (pathEl) pathEl.textContent = shortenPath(wizardOutputDir);
+}
+
+async function wizardSelectFolder() {
+  const api = window.electronAPI;
+  if (!api) return;
+  try {
+    const newDir = await api.config.selectOutputDir();
+    if (newDir) {
+      wizardOutputDir = newDir;
+      const pathEl = document.getElementById('wizard-folder-path');
+      if (pathEl) pathEl.textContent = shortenPath(newDir);
+    }
+  } catch (err) {
+    console.error('[wizard] Folder selection error:', err);
+  }
+}
+
+function shortenPath(p) {
+  if (!p) return '—';
+  const home = p.replace(/^\/Users\/[^/]+/, '~');
+  return home;
+}
+
+async function wizardCheckChrome() {
+  const api = window.electronAPI;
+  const dot = document.getElementById('wizard-chrome-dot');
+  const label = document.getElementById('wizard-chrome-label');
+  const hint = document.getElementById('wizard-chrome-hint');
+  const btn = document.getElementById('wizard-chrome-btn');
+  const instructions = document.getElementById('wizard-instructions');
+  const skipBtn = document.getElementById('wizard-skip-btn');
+  const nextBtn = document.getElementById('wizard-next-chrome');
+
+  if (!api) {
+    dot.className = 'wizard-chrome-dot not-found';
+    label.textContent = 'Electron не доступен';
+    hint.textContent = 'Wizard работает только в приложении';
+    return;
+  }
+
+  // Check if Chrome is installed
+  dot.className = 'wizard-chrome-dot checking';
+  label.textContent = 'Проверяю Chrome...';
+  hint.textContent = '';
+
+  try {
+    const result = await api.chrome.checkInstalled();
+    if (result.installed) {
+      dot.className = 'wizard-chrome-dot found';
+      label.textContent = 'Chrome найден';
+      hint.textContent = 'Готов к подключению';
+      btn.style.display = '';
+      instructions.style.display = '';
+    } else {
+      dot.className = 'wizard-chrome-dot not-found';
+      label.textContent = 'Chrome не найден';
+      hint.textContent = 'Установите Google Chrome и попробуйте снова';
+      btn.style.display = 'none';
+    }
+  } catch (err) {
+    dot.className = 'wizard-chrome-dot not-found';
+    label.textContent = 'Ошибка проверки';
+    hint.textContent = err.message;
+  }
+
+  // Check if already connected (from phase 0 auto-connect)
+  try {
+    const status = await api.chrome.status();
+    if (status.connected) {
+      wizardChromeConnected = true;
+      dot.className = 'wizard-chrome-dot connected';
+      label.textContent = 'Chrome подключён ✓';
+      hint.textContent = 'Сессия Higgsfield активна';
+      btn.style.display = 'none';
+      skipBtn.style.display = 'none';
+      nextBtn.style.display = '';
+    }
+  } catch {}
+}
+
+async function wizardConnectChrome() {
+  const api = window.electronAPI;
+  if (!api) return;
+
+  const dot = document.getElementById('wizard-chrome-dot');
+  const label = document.getElementById('wizard-chrome-label');
+  const hint = document.getElementById('wizard-chrome-hint');
+  const btn = document.getElementById('wizard-chrome-btn');
+  const skipBtn = document.getElementById('wizard-skip-btn');
+  const nextBtn = document.getElementById('wizard-next-chrome');
+
+  btn.disabled = true;
+  dot.className = 'wizard-chrome-dot checking';
+  label.textContent = 'Запускаю Chrome...';
+  hint.textContent = 'Войдите в Higgsfield через Google';
+
+  try {
+    await api.chrome.launch();
+    label.textContent = 'Жду авторизации...';
+    hint.textContent = 'Войдите на higgsfield.ai, затем вернитесь сюда';
+
+    // Poll for connection
+    for (let i = 0; i < 60; i++) {
+      await new Promise(r => setTimeout(r, 3000));
+
+      try {
+        const connectResult = await api.chrome.connect();
+        if (connectResult.success) {
+          await api.chrome.saveSession();
+          const auth = await api.chrome.checkAuth();
+          if (auth.authenticated) {
+            wizardChromeConnected = true;
+            dot.className = 'wizard-chrome-dot connected';
+            label.textContent = 'Подключено! ✓';
+            hint.textContent = 'Авторизация прошла успешно';
+            btn.style.display = 'none';
+            skipBtn.style.display = 'none';
+            nextBtn.style.display = '';
+            return;
+          }
+        }
+      } catch {}
+
+      label.textContent = `Жду авторизации... (${i + 1}/60)`;
+    }
+
+    // Timeout
+    dot.className = 'wizard-chrome-dot not-found';
+    label.textContent = 'Время ожидания истекло';
+    hint.textContent = 'Попробуйте ещё раз или пропустите этот шаг';
+    btn.disabled = false;
+  } catch (err) {
+    dot.className = 'wizard-chrome-dot not-found';
+    label.textContent = 'Ошибка подключения';
+    hint.textContent = err.message;
+    btn.disabled = false;
+  }
+}
+
+function wizardInitSummary() {
+  const folderEl = document.getElementById('wizard-summary-folder');
+  const chromeEl = document.getElementById('wizard-summary-chrome');
+  if (folderEl) folderEl.textContent = shortenPath(wizardOutputDir);
+  if (chromeEl) {
+    chromeEl.textContent = wizardChromeConnected ? '✅ Подключён' : '⏭ Пропущено';
+  }
+}
+
+async function wizardFinish() {
+  const api = window.electronAPI;
+  if (api) {
+    try {
+      await api.config.set('isFirstLaunch', false);
+    } catch {}
+  }
+  // Hide wizard
+  const overlay = document.getElementById('wizard-overlay');
+  if (overlay) overlay.style.display = 'none';
+  // Navigate to projects
+  navigateTo('projects');
+}
+
 // ── Init ──
 document.addEventListener('DOMContentLoaded', async () => {
+
+  // ── First Launch Check ──
+  const api = window.electronAPI;
+  if (api) {
+    try {
+      const isFirstLaunch = await api.config.get('isFirstLaunch');
+      if (isFirstLaunch === true || isFirstLaunch === undefined || isFirstLaunch === null) {
+        const overlay = document.getElementById('wizard-overlay');
+        if (overlay) overlay.style.display = 'flex';
+        // Don't show app behind wizard
+      }
+    } catch (err) {
+      console.warn('[app] Config check failed:', err);
+    }
+  }
+
   // Nav click handlers
   document.querySelectorAll('.nav-item').forEach(item => {
     item.addEventListener('click', () => {
@@ -847,10 +1485,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   });
 
-  // Show projects or empty state
-  if (state.hasProjects) {
-    showProjectsList();
-  }
+  // Load real projects from disk
+  await loadProjectsList();
 
   // Init step indicator
   updateStepIndicator();
@@ -867,7 +1503,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (imagesEl) imagesEl.textContent = '0';
 
   // ── Electron: Check existing connection on startup ──
-  const api = window.electronAPI;
+  // (api is already declared above in first-launch check)
   if (api) {
     try {
       const status = await api.chrome.status();

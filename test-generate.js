@@ -97,66 +97,45 @@ async function main() {
       model,
       aspect: '1:1',
       quality: '1K',
+      outputDir: promptDir,
       onProgress: (p) => {
         const ts = new Date().toLocaleTimeString();
-        console.log(`   [${ts}] ${p.step}: ${p.message}`);
+        const stateTag = p.state ? ` [${p.state}]` : '';
+        console.log(`   [${ts}] ${p.step}${stateTag}: ${p.message}`);
       },
     });
 
-    console.log(`\n   ✅ Generated: ${result.imageCount} images from ${result.clickCount} clicks`);
-    for (const u of result.urls) {
-      console.log(`      URL: ${u.substring(0, 80)}...`);
-    }
+    // ── Results ──
+    console.log(`\n📋 Results:`);
+    console.log(`   Saved: ${result.savedCount}/${result.total}`);
+    console.log(`   Errors: ${result.errorCount}/${result.total}`);
 
-    // ── 8. Download images ──
-    console.log('\n📥 Downloading...');
-    const files = [];
-    for (let i = 0; i < Math.min(result.urls.length, 4); i++) {
-      const dest = path.join(promptDir, `gen_${i + 1}.jpg`);
-      const dlResult = await engine.downloadImage(result.urls[i], dest);
-
-      if (dlResult.success) {
-        const kb = Math.round(dlResult.size / 1024);
-        console.log(`   ✅ gen_${i + 1}.jpg — ${kb}KB (${dlResult.method})`);
-        files.push(`gen_${i + 1}.jpg`);
+    for (const img of result.images) {
+      if (img.state === 'saved') {
+        const kb = Math.round(img.size / 1024);
+        console.log(`   ✅ ${img.file} — ${kb}KB (${img.quality})`);
       } else {
-        console.log(`   ❌ gen_${i + 1}.jpg — ${dlResult.error}`);
+        console.log(`   ❌ Image ${img.index} — ${img.error}`);
       }
     }
 
-    // ── 9. Save meta.json ──
-    const meta = {
-      id: prompt.id,
-      prompt: prompt.prompt,
-      status: files.length > 0 ? 'ready_for_selection' : 'error',
-      target_count: 4,
-      generated_count: files.length,
-      in_flight_count: 0,
-      files,
-      selected: null,
-      error: null,
-      model,
-      aspect_ratio: '1:1',
-      resolution: '1K',
-      timestamps: {
-        started: new Date().toISOString(),
-        completed: new Date().toISOString(),
-      },
-      urls: result.urls.slice(0, 4),
-    };
-    fs.writeFileSync(path.join(promptDir, 'meta.json'), JSON.stringify(meta, null, 2));
-    console.log('\n📋 Meta.json saved');
-
-    // ── 10. Validate ──
+    // ── Validation ──
     console.log('\n🔍 Validation:');
-    console.log(`   Files saved: ${files.length}/4`);
-    console.log(`   Status: ${meta.status}`);
-    console.log(`   Output dir: ${promptDir}`);
+    const savedFiles = result.images.filter(r => r.state === 'saved');
+    for (const img of savedFiles) {
+      const filePath = path.join(promptDir, img.file);
+      const exists = fs.existsSync(filePath);
+      const stat = exists ? fs.statSync(filePath) : null;
+      const sizeOk = stat && stat.size >= 1_000_000;
+      console.log(`   ${img.file}: exists=${exists}, size=${stat ? Math.round(stat.size / 1024) + 'KB' : 'N/A'}, ≥1MB=${sizeOk}`);
+    }
 
-    if (files.length >= 4) {
-      console.log('\n🎉 TEST PASSED! Full pipeline works.');
-    } else if (files.length > 0) {
-      console.log(`\n⚠️ PARTIAL: ${files.length}/4 images saved.`);
+    console.log(`\n   Output dir: ${promptDir}`);
+
+    if (result.savedCount >= result.total) {
+      console.log('\n🎉 TEST PASSED! All images generated, downloaded, and validated.');
+    } else if (result.savedCount > 0) {
+      console.log(`\n⚠️ PARTIAL: ${result.savedCount}/${result.total} images saved.`);
     } else {
       console.log('\n❌ TEST FAILED: No images saved.');
     }

@@ -46,6 +46,7 @@ async function generatePrompt(prompt, options = {}) {
     model = DEFAULT_MODEL,
     aspect = '1:1',
     quality = '1K',
+    outputDir = null,
     onProgress = () => {},
   } = options;
 
@@ -114,16 +115,21 @@ async function generatePrompt(prompt, options = {}) {
     onProgress({ step: 'settings', message: `Aspect: ${aspect}...` });
     await setAspectRatio(page, aspect);
 
-    // ── Step 9: SEQUENTIAL generation — 1 image at a time ──
-    // Unlimited mode only allows 1 image at a time: click → wait → collect → repeat
-    const allImageUrls = [];
+    // ── Step 9: SEQUENTIAL STATE MACHINE — generate + download + validate per image ──
+    // Each image MUST go through: generating → downloading → validating_download → saved
+    // Transition to next image ONLY from 'saved' or 'error' state.
+    const imageResults = [];
 
     for (let i = 0; i < IMAGES_PER_PROMPT && !shouldStop; i++) {
+      const img = { index: i + 1, state: 'generating', url: null, file: null, size: 0, quality: null, error: null };
+      console.log(`\n[engine] ═══ IMAGE ${img.index}/${IMAGES_PER_PROMPT} — STATE: generating ═══`);
+
       onProgress({
         step: 'generate',
-        message: `Проверяю → Generate ${i + 1}/${IMAGES_PER_PROMPT}...`,
-        current: i + 1,
+        message: `Проверяю → Generate ${img.index}/${IMAGES_PER_PROMPT}...`,
+        current: img.index,
         total: IMAGES_PER_PROMPT,
+        state: img.state,
       });
 
       // ═══ HARD RULES: verify ALL 4 conditions before EVERY click ═══
@@ -137,100 +143,159 @@ async function generatePrompt(prompt, options = {}) {
       // Rule 2: Batch MUST be 1/4
       const batchNow = await getBatchSize(page);
       if (!batchNow || batchNow.current !== 1) {
-        console.log(`[engine] ⚠️ Batch = ${batchNow ? batchNow.current : '?'} перед кликом ${i + 1}! Исправляю...`);
+        console.log(`[engine] ⚠️ Batch = ${batchNow ? batchNow.current : '?'} перед кликом ${img.index}! Исправляю...`);
         const batchFixed = await ensureBatchSize1(page);
         if (!batchFixed) {
-          throw new Error(`Batch не 1/4 перед кликом ${i + 1}. Генерация остановлена.`);
+          throw new Error(`Batch не 1/4 перед кликом ${img.index}. Генерация остановлена.`);
         }
       }
 
       // Rule 3: Extra free gens MUST be OFF (do this BEFORE Unlimited!)
-      // IMPORTANT: Higgsfield links these toggles — disabling ExtraFree may disable Unlimited
       const extraOn = await isExtraFreeGensOn(page);
       if (extraOn) {
-        console.log(`[engine] ⚠️ Extra free gens ON перед кликом ${i + 1}! Отключаю...`);
+        console.log(`[engine] ⚠️ Extra free gens ON перед кликом ${img.index}! Отключаю...`);
         await ensureExtraFreeGensOff(page);
       }
 
       // Rule 4: Unlimited must be ON — enable LAST right before Generate!
-      // This must be the FINAL toggle before clicking Generate
       const unlimitedNow = await isUnlimitedOn(page);
       if (!unlimitedNow) {
-        console.log(`[engine] ⚠️ Unlimited OFF перед кликом ${i + 1}! Включаю...`);
+        console.log(`[engine] ⚠️ Unlimited OFF перед кликом ${img.index}! Включаю...`);
         const reEnabled = await ensureUnlimited(page);
         if (!reEnabled) {
-          throw new Error(`Unlimited отключился перед кликом ${i + 1}. Генерация остановлена.`);
+          throw new Error(`Unlimited отключился перед кликом ${img.index}. Генерация остановлена.`);
         }
       }
 
-      // Dismiss any Payment Required modals right before clicking
       await dismissOverlays(page);
+      console.log(`[engine] ✓ Click ${img.index}: model=${modelInfo.name}, unlimited=ON, batch=1/4, extraFree=OFF`);
 
-      console.log(`[engine] ✓ Click ${i + 1}: model=${modelInfo.name}, unlimited=ON, batch=1/4, extraFree=OFF`);
-
-      // Save first img URL BEFORE this click (new image will replace it)
+      // Save first img URL BEFORE this click
       const firstImgBefore = await getFirstFeedImgUrl(page);
-      console.log(`[engine] DEBUG: firstImgBefore = ${firstImgBefore ? firstImgBefore.substring(0, 80) : 'none'}`);
 
       // Click Generate
       const clicked = await clickGenerate(page);
       if (!clicked) {
-        console.log(`[engine] ⚠️ Generate click ${i + 1} failed, retrying...`);
+        console.log(`[engine] ⚠️ Generate click ${img.index} failed, retrying...`);
         await chrome.sleep(1000);
         await dismissOverlays(page);
         const retryClicked = await clickGenerate(page);
         if (!retryClicked) {
-          throw new Error(`Не удалось нажать Generate для изображения ${i + 1}.`);
+          img.state = 'error';
+          img.error = `Generate click failed for image ${img.index}`;
+          imageResults.push(img);
+          console.log(`[engine] ❌ IMAGE ${img.index} — STATE: error (${img.error})`);
+          continue;
         }
       }
-      console.log(`[engine] ✅ Generate ${i + 1}/${IMAGES_PER_PROMPT} clicked`);
+      console.log(`[engine] ✅ Generate ${img.index}/${IMAGES_PER_PROMPT} clicked`);
 
-      // Wait for this ONE image to appear (Queued → ready)
-      onProgress({
-        step: 'waiting',
-        message: `Ожидаю изображение ${i + 1}/${IMAGES_PER_PROMPT}...`,
-      });
+      // Wait for this ONE image to appear
+      onProgress({ step: 'waiting', message: `Ожидаю изображение ${img.index}/${IMAGES_PER_PROMPT}...`, state: 'generating' });
+      const imageUrl = await waitForSingleImage(page, firstImgBefore, img.index, IMAGES_PER_PROMPT, onProgress);
 
-      const imageUrl = await waitForSingleImage(page, firstImgBefore, i + 1, IMAGES_PER_PROMPT, onProgress);
-
-      if (imageUrl) {
-        allImageUrls.push(imageUrl);
-        console.log(`[engine] ✅ Image ${i + 1}: ${imageUrl.substring(0, 80)}...`);
-      } else {
-        console.log(`[engine] ⚠️ Image ${i + 1} не появилось (timeout)`);
+      if (!imageUrl) {
+        img.state = 'error';
+        img.error = 'generation_timeout';
+        imageResults.push(img);
+        console.log(`[engine] ❌ IMAGE ${img.index} — STATE: error (timeout)`);
+        await dismissOverlays(page);
+        continue;
       }
 
-      // Dismiss overlays (Payment required, etc) before next iteration
+      img.url = imageUrl;
+      console.log(`[engine] ✅ Image ${img.index} generated: ${imageUrl.substring(0, 80)}...`);
+
+      // ═══ STATE: downloading ═══
+      img.state = 'downloading';
+      console.log(`[engine] ═══ IMAGE ${img.index} — STATE: downloading ═══`);
+      onProgress({ step: 'downloading', message: `Скачиваю изображение ${img.index}/${IMAGES_PER_PROMPT}...`, state: 'downloading' });
+
+      const destPath = outputDir
+        ? path.join(outputDir, `gen_${img.index}.jpg`)
+        : path.join(__dirname, 'output', 'temp', `gen_${img.index}.jpg`);
+
+      // Ensure directory exists
+      const destDir = path.dirname(destPath);
+      if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
+
+      let dlResult = await downloadImage(imageUrl, destPath, (p) => {
+        onProgress({ step: 'downloading', message: p.message, state: 'downloading' });
+      });
+
+      // ═══ STATE: validating_download ═══
+      img.state = 'validating_download';
+      console.log(`[engine] ═══ IMAGE ${img.index} — STATE: validating_download ═══`);
+      let validation = validateDownload(destPath, dlResult);
+
+      if (!validation.ok) {
+        console.log(`[engine] ⚠️ Validation failed: ${validation.reason}. Retrying download...`);
+        onProgress({ step: 'downloading', message: `Повторное скачивание ${img.index}/${IMAGES_PER_PROMPT}...`, state: 'downloading' });
+
+        // RETRY: one more attempt
+        dlResult = await downloadImage(imageUrl, destPath, (p) => {
+          onProgress({ step: 'downloading', message: `(retry) ${p.message}`, state: 'downloading' });
+        });
+        validation = validateDownload(destPath, dlResult);
+
+        if (!validation.ok) {
+          img.state = 'error';
+          img.error = `download_validation_failed: ${validation.reason}`;
+          imageResults.push(img);
+          console.log(`[engine] ❌ IMAGE ${img.index} — STATE: error (${validation.reason})`);
+          saveIntermediateMeta(outputDir, prompt, model, aspect, quality, imageResults);
+          await dismissOverlays(page);
+          continue;
+        }
+      }
+
+      // ═══ STATE: saved ═══
+      img.state = 'saved';
+      img.file = `gen_${img.index}.jpg`;
+      img.size = validation.size;
+      img.quality = validation.quality;
+      console.log(`[engine] ✅ IMAGE ${img.index} — STATE: saved (${Math.round(img.size / 1024)}KB, ${img.quality})`);
+
+      onProgress({
+        step: 'saved',
+        message: `✅ Изображение ${img.index}/${IMAGES_PER_PROMPT} сохранено (${Math.round(img.size / 1024)}KB)`,
+        state: 'saved',
+      });
+
+      imageResults.push(img);
+
+      // Save intermediate meta.json
+      saveIntermediateMeta(outputDir, prompt, model, aspect, quality, imageResults);
+
+      // Dismiss overlays before next iteration
       await dismissOverlays(page);
 
-      // Wait 3 sec before next generation
+      // Wait before next generation
       if (i < IMAGES_PER_PROMPT - 1) {
         await chrome.sleep(3000);
       }
     }
 
-    console.log(`[engine] Got ${allImageUrls.length}/${IMAGES_PER_PROMPT} image URLs`);
+    // ── Final summary ──
+    const savedCount = imageResults.filter(r => r.state === 'saved').length;
+    const errorCount = imageResults.filter(r => r.state === 'error').length;
+    console.log(`\n[engine] ═══ SUMMARY: ${savedCount} saved, ${errorCount} errors out of ${IMAGES_PER_PROMPT} ═══`);
 
-    if (allImageUrls.length === 0) {
-      throw new Error('Ни одно изображение не появилось. Возможно, аккаунт заблокирован.');
-    }
-
-    // ── Step 10: Collect results ──
-    const downloads = [];
-    for (let i = 0; i < allImageUrls.length; i++) {
-      downloads.push({ url: allImageUrls[i], index: i });
+    if (savedCount === 0) {
+      throw new Error('Ни одно изображение не скачано и не сохранено.');
     }
 
     onProgress({
       step: 'done',
-      message: `✅ Получено ${allImageUrls.length} изображений`,
-      urls: allImageUrls,
+      message: `✅ Сохранено ${savedCount}/${IMAGES_PER_PROMPT} изображений`,
+      state: 'done',
     });
 
     return {
-      urls: allImageUrls,
-      clickCount: allImageUrls.length,
-      imageCount: allImageUrls.length,
+      images: imageResults,
+      savedCount,
+      errorCount,
+      total: IMAGES_PER_PROMPT,
     };
 
   } finally {
@@ -866,6 +931,7 @@ async function waitForSingleImage(page, firstImgBefore, index, total, onProgress
   const deadline = startTime + GENERATION_TIMEOUT;
   let generationDetected = false;
   let queuedGone = false;
+  let queuedGoneTime = 0; // timestamp when Queued disappeared
 
   while (Date.now() < deadline && !shouldStop) {
     await chrome.sleep(POLL_INTERVAL);
@@ -881,6 +947,7 @@ async function waitForSingleImage(page, firstImgBefore, index, total, onProgress
     // Detect when Queued disappears = image should be ready
     if (generationDetected && queued === 0 && !queuedGone) {
       queuedGone = true;
+      queuedGoneTime = Date.now();
       console.log(`[engine] 🎬 Image ${index}: Queued disappeared, checking for new img...`);
       await chrome.sleep(2000); // Wait for DOM update
     }
@@ -912,9 +979,22 @@ async function waitForSingleImage(page, firstImgBefore, index, total, onProgress
       return finalUrl || firstImgNow;
     }
 
+    // FALLBACK: Queued gone for 30+ seconds but URL didn't change
+    // This happens when proxy URL is identical before/after — image IS ready
+    if (queuedGone && firstImgNow && queuedGoneTime > 0) {
+      const sinceQueuedGone = Date.now() - queuedGoneTime;
+      if (sinceQueuedGone > 30_000) {
+        console.log(`[engine] ⚠️ Image ${index}: Queued gone ${Math.round(sinceQueuedGone / 1000)}s, URL unchanged. Accepting current first img.`);
+        await chrome.sleep(2000);
+        const finalUrl = await getFirstFeedImgUrl(page);
+        return finalUrl || firstImgNow;
+      }
+    }
+
     // Debug log every 15 seconds
     if (elapsed % 15 === 0 && elapsed > 0) {
-      console.log(`[engine] DEBUG: queued=${queued}, queuedGone=${queuedGone}, firstImgChanged=${firstImgNow !== firstImgBefore}`);
+      const sinceGone = queuedGoneTime > 0 ? Math.round((Date.now() - queuedGoneTime) / 1000) : 0;
+      console.log(`[engine] DEBUG: queued=${queued}, queuedGone=${queuedGone}, firstImgChanged=${firstImgNow !== firstImgBefore}, sinceQueuedGone=${sinceGone}s`);
     }
 
     // Dismiss overlays periodically
@@ -1008,6 +1088,109 @@ async function waitForNewImages(page, beforeCount, expected, onProgress) {
 
 
 // ══════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════
+//  DOWNLOAD VALIDATION — strict file checks
+// ══════════════════════════════════════════════════════════════
+
+const MIN_FILE_SIZE = 1_000_000; // 1MB minimum for full-res
+
+/**
+ * Validate a downloaded image file.
+ * All conditions must pass:
+ * 1. dlResult.success === true
+ * 2. File exists on disk
+ * 3. File is not empty
+ * 4. File size >= 1MB (full-res requirement)
+ * 5. Valid image format (JPEG/PNG/WebP magic bytes)
+ */
+function validateDownload(filePath, dlResult) {
+  // 1. Download reported success
+  if (!dlResult || !dlResult.success) {
+    return { ok: false, reason: 'download_failed' };
+  }
+
+  // 2. File exists on disk
+  if (!fs.existsSync(filePath)) {
+    return { ok: false, reason: 'file_not_found' };
+  }
+
+  // 3. File is not empty
+  const stat = fs.statSync(filePath);
+  if (stat.size === 0) {
+    return { ok: false, reason: 'empty_file' };
+  }
+
+  // 4. File size >= 1MB
+  if (stat.size < MIN_FILE_SIZE) {
+    return { ok: false, reason: `too_small_${Math.round(stat.size / 1024)}KB_need_1MB` };
+  }
+
+  // 5. Valid image format (magic bytes check)
+  try {
+    const header = Buffer.alloc(4);
+    const fd = fs.openSync(filePath, 'r');
+    fs.readSync(fd, header, 0, 4, 0);
+    fs.closeSync(fd);
+
+    const isJpeg = header[0] === 0xFF && header[1] === 0xD8;
+    const isPng = header[0] === 0x89 && header[1] === 0x50;
+    const isWebp = header[0] === 0x52 && header[1] === 0x49; // RIFF (WebP)
+
+    if (!isJpeg && !isPng && !isWebp) {
+      return { ok: false, reason: 'invalid_image_format' };
+    }
+
+    const format = isJpeg ? 'jpeg' : isPng ? 'png' : 'webp';
+    const quality = stat.size >= 2_000_000 ? 'fullres' : 'acceptable';
+
+    console.log(`[engine] ✓ Validation passed: ${Math.round(stat.size / 1024)}KB, format=${format}, quality=${quality}`);
+    return { ok: true, size: stat.size, quality, format };
+  } catch (err) {
+    return { ok: false, reason: `read_error: ${err.message}` };
+  }
+}
+
+/**
+ * Save intermediate meta.json after each image is processed.
+ * Enables crash recovery — state is persisted per image.
+ */
+function saveIntermediateMeta(outputDir, prompt, model, aspect, quality, imageResults) {
+  if (!outputDir) return;
+
+  const meta = {
+    prompt,
+    model,
+    aspect_ratio: aspect,
+    resolution: quality,
+    status: 'in_progress',
+    total: IMAGES_PER_PROMPT,
+    savedCount: imageResults.filter(r => r.state === 'saved').length,
+    errorCount: imageResults.filter(r => r.state === 'error').length,
+    images: imageResults.map(r => ({
+      index: r.index,
+      state: r.state,
+      file: r.file,
+      size: r.size,
+      quality: r.quality,
+      error: r.error,
+      url: r.url ? r.url.substring(0, 120) : null,
+    })),
+    timestamps: {
+      updated: new Date().toISOString(),
+    },
+  };
+
+  try {
+    if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
+    fs.writeFileSync(path.join(outputDir, 'meta.json'), JSON.stringify(meta, null, 2));
+    console.log(`[engine] 📋 Meta.json updated (${meta.savedCount} saved, ${meta.errorCount} errors)`);
+  } catch (err) {
+    console.log(`[engine] ⚠️ Failed to save meta.json: ${err.message}`);
+  }
+}
+
+
+// ══════════════════════════════════════════════════════════════
 //  IMAGE DOWNLOAD
 // ══════════════════════════════════════════════════════════════
 
@@ -1018,10 +1201,10 @@ async function downloadImage(previewUrl, destPath, onProgress = () => {}) {
   const page = chrome.getActivePage();
   if (!page) throw new Error('Chrome не подключён');
 
-  // Strategy 0: Get full-res URL via Higgsfield API (click image → detail → raw.url)
+  // Strategy 0: Get full-res URL via Higgsfield API (extract job_id from preview URL)
   try {
     onProgress({ message: 'Получаю full-res URL...' });
-    const fullResUrl = await getFullResUrlViaAPI(page);
+    const fullResUrl = await getFullResUrl(page, previewUrl);
     if (fullResUrl) {
       console.log(`[engine] Full-res URL: ${fullResUrl.substring(0, 100)}...`);
       const data = await nodeFetch(fullResUrl);
@@ -1030,6 +1213,8 @@ async function downloadImage(previewUrl, destPath, onProgress = () => {}) {
         const kb = Math.round(data.length / 1024);
         console.log(`[engine] ✅ Downloaded FULL-RES: ${path.basename(destPath)} (${kb}KB)`);
         return { success: true, size: data.length, method: 'api_fullres' };
+      } else {
+        console.log(`[engine] ⚠️ Full-res too small: ${data ? data.length : 0} bytes`);
       }
     }
   } catch (err) {
@@ -1092,130 +1277,79 @@ async function downloadImage(previewUrl, destPath, onProgress = () => {}) {
 }
 
 /**
- * Get full-res URL by clicking first feed image and calling Higgsfield detail API
+ * Get full-res URL for a specific image using its preview URL.
+ * Extracts the job_id from the filename and queries the Higgsfield API.
+ * 
+ * URL format: hf_YYYYMMDD_HHMMSS_{uuid}_min.webp
+ * API: POST fnf.higgsfield.ai/jobs/{uuid}/view → { results: { raw: { url } } }
  */
-async function getFullResUrlViaAPI(page) {
-  // Step 1: Click on the first image in feed to open detail view
-  const clicked = await page.evaluate(() => {
-    const feed = document.querySelector('#soul-feed-scroll');
-    if (!feed) return false;
-    const firstImg = feed.querySelector('img');
-    if (firstImg) {
-      firstImg.click();
-      return true;
-    }
-    return false;
-  });
-  
-  if (!clicked) {
-    console.log('[engine] Could not click first feed image');
-    return null;
-  }
-  
-  console.log('[engine] Clicked first feed image, waiting for detail API...');
-  await chrome.sleep(3000);
-  
-  // Step 2: Look for the full-res image URL from the detail view
-  // The detail view loads the full image — find it in the DOM
-  const rawUrl = await page.evaluate(() => {
-    // Look for high-res img in modal/detail overlay
-    const allImgs = document.querySelectorAll('img');
-    let bestUrl = null;
-    let bestSize = 0;
-    
-    for (const img of allImgs) {
-      if (!img.src || !img.src.startsWith('http')) continue;
-      if (img.src.includes('avatar')) continue;
-      
-      // Prefer images with natural dimensions (loaded)
-      const size = img.naturalWidth * img.naturalHeight;
-      
-      // Look for cloudfront URLs (not proxy) — these are fullres
-      if (img.src.includes('cloudfront.net') && !img.src.includes('_min') && size > bestSize) {
-        bestUrl = img.src;
-        bestSize = size;
-      }
-      
-      // Also look for proxy URLs with high quality
-      if (img.src.includes('images.higgs.ai') && size > bestSize) {
-        // Try to extract and upgrade the embedded URL
-        try {
-          const u = new URL(img.src);
-          const embeddedUrl = u.searchParams.get('url');
-          if (embeddedUrl && !embeddedUrl.includes('_min')) {
-            bestUrl = embeddedUrl;
-            bestSize = size;
-          }
-        } catch {}
-      }
-    }
-    
-    return bestUrl;
-  });
-
-  // Step 3: Also try to fetch the download URL via the blob approach
-  // The download button creates a blob from the full-res image
-  let downloadUrl = rawUrl;
-  
-  if (!downloadUrl) {
-    // Try clicking the download button and intercepting
-    downloadUrl = await page.evaluate(async () => {
-      // Find download button in the detail view
-      const buttons = document.querySelectorAll('button');
-      for (const btn of buttons) {
-        const text = btn.textContent.trim().toLowerCase();
-        if (text === 'download' || btn.querySelector('[data-icon="download"]')) {
-          // Don't click — instead look for the image source in the detail view
-          break;
-        }
-      }
-      
-      // Fallback: get the main image src from detail modal
-      const detailImg = document.querySelector('[class*="detail"] img, [class*="modal"] img, [class*="Dialog"] img');
-      if (detailImg && detailImg.src && detailImg.src.startsWith('http')) {
-        return detailImg.src;
-      }
-      return null;
-    });
-  }
-  
-  // Step 4: Close the detail modal
-  await page.evaluate(() => {
-    // Press Escape to close
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true }));
-  });
-  await chrome.sleep(500);
-  // Also try clicking close button
-  await page.evaluate(() => {
-    const closeButtons = document.querySelectorAll('button[aria-label="Close"], button[aria-label="close"], [class*="close"], [class*="Close"]');
-    for (const btn of closeButtons) {
-      if (btn.offsetParent !== null) { // visible
-        btn.click();
-        break;
-      }
-    }
-  });
-  await chrome.sleep(500);
-
-  // If we got a proxy URL, extract the real URL
-  if (downloadUrl && downloadUrl.includes('images.higgs.ai')) {
+async function getFullResUrl(page, previewUrl) {
+  // Step 1: Extract the real cloudfront URL from the proxy
+  let realUrl = previewUrl;
+  if (previewUrl.includes('images.higgs.ai') || previewUrl.includes('url=http')) {
     try {
-      const u = new URL(downloadUrl);
+      const u = new URL(previewUrl);
       const embedded = u.searchParams.get('url');
-      if (embedded) {
-        // Convert _min.webp to .jpeg (fullres format)
-        let fullUrl = embedded;
-        if (fullUrl.includes('_min.webp')) {
-          fullUrl = fullUrl.replace('_min.webp', '.jpeg');
-        } else if (fullUrl.includes('_min')) {
-          fullUrl = fullUrl.replace('_min', '');
-        }
-        return fullUrl;
-      }
+      if (embedded) realUrl = embedded;
     } catch {}
   }
 
-  return downloadUrl;
+  // Step 2: Extract job_id (UUID) from the filename
+  // Pattern: hf_20260315_150700_c2a3a0ea-6cbd-4b18-a930-d2b783eba5d4_min.webp
+  const uuidMatch = realUrl.match(/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i);
+  if (!uuidMatch) {
+    console.log(`[engine] Could not extract job_id from URL: ${realUrl.substring(0, 100)}`);
+    // Fallback: construct .jpeg URL directly
+    if (realUrl.includes('_min.webp')) {
+      return realUrl.replace('_min.webp', '.jpeg');
+    }
+    return null;
+  }
+
+  const jobId = uuidMatch[1];
+  console.log(`[engine] Extracted job_id: ${jobId}`);
+
+  // Step 3: Call Higgsfield API to get full-res URL
+  try {
+    const apiResult = await page.evaluate(async (jid) => {
+      try {
+        const r = await fetch(`https://fnf.higgsfield.ai/jobs/${jid}/view`, {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+        });
+        if (!r.ok) return { error: `HTTP ${r.status}` };
+        const json = await r.json();
+        // Navigate to raw URL in response
+        const rawUrl = json?.results?.raw?.url 
+                    || json?.raw?.url 
+                    || json?.result?.raw?.url;
+        return { rawUrl, keys: Object.keys(json || {}).join(',') };
+      } catch (e) {
+        return { error: e.message };
+      }
+    }, jobId);
+
+    if (apiResult.error) {
+      console.log(`[engine] API /jobs/${jobId}/view error: ${apiResult.error}`);
+    } else if (apiResult.rawUrl) {
+      console.log(`[engine] ✅ Got raw URL from API: ${apiResult.rawUrl.substring(0, 80)}...`);
+      return apiResult.rawUrl;
+    } else {
+      console.log(`[engine] API response keys: ${apiResult.keys} (no rawUrl found)`);
+    }
+  } catch (err) {
+    console.log(`[engine] API call failed: ${err.message}`);
+  }
+
+  // Step 4: Fallback — construct full-res URL by replacing _min.webp → .jpeg
+  if (realUrl.includes('_min.webp')) {
+    const jpegUrl = realUrl.replace('_min.webp', '.jpeg');
+    console.log(`[engine] Fallback: trying .jpeg URL`);
+    return jpegUrl;
+  }
+
+  return null;
 }
 
 /**

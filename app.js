@@ -596,9 +596,17 @@ function openProject(id) {
   
   console.log(`[app] Opening project: ${project.name} (${id})`);
 
+  // FIX: Reset file-imported state for new project context
+  state.fileImported = false;
+
   // Load state from project DB
   state.importedPrompts = project.prompts || [];
   state.promptCount = state.importedPrompts.length;
+  
+  // FIX: Mark as imported if project has prompts
+  if (state.importedPrompts.length > 0) {
+    state.fileImported = true;
+  }
   
   if (project.model) {
     state.selectedModel = project.model;
@@ -809,13 +817,23 @@ function selectImagesCount(optionEl, count) {
   
   const hintEl = document.getElementById('images-count-hint');
   if (hintEl) {
-    hintEl.textContent = `${count} генераци${pluralRu(count) === 'ов' ? 'й' : pluralRu(count) === 'а' ? 'и' : 'я'} × 1 картинка (Unlimited)`;
+    const genWord = count === 1 ? 'генерация' : (count >= 2 && count <= 4 ? 'генерации' : 'генераций');
+    hintEl.textContent = `${count} ${genWord} × 1 картинка (Unlimited)`;
   }
+
+  // Sync banner
+  const bannerCount = document.getElementById('banner-images-count');
+  if (bannerCount) bannerCount.textContent = count;
+
   updateSettingsSummary();
 }
 
 function selectRatio(el, ratio) {
-  document.querySelectorAll('.ratio-option').forEach(r => r.classList.remove('active'));
+  // FIX: Scope to the aspect-ratio container only, avoid images-count buttons
+  const container = el.closest('.ratio-options');
+  if (container) {
+    container.querySelectorAll('.ratio-option').forEach(r => r.classList.remove('active'));
+  }
   el.classList.add('active');
   state.selectedRatio = ratio;
 }
@@ -921,10 +939,10 @@ function renderProjectPrompts() {
     listEl.innerHTML = state.importedPrompts.map(p => {
       const s = statusMap[p.status] || statusMap.pending;
       return `
-        <div style="display: flex; align-items: center; padding: 6px 8px; border-bottom: 1px solid var(--border-color); font-size: 13px;">
-          <span style="min-width: 40px; color: ${s.color}; font-weight: 500;" title="ID">${p.id}</span>
-          <span style="margin-right: 8px;">${s.icon}</span>
-          <span style="flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text-primary);" title="${escapeHtml(p.prompt)}">${escapeHtml(p.prompt)}</span>
+        <div class="prompts-preview-item">
+          <span class="prompts-preview-id" style="color: ${s.color};" title="ID">${p.id}</span>
+          <span class="prompts-preview-icon">${s.icon}</span>
+          <span class="prompts-preview-text" title="${escapeHtml(p.prompt)}">${escapeHtml(p.prompt)}</span>
         </div>
       `;
     }).join('');
@@ -1243,20 +1261,22 @@ function renderPromptStatusList() {
       'in-progress': '<div class="status-icon in-progress">◉</div>',
       'done': '<div class="status-icon done">🐾</div>',
       'error': '<div class="status-icon error">✗</div>',
+      'stopped': '<div class="status-icon pending">■</div>',
     };
     const statusTexts = {
       'pending': 'Ожидание',
       'in-progress': `Генерация… ${p.imagesGenerated}/${state.imagesPerPrompt || 4} · Unlimited 🆓`,
       'done': 'Готово ✓',
       'error': 'Ошибка',
+      'stopped': 'Остановлен',
     };
 
     return `
       <li class="status-item ${p.status === 'in-progress' ? 'current' : ''}">
-        ${icons[p.status]}
+        ${icons[p.status] || icons['pending']}
         <div class="status-text">
           <div class="status-text-title">${p.text}</div>
-          <div class="status-text-sub">Промпт ${i + 1} · ${statusTexts[p.status]}</div>
+          <div class="status-text-sub">Промпт ${i + 1} · ${statusTexts[p.status] || 'Остановлен'}</div>
         </div>
       </li>
     `;
@@ -1285,10 +1305,10 @@ async function stopGeneration() {
     try { await api.generate.stop(); } catch {}
   }
 
-  // Mark remaining as done
+  // FIX: Honest stop — only mark truly completed prompts as done
   state.promptStatuses.forEach(p => {
-    if (p.status === 'pending') { p.status = 'done'; p.imagesGenerated = state.imagesPerPrompt || 4; }
-    if (p.status === 'in-progress') { p.status = 'done'; p.imagesGenerated = state.imagesPerPrompt || 4; }
+    if (p.status === 'pending') { p.status = 'stopped'; }
+    if (p.status === 'in-progress') { p.status = 'stopped'; }
   });
   state.generationProgress = 100;
   updateProgressUI();
@@ -1355,6 +1375,9 @@ function finishGeneration() {
   if (needsSave && activeProjectId && window.electronAPI) {
     window.electronAPI.projects.savePrompts(activeProjectId, state.importedPrompts, state.importedFilePath).catch(console.error);
   }
+
+  // FIX: Populate results screen counters
+  updateResultsCounters();
 }
 
 // ── Selection ──
@@ -1410,6 +1433,11 @@ function renderSelectionContent() {
   // Render image grid — try loading real images first
   const grid = document.getElementById('selection-image-grid');
   if (!grid) return;
+
+  // FIX: Adapt grid columns to images-per-prompt
+  grid.className = 'image-grid';
+  if (state.imagesPerPrompt === 1) grid.classList.add('cols-1');
+  else if (state.imagesPerPrompt === 2) grid.classList.add('cols-2');
 
   const api = window.electronAPI;
   if (api && activeProjectId) {
@@ -1528,7 +1556,27 @@ async function finishSelection() {
       console.error('[app] Save selection error:', err);
     }
   }
+  updateResultsCounters();
   navigateTo('results');
+}
+
+// ── Results Counters ──
+function updateResultsCounters() {
+  const prompts = state.importedPrompts.length > 0
+    ? state.importedPrompts
+    : MOCK_PROMPTS;
+  const promptCount = prompts.length;
+  const doneCount = state.promptStatuses.filter(p => p.status === 'done').length;
+  const totalImages = state.promptStatuses.reduce((sum, p) => sum + p.imagesGenerated, 0);
+  const selectedCount = Object.keys(state.selections).length;
+
+  const resPrompts = document.getElementById('res-prompts');
+  const resGenerated = document.getElementById('res-generated');
+  const resSelected = document.getElementById('res-selected');
+
+  if (resPrompts) resPrompts.textContent = promptCount;
+  if (resGenerated) resGenerated.textContent = totalImages;
+  if (resSelected) resSelected.textContent = selectedCount;
 }
 
 // ── Results ──

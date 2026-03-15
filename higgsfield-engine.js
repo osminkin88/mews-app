@@ -86,6 +86,14 @@ async function generatePrompt(prompt, options = {}) {
     // ── Step 4: Dismiss any overlays ──
     await dismissOverlays(page);
 
+    // ── Step 4.5: CLEAR the prompt field BEFORE any toggle clicks! ──
+    // CRITICAL: Toggle clicks (Extra free gens, Unlimited) trigger form submission
+    // on Higgsfield. If old prompt text is in the field, it generates a ghost image
+    // from the PREVIOUS prompt. Clearing the field first prevents this.
+    onProgress({ step: 'preflight', message: 'Очищаю поле промпта...' });
+    await clearPromptField(page);
+    console.log('[engine] ✅ Prompt field cleared (safe for toggle clicks)');
+
     // ── Step 5: Turn OFF "Extra free gens" FIRST (prevents multi-model generation) ──
     onProgress({ step: 'preflight', message: 'Отключаю Extra free gens...' });
     await ensureExtraFreeGensOff(page);
@@ -107,16 +115,16 @@ async function generatePrompt(prompt, options = {}) {
     }
     console.log('[engine] ✅ Unlimited confirmed ON');
 
-    // ── Step 7: Verify controls are available ──
+    // ── Step 8: Verify controls are available ──
     onProgress({ step: 'preflight', message: 'Проверяю интерфейс...' });
     await preflight(page);
     console.log('[engine] ✅ Preflight passed');
 
-    // ── Step 7: Enter prompt ──
+    // ── Step 9: Enter prompt (AFTER all toggles are set!) ──
     onProgress({ step: 'prompt', message: 'Ввожу промпт...' });
     await enterPrompt(page, prompt);
 
-    // ── Step 8: Set aspect ratio ──
+    // ── Step 10: Set aspect ratio ──
     onProgress({ step: 'settings', message: `Aspect: ${aspect}...` });
     await setAspectRatio(page, aspect);
 
@@ -135,15 +143,18 @@ async function generatePrompt(prompt, options = {}) {
         state: img.state,
       });
 
-      // ═══ HARD RULES: verify ALL 4 conditions before EVERY click ═══
+      // ═══ PRE-CLICK CHECKS: verify conditions before EVERY click ═══
+      // NOTE: We do NOT re-click Extra free gens or Unlimited here!
+      // Those toggles were set in the preflight section above.
+      // Re-clicking them triggers a form submission on Higgsfield = double generation.
 
-      // Rule 1: Model must be the selected one
+      // Check 1: Model must be the selected one
       const modelOkNow = await verifyActiveModel(page, modelInfo);
       if (!modelOkNow) {
         throw new Error(`Модель изменилась! Ожидалась "${modelInfo.name}". Генерация остановлена.`);
       }
 
-      // Rule 2: Batch MUST be 1/4
+      // Check 2: Batch MUST be 1/4 (safe to re-click, it doesn't submit)
       const batchNow = await getBatchSize(page);
       if (!batchNow || batchNow.current !== 1) {
         console.log(`[engine] ⚠️ Batch = ${batchNow ? batchNow.current : '?'} перед кликом ${img.index}! Исправляю...`);
@@ -153,28 +164,22 @@ async function generatePrompt(prompt, options = {}) {
         }
       }
 
-      // Rule 3: Extra free gens MUST be OFF (do this BEFORE Unlimited!)
+      // Check 3 & 4: Only LOG toggle state, do NOT click (would trigger generation)
       const extraOn = await isExtraFreeGensOn(page);
       if (extraOn) {
-        console.log(`[engine] ⚠️ Extra free gens ON перед кликом ${img.index}! Отключаю...`);
-        await ensureExtraFreeGensOff(page);
+        console.log(`[engine] ⚠️ Extra free gens ON перед кликом ${img.index} (не трогаем — preflight уже настроил)`);
       }
-
-      // Rule 4: Unlimited must be ON — enable LAST right before Generate!
       const unlimitedNow = await isUnlimitedOn(page);
       if (!unlimitedNow) {
-        console.log(`[engine] ⚠️ Unlimited OFF перед кликом ${img.index}! Включаю...`);
-        const reEnabled = await ensureUnlimited(page);
-        if (!reEnabled) {
-          throw new Error(`Unlimited отключился перед кликом ${img.index}. Генерация остановлена.`);
-        }
+        console.log(`[engine] ⚠️ Unlimited OFF перед кликом ${img.index} (не трогаем — preflight уже настроил)`);
       }
 
       await dismissOverlays(page);
       console.log(`[engine] ✓ Click ${img.index}: model=${modelInfo.name}, unlimited=ON, batch=1/4, extraFree=OFF`);
 
-      // Save first img URL BEFORE this click
-      const firstImgBefore = await getFirstFeedImgUrl(page);
+      // Save feed image COUNT before click (more reliable than URL comparison)
+      const feedCountBefore = await countFeedImages(page);
+      console.log(`[engine] 📊 Feed images before click: ${feedCountBefore}`);
 
       // Click Generate
       const clicked = await clickGenerate(page);
@@ -196,9 +201,9 @@ async function generatePrompt(prompt, options = {}) {
       // Give the site time to process the click before we start polling
       await chrome.sleep(2000);
 
-      // Wait for this ONE image to appear
+      // Wait for this ONE image to appear (using count-based detection)
       onProgress({ step: 'waiting', message: `Ожидаю изображение ${img.index}/${imagesCount}...`, state: 'generating' });
-      const imageUrl = await waitForSingleImage(page, firstImgBefore, img.index, imagesCount, onProgress);
+      const imageUrl = await waitForSingleImage(page, feedCountBefore, img.index, imagesCount, onProgress);
 
       if (!imageUrl) {
         img.state = 'error';
@@ -699,6 +704,31 @@ async function preflight(page) {
 //  PROMPT INPUT
 // ══════════════════════════════════════════════════════════════
 
+/**
+ * Clear the prompt field — used BEFORE toggle clicks to prevent ghost generations.
+ * Toggle clicks on Higgsfield can trigger form submission; an empty field means
+ * no image will be generated from the accidental submit.
+ */
+async function clearPromptField(page) {
+  try {
+    const selectors = [
+      'div[id="hf:tour-image-prompt"]',
+      'div[role="textbox"][contenteditable="true"]',
+      'div[contenteditable="true"][class*="cursor-text"]'
+    ];
+    for (const sel of selectors) {
+      const el = await page.$(sel);
+      if (el) {
+        await el.click({ clickCount: 3 }); // Select all
+        await page.keyboard.press('Backspace');
+        await chrome.sleep(200);
+        return;
+      }
+    }
+  } catch {}
+}
+
+
 async function enterPrompt(page, prompt) {
   console.log(`[engine] === enterPrompt called ===`);
   console.log(`[engine] Prompt text: "${prompt.substring(0, 100)}..."`);
@@ -726,9 +756,12 @@ async function enterPrompt(page, prompt) {
     await page.keyboard.press('Backspace');
     await chrome.sleep(100);
 
-    // 3. Type native way (chunked for speed but reliable)
-    // We type it out since React state needs to catch key events
-    await page.keyboard.type(prompt, { delay: 0 });
+    // 3. Type native way — MUST sanitize newlines!
+    // CRITICAL: page.keyboard.type() converts \n to Enter keypress,
+    // which submits the Higgsfield form and starts a generation BEFORE
+    // our explicit clickGenerate(). This caused queued=2.
+    const sanitized = prompt.replace(/[\r\n]+/g, ' ').trim();
+    await page.keyboard.type(sanitized, { delay: 0 });
     await chrome.sleep(300);
 
   } catch (err) {
@@ -828,48 +861,42 @@ async function setAspectRatio(page, aspect) {
 // ══════════════════════════════════════════════════════════════
 
 async function clickGenerate(page) {
-  try {
-    const selectors = [
-      'button[id="hf:image-form-submit"]',
-      'button[type="submit"]',
-      'button:not([disabled])' // Fallback to look through text below
-    ];
+  // IMPORTANT: Use page.evaluate (DOM-level click), NOT btn.click() (Puppeteer native click).
+  // Puppeteer native click dispatches mousedown+mouseup+click events, which React's
+  // form handler on Higgsfield interprets as TWO form submissions → queued=2.
+  // DOM-level el.click() fires exactly ONE click event.
+  const clicked = await page.evaluate(() => {
+    // Primary: by ID
+    let btn = document.querySelector('button[id="hf:image-form-submit"]');
+    if (btn && btn.offsetParent !== null && !btn.disabled) {
+      btn.click();
+      return 'id';
+    }
 
-    let clicked = false;
-    for (const sel of selectors) {
-      if (sel === 'button:not([disabled])') {
-        const buttons = await page.$$(sel);
-        for (const btn of buttons) {
-          const text = await page.evaluate(el => el.textContent, btn);
-          if (text && text.includes('Generate')) {
-            await btn.click();
-            clicked = true;
-            break;
-          }
-        }
-      } else {
-        const btn = await page.$(sel);
-        if (btn) {
-          const disabled = await page.evaluate(el => el.disabled, btn);
-          if (!disabled) {
-            await btn.click();
-            clicked = true;
-          }
-        }
+    // Fallback: submit button
+    btn = document.querySelector('button[type="submit"]');
+    if (btn && btn.offsetParent !== null && !btn.disabled) {
+      btn.click();
+      return 'submit';
+    }
+
+    // Fallback: find button with "Generate" text
+    const allBtns = document.querySelectorAll('button');
+    for (const b of allBtns) {
+      if (b.textContent.includes('Generate') && b.offsetParent !== null && !b.disabled) {
+        b.click();
+        return 'text';
       }
-      if (clicked) break;
     }
 
-    if (clicked) {
-      console.log('[engine] ✅ Generate clicked');
-      return true;
-    }
-    
     return false;
-  } catch (err) {
-    console.log(`[engine] ⚠️ clickGenerate failed: ${err.message}`);
-    return false;
+  });
+
+  if (clicked) {
+    console.log(`[engine] ✅ Generate clicked (via ${clicked})`);
   }
+
+  return !!clicked;
 }
 
 
@@ -910,7 +937,10 @@ async function getFeedImageUrls(page) {
 }
 
 /**
- * Get the URL of the FIRST image in the feed (newest generation)
+ * Get the URL of the FIRST image in the feed (newest generation).
+ * Extracts the INNER cloudfront URL from the Higgsfield proxy wrapper,
+ * because the proxy URL pattern is identical for all images and
+ * comparing proxy URLs fails to detect new images.
  */
 async function getFirstFeedImgUrl(page) {
   return await page.evaluate(() => {
@@ -919,7 +949,13 @@ async function getFirstFeedImgUrl(page) {
     const imgs = feed.querySelectorAll('img');
     for (const img of imgs) {
       if (img.src && img.src.startsWith('http') && !img.src.includes('avatar')) {
-        return img.src;
+        // Extract inner URL from proxy wrapper: images.higgs.ai/?...url=ENCODED
+        try {
+          const u = new URL(img.src);
+          const innerUrl = u.searchParams.get('url');
+          if (innerUrl) return innerUrl; // Return decoded cloudfront URL
+        } catch {}
+        return img.src; // Fallback to raw URL
       }
     }
     return null;
@@ -947,23 +983,21 @@ async function countQueuedItems(page) {
 /**
  * Wait for 1 new image to appear after a single Generate click.
  * 
- * Strategy: save firstImgBefore (URL of the first img before clicking).
- * After Queued appears and disappears, check if first img URL changed.
- * If different → new image is ready, return new URL.
+ * Strategy: count images in feed BEFORE clicking. Poll until count increases.
+ * When feed has more images → new generation is ready at position 0.
  * 
  * @param {Object} page - Puppeteer page
- * @param {string|null} firstImgBefore - URL of the first img before click
+ * @param {number} feedCountBefore - Number of images in feed before Generate click
  * @param {number} index - Current image index (1-based)
  * @param {number} total - Total images expected
  * @param {Function} onProgress - Progress callback
  * @returns {string|null} - New image URL or null if timeout
  */
-async function waitForSingleImage(page, firstImgBefore, index, total, onProgress) {
+async function waitForSingleImage(page, feedCountBefore, index, total, onProgress) {
   const startTime = Date.now();
   const deadline = startTime + GENERATION_TIMEOUT;
   let generationDetected = false;
   let queuedGone = false;
-  let queuedGoneTime = 0; // timestamp when Queued disappeared
 
   while (Date.now() < deadline && !shouldStop) {
     await chrome.sleep(POLL_INTERVAL);
@@ -979,19 +1013,20 @@ async function waitForSingleImage(page, firstImgBefore, index, total, onProgress
     // Detect when Queued disappears = image should be ready
     if (generationDetected && queued === 0 && !queuedGone) {
       queuedGone = true;
-      queuedGoneTime = Date.now();
       console.log(`[engine] 🎬 Image ${index}: Queued disappeared, checking for new img...`);
       await chrome.sleep(2000); // Wait for DOM update
     }
 
-    // Get current first img URL
-    const firstImgNow = await getFirstFeedImgUrl(page);
+    // Count-based detection: check if feed has more images than before
+    const feedCountNow = await countFeedImages(page);
 
-    // If we missed the Queued state entirely, but a new image appeared at the top of the feed:
-    if (!queuedGone && firstImgNow && firstImgBefore && firstImgNow !== firstImgBefore) {
-      console.log(`[engine] 🎬 Image ${index}: missed Queued state but new image detected!`);
-      queuedGone = true;
-      generationDetected = true;
+    // If feed count increased → new image appeared!
+    if (feedCountNow > feedCountBefore) {
+      // New image is at position 0 (newest first)
+      await chrome.sleep(2000); // Wait for full resolution to load
+      const newImgUrl = await getFirstFeedImgUrl(page);
+      console.log(`[engine] ✅ Image ${index} ready (${elapsed}s, feedCount: ${feedCountBefore}→${feedCountNow}): ${(newImgUrl || '').substring(0, 80)}...`);
+      return newImgUrl;
     }
 
     // Status update
@@ -1001,45 +1036,9 @@ async function waitForSingleImage(page, firstImgBefore, index, total, onProgress
       message: `Изображение ${index}/${total}: ${status} (${elapsed}с)`,
     });
 
-    // Check if new image is ready and differs from the before click state
-    if (queuedGone && firstImgNow && firstImgNow !== firstImgBefore) {
-      // Wait for full resolution
-      await chrome.sleep(2000);
-      const finalUrl = await getFirstFeedImgUrl(page);
-      console.log(`[engine] ✅ Image ${index} ready (${elapsed}s): ${(finalUrl || firstImgNow).substring(0, 80)}...`);
-      return finalUrl || firstImgNow;
-    }
-
-    // Fallback: if no firstImgBefore (empty feed), any first img means success
-    if (queuedGone && firstImgNow && !firstImgBefore) {
-      await chrome.sleep(2000);
-      const finalUrl = await getFirstFeedImgUrl(page);
-      console.log(`[engine] ✅ Image ${index} ready (empty feed) (${elapsed}s)`);
-      return finalUrl || firstImgNow;
-    }
-
-    // FALLBACK: Queued gone for 30+ seconds but URL didn't change
-    // This happens when proxy URL is identical before/after — image IS ready
-    if (queuedGone && firstImgNow && queuedGoneTime > 0) {
-      const sinceQueuedGone = Date.now() - queuedGoneTime;
-      if (sinceQueuedGone > 30_000) {
-        console.log(`[engine] ⚠️ Image ${index}: Queued gone ${Math.round(sinceQueuedGone / 1000)}s, URL unchanged. Accepting current first img.`);
-        await chrome.sleep(2000);
-        const finalUrl = await getFirstFeedImgUrl(page);
-        return finalUrl || firstImgNow;
-      }
-    }
-    
-    // FALLBACK: If we've been waiting for 60 seconds and still no Queued state, but the prompt is in
-    if (!generationDetected && elapsed > 60 && firstImgNow) {
-       console.log(`[engine] ⚠️ Image ${index}: 60 seconds passed with no Queued state. Accepting current first img as a fallback.`);
-       return firstImgNow;
-    }
-
     // Debug log every 15 seconds
     if (elapsed % 15 === 0 && elapsed > 0) {
-      const sinceGone = queuedGoneTime > 0 ? Math.round((Date.now() - queuedGoneTime) / 1000) : 0;
-      console.log(`[engine] DEBUG: queued=${queued}, queuedGone=${queuedGone}, firstImgChanged=${firstImgNow !== firstImgBefore}, sinceQueuedGone=${sinceGone}s`);
+      console.log(`[engine] DEBUG: queued=${queued}, queuedGone=${queuedGone}, feedCount=${feedCountNow}/${feedCountBefore}, elapsed=${elapsed}s`);
     }
 
     // Dismiss overlays periodically

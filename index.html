@@ -354,16 +354,16 @@
       <!-- Not connected state -->
       <div id="connection-disconnected">
         <div class="card" style="max-width: 520px;">
-          <div style="text-align: center; padding: var(--space-xl) 0;">
-            <div style="font-size: 56px; margin-bottom: var(--space-lg);">🔐</div>
+          <div class="connection-center">
+            <div class="connection-lock-icon">🔐</div>
             <h2 class="text-title" style="margin-bottom: var(--space-sm);">Подключите аккаунт</h2>
-            <p class="text-secondary" style="max-width: 360px; margin: 0 auto var(--space-xl); line-height: 1.6;">
+            <p class="text-secondary connection-desc">
               Для генерации изображений нужно один раз войти в ваш аккаунт Higgsfield. Это безопасно и занимает пару секунд.
             </p>
             <button class="btn btn-primary btn-large" onclick="connectAccount()">
               🔗 Подключиться к Higgsfield
             </button>
-            <p style="font-size: 11px; color: var(--text-tertiary); margin-top: var(--space-md);">
+            <p class="connection-session-hint">
               Сессия сохраняется автоматически
             </p>
           </div>
@@ -407,22 +407,22 @@
         <div class="drop-zone" id="drop-zone" onclick="simulateImport()">
           <div class="drop-zone-icon">📄</div>
           <div class="drop-zone-title">Перетащите файл сюда</div>
-          <div class="drop-zone-hint">CSV или XLSX · Колонки: Промпт (обязательно), Категория, Стиль</div>
+          <div class="drop-zone-hint">CSV или XLSX · Формат: ID · Промпт · Категория · Стиль · Комментарий</div>
           <button class="btn-template-download" onclick="event.stopPropagation(); downloadTemplate()">
             🐾 Скачать шаблон промптов
           </button>
         </div>
 
         <!-- File info (shown after import or when opening a filled project) -->
-        <div class="card file-info mt-md" id="file-info" style="display: none; align-items: center; justify-content: space-between;">
-          <div style="display: flex; align-items: center; gap: 12px;">
+        <div class="card file-info mt-md" id="file-info" style="display: none;">
+          <div class="file-info-row">
             <span class="file-info-icon">📊</span>
             <div>
               <div class="file-info-name" id="file-name">prompts.csv</div>
               <div class="file-info-meta" id="file-prompt-count">Загружено 0 промптов</div>
             </div>
           </div>
-          <div style="display: flex; gap: 8px;">
+          <div class="file-info-actions">
             <button class="btn btn-ghost btn-sm" onclick="appUpdatePrompts()" title="Загрузить обновленный файл и сравнить по ID">Обновить 🔄</button>
             <button class="btn btn-ghost btn-sm" style="color: var(--danger)" onclick="appReplacePrompts()" title="Полностью удалить старые промпты и загрузить новые">Заменить 🗑</button>
           </div>
@@ -430,8 +430,8 @@
 
         <!-- Prompts Preview List -->
         <div class="mt-md" id="prompts-preview-container" style="display: none;">
-          <div style="font-size: 13px; font-weight: 600; color: var(--text-secondary); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px;">Текущие промпты</div>
-          <div id="prompts-preview-list" style="max-height: 200px; overflow-y: auto; background: var(--bg-card); border-radius: 12px; border: 1px solid var(--border-color); padding: 4px;">
+          <div class="prompts-preview-header">Текущие промпты</div>
+          <div id="prompts-preview-list" class="prompts-preview-scroll">
             <!-- Rendered by JS -->
           </div>
         </div>
@@ -541,14 +541,14 @@
       </div>
 
       <!-- Unlimited info banner -->
-      <div class="banner banner-unlimited mt-md">
+      <div class="banner banner-unlimited mt-md" id="banner-unlimited">
         <span class="banner-icon">🆓</span>
         <span class="banner-text">
-          <strong>Режим Unlimited:</strong> генерация бесплатна. Каждый промпт = 4 отдельных запроса по 1 картинке. Стандартная очередь.
+          <strong>Режим Unlimited:</strong> генерация бесплатна. Каждый промпт = <span id="banner-images-count">4</span> отдельных запроса по 1 картинке. Стандартная очередь.
         </span>
       </div>
 
-      <div class="card mt-lg" style="display: flex; align-items: center; justify-content: space-between; padding: var(--space-lg) var(--space-xl);">
+      <div class="card settings-ready-card mt-lg">
         <div>
           <div class="text-heading">Всё готово к генерации</div>
           <div class="text-secondary mt-sm" id="settings-model-info">Nano Banana Pro · 2K · Unlimited 🆓</div>
@@ -584,7 +584,7 @@
             <div class="progress-stat-label">Готово</div>
           </div>
           <div class="progress-stat">
-            <div class="progress-stat-value" id="stat-total">12</div>
+            <div class="progress-stat-value" id="stat-total">—</div>
             <div class="progress-stat-label">Всего</div>
           </div>
           <div class="progress-stat">
@@ -645,7 +645,7 @@
       <!-- Navigation between prompts -->
       <div class="prompt-nav">
         <div class="prompt-counter">
-          Промпт <span id="sel-current">1</span> из <span id="sel-total">12</span>
+          Промпт <span id="sel-current">1</span> из <span id="sel-total">—</span>
         </div>
         <div class="prompt-nav-buttons">
           <button class="btn btn-secondary btn-icon" id="btn-prev-prompt" onclick="prevPrompt()">←</button>
@@ -674,7 +674,7 @@
       <!-- Selection footer -->
       <div class="selection-footer">
         <div class="selection-counter">
-          Выбрано: <span id="sel-count">0</span> из <span id="sel-count-total">12</span>
+          Выбрано: <span id="sel-count">0</span> из <span id="sel-count-total">—</span>
         </div>
         <button class="btn btn-primary" id="btn-finish-selection" onclick="finishSelection()" disabled>
           Завершить отбор ✓
@@ -694,16 +694,16 @@
         </div>
 
         <div class="results-grid">
-          <div class="card result-stat">
-            <div class="result-stat-value" id="res-prompts">12</div>
+          <div class="card card-static result-stat">
+            <div class="result-stat-value" id="res-prompts">—</div>
             <div class="result-stat-label">Промптов</div>
           </div>
-          <div class="card result-stat">
-            <div class="result-stat-value" id="res-generated">48</div>
+          <div class="card card-static result-stat">
+            <div class="result-stat-value" id="res-generated">—</div>
             <div class="result-stat-label">Сгенерировано</div>
           </div>
-          <div class="card result-stat">
-            <div class="result-stat-value" id="res-selected">12</div>
+          <div class="card card-static result-stat">
+            <div class="result-stat-value" id="res-selected">—</div>
             <div class="result-stat-label">Отобрано</div>
           </div>
         </div>

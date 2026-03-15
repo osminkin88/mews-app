@@ -4,17 +4,15 @@
 
 // ── Higgsfield Models (Unlimited text-to-image only) ──
 const MODELS = [
-  { id: 'nano_banana_pro', name: 'Nano Banana Pro', desc: 'Google — flagship generation model', badge: 'Unlimited' },
-  { id: 'seedream_5_lite', name: 'Seedream 5.0 lite', desc: 'Intelligent visual reasoning', badge: 'Unlimited' },
-  { id: 'seedream_4_5', name: 'Seedream 4.5', desc: 'ByteDance — next-gen 4K image model', badge: 'Unlimited' },
-  { id: 'nano_banana', name: 'Nano Banana', desc: 'Google — standard generation model', badge: 'Unlimited' },
-  { id: 'seedream_4_0', name: 'Seedream 4.0', desc: 'Предыдущее поколение', badge: 'Unlimited' },
-];
-
-// ── Quality Options ──
-const QUALITY_OPTIONS = [
-  { id: '1K', label: '1K', badge: 'Unlimited' },
-  { id: '2K', label: '2K', badge: 'Unlimited' },
+  { id: 'nano_banana_pro', name: 'Nano Banana Pro', desc: 'Google — flagship generation model', badge: 'Unlimited', quality: ['1K', '2K'], defaultQuality: '2K' },
+  { id: 'gpt_image', name: 'GPT Image', desc: 'Versatile text-to-image AI', badge: 'Unlimited', quality: ['High'], defaultQuality: 'High' },
+  { id: 'seedream_5_lite', name: 'Seedream 5.0 lite', desc: 'Intelligent visual reasoning', badge: 'Unlimited', quality: ['2K'], defaultQuality: '2K' },
+  { id: 'seedream_4_5', name: 'Seedream 4.5', desc: 'ByteDance — next-gen 4K image model', badge: 'Unlimited', quality: ['2K'], defaultQuality: '2K' },
+  { id: 'flux_2_pro', name: 'FLUX.2 Pro', desc: 'Speed-optimized detail', badge: 'Unlimited', quality: ['1K'], defaultQuality: '1K' },
+  { id: 'kling_o1', name: 'Kling O1', desc: 'Kling\'s Photorealistic Image Model', badge: 'Unlimited', quality: ['1K'], defaultQuality: '1K' },
+  { id: 'z_image', name: 'Z-Image', desc: 'Instant lifelike portraits', badge: 'Unlimited', quality: [], defaultQuality: null },
+  { id: 'nano_banana', name: 'Nano Banana', desc: 'Google — standard generation model', badge: 'Unlimited', quality: [], defaultQuality: null },
+  { id: 'higgsfield_soul', name: 'Higgsfield Soul', desc: 'Ultra-realistic fashion visuals', badge: 'Unlimited', quality: ['2K'], defaultQuality: '2K' },
 ];
 
 // ── Aspect Ratios ──
@@ -144,6 +142,11 @@ function navigateTo(screenId) {
     updateConnectionUI();
   }
 
+  // Render dynamic quality options when visiting settings
+  if (screenId === 'settings') {
+    renderQualityOptions();
+  }
+
   updateStepIndicator();
   updateNavStatuses();
 }
@@ -230,6 +233,11 @@ function simulateImport() {
 
 function selectModel(modelId) {
   state.selectedModel = modelId;
+  const model = MODELS.find(m => m.id === modelId);
+  if (model) {
+    state.selectedQuality = model.defaultQuality;
+  }
+  renderQualityOptions();
   updateSettingsSummary();
 }
 
@@ -246,11 +254,44 @@ function selectRatio(el, ratio) {
   state.selectedRatio = ratio;
 }
 
+function renderQualityOptions() {
+  const card = document.getElementById('quality-card');
+  if (!card) return;
+
+  const model = MODELS.find(m => m.id === state.selectedModel);
+  if (!model || model.quality.length === 0) {
+    // No quality options — hide card
+    card.style.display = 'none';
+    return;
+  }
+
+  card.style.display = '';
+  const container = document.getElementById('quality-buttons');
+  const hint = document.getElementById('quality-hint');
+  if (!container) return;
+
+  container.innerHTML = model.quality.map(q => {
+    const isActive = q === state.selectedQuality ? 'active' : '';
+    return `<div class="quality-option ${isActive}" onclick="selectQuality(this, '${q}')">
+      <span class="quality-label">${q}</span>
+    </div>`;
+  }).join('');
+
+  if (hint) {
+    if (model.quality.length === 1) {
+      hint.textContent = `${model.quality[0]} — Unlimited`;
+    } else {
+      hint.textContent = model.quality.map(q => q).join(' и ') + ' — без ограничений';
+    }
+  }
+}
+
 function updateSettingsSummary() {
   const model = MODELS.find(m => m.id === state.selectedModel);
   const modelInfoEl = document.getElementById('settings-model-info');
   if (modelInfoEl && model) {
-    modelInfoEl.textContent = `${model.name} · ${state.selectedQuality} · Unlimited 🆓`;
+    const qualityStr = state.selectedQuality ? ` · ${state.selectedQuality}` : '';
+    modelInfoEl.textContent = `${model.name}${qualityStr} · Unlimited \ud83c\udd93`;
   }
 }
 

@@ -239,25 +239,24 @@
           <div class="settings-card-label">Модель <span class="badge-unlimited">∞ Unlimited</span></div>
           <select class="form-select" id="model-select" onchange="selectModel(this.value)">
             <option value="nano_banana_pro" selected>Nano Banana Pro</option>
+            <option value="gpt_image">GPT Image</option>
             <option value="seedream_5_lite">Seedream 5.0 lite</option>
             <option value="seedream_4_5">Seedream 4.5</option>
+            <option value="flux_2_pro">FLUX.2 Pro</option>
+            <option value="kling_o1">Kling O1</option>
+            <option value="z_image">Z-Image</option>
             <option value="nano_banana">Nano Banana</option>
-            <option value="seedream_4_0">Seedream 4.0</option>
+            <option value="higgsfield_soul">Higgsfield Soul</option>
           </select>
           <div class="settings-card-hint">Все модели — Unlimited (бесплатно)</div>
         </div>
 
-        <div class="card settings-card">
+        <div class="card settings-card" id="quality-card">
           <div class="settings-card-label">Качество <span class="badge-unlimited">∞ Unlimited</span></div>
-          <div class="quality-options mt-sm">
-            <div class="quality-option" onclick="selectQuality(this, '1K')">
-              <span class="quality-label">1K</span>
-            </div>
-            <div class="quality-option active" onclick="selectQuality(this, '2K')">
-              <span class="quality-label">2K</span>
-            </div>
+          <div class="quality-options mt-sm" id="quality-buttons">
+            <!-- Populated dynamically by renderQualityOptions() -->
           </div>
-          <div class="settings-card-hint">1K и 2K — без ограничений</div>
+          <div class="settings-card-hint" id="quality-hint"></div>
         </div>
       </div>
 

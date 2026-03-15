@@ -12,7 +12,7 @@ const chrome = require('./chrome-manager');
 
 // ── Config ────────────────────────────────────────────────────
 const IMAGES_PER_PROMPT = 4;
-const GENERATION_TIMEOUT = 240_000; // 4 min per prompt (all 4 images)
+const GENERATION_TIMEOUT = 4 * 60 * 1000; // 4 minutes per image
 const POLL_INTERVAL = 3000;         // 3s polling
 const DEFAULT_MODEL = 'nano_banana_pro';
 
@@ -38,6 +38,11 @@ const PAID_ONLY_MODELS = {
 let isGenerating = false;
 let shouldStop = false;
 
+function getIsGenerating() { return isGenerating; }
+function getShouldStop() { return shouldStop; }
+function resetShouldStop() { shouldStop = false; }
+function _resetIsGenerating() { isGenerating = false; }
+
 // ══════════════════════════════════════════════════════════════
 //  MAIN: Generate Images for a Single Prompt
 // ══════════════════════════════════════════════════════════════
@@ -46,6 +51,7 @@ async function generatePrompt(prompt, options = {}) {
     model = DEFAULT_MODEL,
     aspect = '1:1',
     quality = '1K',
+    imagesCount = 4,
     outputDir = null,
     onProgress = () => {},
   } = options;
@@ -54,7 +60,6 @@ async function generatePrompt(prompt, options = {}) {
   if (!page) throw new Error('Chrome не подключён');
 
   isGenerating = true;
-  shouldStop = false;
 
   try {
     // ── Step 1: Check model supports Unlimited ──
@@ -116,19 +121,17 @@ async function generatePrompt(prompt, options = {}) {
     await setAspectRatio(page, aspect);
 
     // ── Step 9: SEQUENTIAL STATE MACHINE — generate + download + validate per image ──
-    // Each image MUST go through: generating → downloading → validating_download → saved
-    // Transition to next image ONLY from 'saved' or 'error' state.
     const imageResults = [];
 
-    for (let i = 0; i < IMAGES_PER_PROMPT && !shouldStop; i++) {
+    for (let i = 0; i < imagesCount && !shouldStop; i++) {
       const img = { index: i + 1, state: 'generating', url: null, file: null, size: 0, quality: null, error: null };
-      console.log(`\n[engine] ═══ IMAGE ${img.index}/${IMAGES_PER_PROMPT} — STATE: generating ═══`);
+      console.log(`\n[engine] ═══ IMAGE ${img.index}/${imagesCount} — STATE: generating ═══`);
 
       onProgress({
         step: 'generate',
-        message: `Проверяю → Generate ${img.index}/${IMAGES_PER_PROMPT}...`,
+        message: `Проверяю → Generate ${img.index}/${imagesCount}...`,
         current: img.index,
-        total: IMAGES_PER_PROMPT,
+        total: imagesCount,
         state: img.state,
       });
 
@@ -177,7 +180,7 @@ async function generatePrompt(prompt, options = {}) {
       const clicked = await clickGenerate(page);
       if (!clicked) {
         console.log(`[engine] ⚠️ Generate click ${img.index} failed, retrying...`);
-        await chrome.sleep(1000);
+        await chrome.sleep(2000);
         await dismissOverlays(page);
         const retryClicked = await clickGenerate(page);
         if (!retryClicked) {
@@ -188,11 +191,14 @@ async function generatePrompt(prompt, options = {}) {
           continue;
         }
       }
-      console.log(`[engine] ✅ Generate ${img.index}/${IMAGES_PER_PROMPT} clicked`);
+      console.log(`[engine] ✅ Generate ${img.index}/${imagesCount} clicked`);
+
+      // Give the site time to process the click before we start polling
+      await chrome.sleep(2000);
 
       // Wait for this ONE image to appear
-      onProgress({ step: 'waiting', message: `Ожидаю изображение ${img.index}/${IMAGES_PER_PROMPT}...`, state: 'generating' });
-      const imageUrl = await waitForSingleImage(page, firstImgBefore, img.index, IMAGES_PER_PROMPT, onProgress);
+      onProgress({ step: 'waiting', message: `Ожидаю изображение ${img.index}/${imagesCount}...`, state: 'generating' });
+      const imageUrl = await waitForSingleImage(page, firstImgBefore, img.index, imagesCount, onProgress);
 
       if (!imageUrl) {
         img.state = 'error';
@@ -209,7 +215,7 @@ async function generatePrompt(prompt, options = {}) {
       // ═══ STATE: downloading ═══
       img.state = 'downloading';
       console.log(`[engine] ═══ IMAGE ${img.index} — STATE: downloading ═══`);
-      onProgress({ step: 'downloading', message: `Скачиваю изображение ${img.index}/${IMAGES_PER_PROMPT}...`, state: 'downloading' });
+      onProgress({ step: 'downloading', message: `Скачиваю изображение ${img.index}/${imagesCount}...`, state: 'downloading' });
 
       const destPath = outputDir
         ? path.join(outputDir, `gen_${img.index}.jpg`)
@@ -230,7 +236,7 @@ async function generatePrompt(prompt, options = {}) {
 
       if (!validation.ok) {
         console.log(`[engine] ⚠️ Validation failed: ${validation.reason}. Retrying download...`);
-        onProgress({ step: 'downloading', message: `Повторное скачивание ${img.index}/${IMAGES_PER_PROMPT}...`, state: 'downloading' });
+        onProgress({ step: 'downloading', message: `Повторное скачивание ${img.index}/${imagesCount}...`, state: 'downloading' });
 
         // RETRY: one more attempt
         dlResult = await downloadImage(imageUrl, destPath, (p) => {
@@ -243,7 +249,7 @@ async function generatePrompt(prompt, options = {}) {
           img.error = `download_validation_failed: ${validation.reason}`;
           imageResults.push(img);
           console.log(`[engine] ❌ IMAGE ${img.index} — STATE: error (${validation.reason})`);
-          saveIntermediateMeta(outputDir, prompt, model, aspect, quality, imageResults);
+          saveIntermediateMeta(outputDir, prompt, model, aspect, quality, imageResults, imagesCount);
           await dismissOverlays(page);
           continue;
         }
@@ -258,20 +264,20 @@ async function generatePrompt(prompt, options = {}) {
 
       onProgress({
         step: 'saved',
-        message: `✅ Изображение ${img.index}/${IMAGES_PER_PROMPT} сохранено (${Math.round(img.size / 1024)}KB)`,
+        message: `✅ Изображение ${img.index}/${imagesCount} сохранено (${Math.round(img.size / 1024)}KB)`,
         state: 'saved',
       });
 
       imageResults.push(img);
 
       // Save intermediate meta.json
-      saveIntermediateMeta(outputDir, prompt, model, aspect, quality, imageResults);
+      saveIntermediateMeta(outputDir, prompt, model, aspect, quality, imageResults, imagesCount);
 
       // Dismiss overlays before next iteration
       await dismissOverlays(page);
 
       // Wait before next generation
-      if (i < IMAGES_PER_PROMPT - 1) {
+      if (i < imagesCount - 1) {
         await chrome.sleep(3000);
       }
     }
@@ -279,7 +285,7 @@ async function generatePrompt(prompt, options = {}) {
     // ── Final summary ──
     const savedCount = imageResults.filter(r => r.state === 'saved').length;
     const errorCount = imageResults.filter(r => r.state === 'error').length;
-    console.log(`\n[engine] ═══ SUMMARY: ${savedCount} saved, ${errorCount} errors out of ${IMAGES_PER_PROMPT} ═══`);
+    console.log(`\n[engine] ═══ SUMMARY: ${savedCount} saved, ${errorCount} errors out of ${imagesCount} ═══`);
 
     if (savedCount === 0) {
       throw new Error('Ни одно изображение не скачано и не сохранено.');
@@ -287,7 +293,7 @@ async function generatePrompt(prompt, options = {}) {
 
     onProgress({
       step: 'done',
-      message: `✅ Сохранено ${savedCount}/${IMAGES_PER_PROMPT} изображений`,
+      message: `✅ Сохранено ${savedCount}/${imagesCount} изображений`,
       state: 'done',
     });
 
@@ -295,11 +301,15 @@ async function generatePrompt(prompt, options = {}) {
       images: imageResults,
       savedCount,
       errorCount,
-      total: IMAGES_PER_PROMPT,
+      total: imagesCount,
     };
 
   } finally {
-    isGenerating = false;
+    // NOTE: Do NOT set isGenerating = false here!
+    // This function handles ONE prompt. The batch loop in main.js
+    // manages the overall lifecycle. Setting isGenerating=false here
+    // would make main.js think the user pressed Stop after every prompt.
+    // isGenerating is reset by stopGeneration() or by main.js after the batch.
   }
 }
 
@@ -693,47 +703,36 @@ async function enterPrompt(page, prompt) {
   console.log(`[engine] === enterPrompt called ===`);
   console.log(`[engine] Prompt text: "${prompt.substring(0, 100)}..."`);
 
-  const result = await page.evaluate((text) => {
-    let el = document.querySelector('div[id="hf:tour-image-prompt"]');
-    if (!el) el = document.querySelector('div[role="textbox"][contenteditable="true"]');
-    if (!el) el = document.querySelector('div[contenteditable="true"][class*="cursor-text"]');
-    if (!el) return { error: 'Not found' };
-
-    el.focus();
-    el.click();
-
-    // Select all existing text
-    const sel = window.getSelection();
-    const range = document.createRange();
-    range.selectNodeContents(el);
-    sel.removeAllRanges();
-    sel.addRange(range);
-
-    // Overwrite the selection directly with insertText (best for React)
-    const ok = document.execCommand('insertText', false, text);
-    
-    // Fallback if insertText fails
-    if (!ok || el.innerText.trim() === '') {
-      el.innerHTML = '';
-      const p = document.createElement('p');
-      const span = document.createElement('span');
-      span.textContent = text;
-      p.appendChild(span);
-      el.appendChild(p);
-
-      el.dispatchEvent(new Event('input', { bubbles: true }));
-      el.dispatchEvent(new Event('change', { bubbles: true }));
-      try { el.dispatchEvent(new InputEvent('input', { bubbles: true, cancelable: true, inputType: 'insertText', data: text })); } catch {}
+  // 1. Focus the element using Puppeteer native click
+  try {
+    const selectors = [
+      'div[id="hf:tour-image-prompt"]',
+      'div[role="textbox"][contenteditable="true"]',
+      'div[contenteditable="true"][class*="cursor-text"]'
+    ];
+    let clicked = false;
+    for (const sel of selectors) {
+      const el = await page.$(sel);
+      if (el) {
+        // Click 3 times to select all text inside
+        await el.click({ clickCount: 3 });
+        clicked = true;
+        break;
+      }
     }
+    if (!clicked) throw new Error('Not found');
 
-    return { 
-      success: true, 
-      finalText: el.innerText.trim() 
-    };
-  }, prompt);
+    // 2. Clear native way
+    await page.keyboard.press('Backspace');
+    await chrome.sleep(100);
 
-  if (result.error) {
-    throw new Error(`Поле ввода промпта не найдено: ${result.error}`);
+    // 3. Type native way (chunked for speed but reliable)
+    // We type it out since React state needs to catch key events
+    await page.keyboard.type(prompt, { delay: 0 });
+    await chrome.sleep(300);
+
+  } catch (err) {
+    throw new Error(`Поле ввода промпта не найдено или недоступно: ${err.message}`);
   }
 
   await chrome.sleep(500);
@@ -829,39 +828,48 @@ async function setAspectRatio(page, aspect) {
 // ══════════════════════════════════════════════════════════════
 
 async function clickGenerate(page) {
-  // Try known selectors
-  const clicked = await page.evaluate(() => {
-    // Primary: by ID
-    let btn = document.querySelector('button[id="hf:image-form-submit"]');
-    if (btn && btn.offsetParent !== null && !btn.disabled) {
-      btn.click();
-      return true;
-    }
+  try {
+    const selectors = [
+      'button[id="hf:image-form-submit"]',
+      'button[type="submit"]',
+      'button:not([disabled])' // Fallback to look through text below
+    ];
 
-    // Fallback: submit button
-    btn = document.querySelector('button[type="submit"]');
-    if (btn && btn.offsetParent !== null && !btn.disabled) {
-      btn.click();
-      return true;
-    }
-
-    // Fallback: find button with "Generate" text
-    const allBtns = document.querySelectorAll('button');
-    for (const b of allBtns) {
-      if (b.textContent.includes('Generate') && b.offsetParent !== null && !b.disabled) {
-        b.click();
-        return true;
+    let clicked = false;
+    for (const sel of selectors) {
+      if (sel === 'button:not([disabled])') {
+        const buttons = await page.$$(sel);
+        for (const btn of buttons) {
+          const text = await page.evaluate(el => el.textContent, btn);
+          if (text && text.includes('Generate')) {
+            await btn.click();
+            clicked = true;
+            break;
+          }
+        }
+      } else {
+        const btn = await page.$(sel);
+        if (btn) {
+          const disabled = await page.evaluate(el => el.disabled, btn);
+          if (!disabled) {
+            await btn.click();
+            clicked = true;
+          }
+        }
       }
+      if (clicked) break;
     }
 
+    if (clicked) {
+      console.log('[engine] ✅ Generate clicked');
+      return true;
+    }
+    
     return false;
-  });
-
-  if (clicked) {
-    console.log('[engine] ✅ Generate clicked');
+  } catch (err) {
+    console.log(`[engine] ⚠️ clickGenerate failed: ${err.message}`);
+    return false;
   }
-
-  return clicked;
 }
 
 
@@ -979,6 +987,13 @@ async function waitForSingleImage(page, firstImgBefore, index, total, onProgress
     // Get current first img URL
     const firstImgNow = await getFirstFeedImgUrl(page);
 
+    // If we missed the Queued state entirely, but a new image appeared at the top of the feed:
+    if (!queuedGone && firstImgNow && firstImgBefore && firstImgNow !== firstImgBefore) {
+      console.log(`[engine] 🎬 Image ${index}: missed Queued state but new image detected!`);
+      queuedGone = true;
+      generationDetected = true;
+    }
+
     // Status update
     const status = queuedGone ? 'обработка...' : queued > 0 ? 'генерация...' : 'ожидание...';
     onProgress({
@@ -986,7 +1001,7 @@ async function waitForSingleImage(page, firstImgBefore, index, total, onProgress
       message: `Изображение ${index}/${total}: ${status} (${elapsed}с)`,
     });
 
-    // Check if first img URL changed (= new image appeared at top of feed)
+    // Check if new image is ready and differs from the before click state
     if (queuedGone && firstImgNow && firstImgNow !== firstImgBefore) {
       // Wait for full resolution
       await chrome.sleep(2000);
@@ -1013,6 +1028,12 @@ async function waitForSingleImage(page, firstImgBefore, index, total, onProgress
         const finalUrl = await getFirstFeedImgUrl(page);
         return finalUrl || firstImgNow;
       }
+    }
+    
+    // FALLBACK: If we've been waiting for 60 seconds and still no Queued state, but the prompt is in
+    if (!generationDetected && elapsed > 60 && firstImgNow) {
+       console.log(`[engine] ⚠️ Image ${index}: 60 seconds passed with no Queued state. Accepting current first img as a fallback.`);
+       return firstImgNow;
     }
 
     // Debug log every 15 seconds
@@ -1178,7 +1199,7 @@ function validateDownload(filePath, dlResult) {
  * Save intermediate meta.json after each image is processed.
  * Enables crash recovery — state is persisted per image.
  */
-function saveIntermediateMeta(outputDir, prompt, model, aspect, quality, imageResults) {
+function saveIntermediateMeta(outputDir, prompt, model, aspect, quality, imageResults, totalImages) {
   if (!outputDir) return;
 
   const meta = {
@@ -1187,7 +1208,7 @@ function saveIntermediateMeta(outputDir, prompt, model, aspect, quality, imageRe
     aspect_ratio: aspect,
     resolution: quality,
     status: 'in_progress',
-    total: IMAGES_PER_PROMPT,
+    total: totalImages || 4,
     savedCount: imageResults.filter(r => r.state === 'saved').length,
     errorCount: imageResults.filter(r => r.state === 'error').length,
     images: imageResults.map(r => ({
@@ -1586,9 +1607,7 @@ function stopGeneration() {
   shouldStop = true;
 }
 
-function getIsGenerating() {
-  return isGenerating;
-}
+// Removed inline function getIsGenerating here since it was duplicated at the top
 
 
 // ══════════════════════════════════════════════════════════════
@@ -1601,6 +1620,9 @@ module.exports = {
   buildDownloadCandidates,
   stopGeneration,
   getIsGenerating,
+  getShouldStop,
+  resetShouldStop,
+  _resetIsGenerating,
   dedupeUrls,
   isUnlimitedOn,
   ensureUnlimited,

@@ -154,7 +154,7 @@ ipcMain.handle('file:download-template', async () => {
 // =============================================================
 
 ipcMain.handle('generate:start', async (event, { prompts, settings, projectId }) => {
-  const { model, aspect, quality } = settings;
+  const { model, aspect, quality, imagesCount } = settings;
 
   // Route output to project's generated/ folder if projectId is set
   let baseOutputDir = config.ensureOutputDir();
@@ -194,14 +194,27 @@ ipcMain.handle('generate:start', async (event, { prompts, settings, projectId })
     console.log(`[main] Prompt ${i + 1}: id=${p.id}, text="${(p.prompt || 'EMPTY!').substring(0, 80)}"`);
   });
 
+  // Reset stop flag for this entire batch
+  if (typeof engine.resetShouldStop === 'function') {
+    engine.resetShouldStop();
+  } else {
+    engine.isGenerating = true; // Fallback for older versions if needed
+  }
+
   const results = [];
   for (let i = 0; i < prompts.length; i++) {
-    if (!engine.getIsGenerating() && i > 0) break; // Stopped
+    // Check if stopped by user (only via explicit stop button)
+    if (engine.getShouldStop()) {
+      console.log(`[main] ─── User pressed STOP before prompt ${i + 1}. Breaking. ───`);
+      break;
+    }
 
     const prompt = prompts[i];
-    const idx = i + 1;
-    const promptDir = path.join(baseOutputDir, String(idx).padStart(3, '0'));
-    console.log(`[main] ─── Processing prompt ${idx}/${prompts.length}: "${(prompt.prompt || 'EMPTY!').substring(0, 60)}" ───`);
+    const runIndex = i + 1; // Index in the current generation batch (1-based) for UI sync
+    const folderIndex = prompt.originalIndex !== undefined ? prompt.originalIndex + 1 : runIndex; // Absolute index for folder mapping
+    
+    const promptDir = path.join(baseOutputDir, String(folderIndex).padStart(3, '0'));
+    console.log(`[main] ─── Processing prompt ${runIndex}/${prompts.length}: "${(prompt.prompt || 'EMPTY!').substring(0, 60)}" ───`);
     console.log(`[main] ─── Output dir: ${promptDir} ───`);
 
     if (!fs.existsSync(promptDir)) {
@@ -213,7 +226,7 @@ ipcMain.handle('generate:start', async (event, { prompts, settings, projectId })
       id: prompt.id,
       prompt: prompt.prompt,
       status: 'preparing',
-      target_count: 4,
+      target_count: imagesCount || 4,
       generated_count: 0,
       in_flight_count: 0,
       files: [],
@@ -233,41 +246,42 @@ ipcMain.handle('generate:start', async (event, { prompts, settings, projectId })
 
     // Send progress
     sendToRenderer('generate:progress', {
-      current: idx,
+      current: runIndex,
       total: prompts.length,
       prompt: prompt.prompt,
       status: 'generating',
-      message: `Промпт ${idx}/${prompts.length}...`,
+      message: `Промпт ${runIndex}/${prompts.length}...`,
     });
 
     // ── Try generation (with 1 auto-retry) ──
     let succeeded = false;
     for (let attempt = 1; attempt <= 2 && !succeeded; attempt++) {
       if (attempt === 2) {
-        console.log(`[main] Retry for prompt ${idx}...`);
+        console.log(`[main] Retry for prompt ${runIndex}...`);
         sendToRenderer('generate:progress', {
-          current: idx,
+          current: runIndex,
           total: prompts.length,
           prompt: prompt.prompt,
           status: 'retrying',
-          message: `Повторяю промпт ${idx}...`,
+          message: `Повторяю промпт ${runIndex}...`,
         });
       }
 
       try {
         meta.status = 'generating';
-        meta.in_flight_count = 4;
+        meta.in_flight_count = imagesCount || 4;
         saveMeta(promptDir, meta);
 
-        // ── Generate + download images (engine handles both) ──
+        // Generate via Engine
         const result = await engine.generatePrompt(prompt.prompt, {
           model,
           aspect,
           quality,
-          outputDir: promptDir, // Engine saves directly here
+          imagesCount: imagesCount || 4,
+          outputDir: promptDir,
           onProgress: (progress) => {
             sendToRenderer('generate:progress', {
-              current: idx,
+              current: runIndex,
               total: prompts.length,
               prompt: prompt.prompt,
               ...progress,
@@ -290,14 +304,14 @@ ipcMain.handle('generate:start', async (event, { prompts, settings, projectId })
           meta.error = null;
           saveMeta(promptDir, meta);
 
-          results.push({ idx, id: prompt.id, status: 'done', files: files.length });
+          results.push({ idx: folderIndex, id: prompt.id, status: 'done', files: files.length });
           succeeded = true;
         } else {
           throw new Error('Ни одно изображение не сохранено');
         }
 
       } catch (err) {
-        console.error(`[main] Prompt ${idx} attempt ${attempt} error: ${err.message}`);
+        console.error(`[main] Prompt ${runIndex} attempt ${attempt} error: ${err.message}`);
 
         if (attempt === 2 || err.message.includes('Сессия истекла') || err.message.includes('не поддерживает Unlimited')) {
           // Final failure
@@ -307,7 +321,7 @@ ipcMain.handle('generate:start', async (event, { prompts, settings, projectId })
           meta.timestamps.completed = new Date().toISOString();
           saveMeta(promptDir, meta);
 
-          results.push({ idx, id: prompt.id, status: 'error', error: err.message });
+          results.push({ idx: folderIndex, id: prompt.id, status: 'error', error: err.message });
 
           // Fatal auth error — stop all
           if (err.message.includes('Сессия истекла')) {
@@ -322,8 +336,19 @@ ipcMain.handle('generate:start', async (event, { prompts, settings, projectId })
       }
     }
 
-    // Check if stopped
-    if (!engine.getIsGenerating()) break;
+    // Check if stopped by user (only via explicit stop button)
+    if (engine.getShouldStop()) {
+      console.log(`[main] ─── User pressed STOP after prompt ${i + 1}. Breaking. ───`);
+      break;
+    }
+  }
+
+  // Reset engine state after the entire batch completes
+  try { engine.resetShouldStop(); } catch {}
+  // isGenerating was left true by generatePrompt — reset it now
+  if (typeof engine.getIsGenerating === 'function') {
+    // Direct module-level reset
+    engine._resetIsGenerating && engine._resetIsGenerating();
   }
 
   sendToRenderer('generate:progress', {
@@ -390,23 +415,61 @@ ipcMain.handle('chrome:check-installed', () => {
 //  IPC HANDLERS — Projects
 // =============================================================
 
-function getProjectsFile() {
-  return path.join(config.getOutputDir(), 'projects.json');
-}
-
 function loadProjects() {
-  const file = getProjectsFile();
-  if (!fs.existsSync(file)) return [];
-  try {
-    return JSON.parse(fs.readFileSync(file, 'utf-8'));
-  } catch {
-    return [];
+  const outputDir = config.getOutputDir();
+  if (!fs.existsSync(outputDir)) return [];
+
+  // Migration: If old `projects.json` exists in root, read it and distribute to folders
+  const oldFile = path.join(outputDir, 'projects.json');
+  if (fs.existsSync(oldFile)) {
+    try {
+      const oldData = JSON.parse(fs.readFileSync(oldFile, 'utf-8'));
+      for (const p of oldData) {
+        if (!p.folderName) continue;
+        const projectDir = path.join(outputDir, p.folderName);
+        if (!fs.existsSync(projectDir)) fs.mkdirSync(projectDir, { recursive: true });
+        
+        const projectJsonPath = path.join(projectDir, 'project.json');
+        if (!fs.existsSync(projectJsonPath)) {
+          fs.writeFileSync(projectJsonPath, JSON.stringify(p, null, 2), 'utf-8');
+        }
+      }
+      // Backup and remove old file
+      fs.renameSync(oldFile, path.join(outputDir, 'projects_backup.json'));
+    } catch(err) {
+      console.error('[projects] Migration error:', err);
+    }
   }
+
+  const folders = fs.readdirSync(outputDir).filter(f => fs.statSync(path.join(outputDir, f)).isDirectory());
+  const projects = [];
+
+  for (const folder of folders) {
+    const projectFile = path.join(outputDir, folder, 'project.json');
+    if (fs.existsSync(projectFile)) {
+      try {
+        const projectData = JSON.parse(fs.readFileSync(projectFile, 'utf-8'));
+        projectData.folderName = folder; // enforce folder link
+        projects.push(projectData);
+      } catch (e) {
+        console.error(`[projects] Error reading ${projectFile}:`, e);
+      }
+    }
+  }
+
+  // Sort by createdAt descending
+  return projects.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 }
 
-function saveProjects(projects) {
-  const dir = config.ensureOutputDir();
-  fs.writeFileSync(path.join(dir, 'projects.json'), JSON.stringify(projects, null, 2), 'utf-8');
+function saveProject(project) {
+  const outputDir = config.ensureOutputDir();
+  if (!project.folderName) return;
+  const projectDir = path.join(outputDir, project.folderName);
+  if (!fs.existsSync(projectDir)) {
+    fs.mkdirSync(projectDir, { recursive: true });
+  }
+  const file = path.join(projectDir, 'project.json');
+  fs.writeFileSync(file, JSON.stringify(project, null, 2), 'utf-8');
 }
 
 ipcMain.handle('projects:list', () => {
@@ -426,16 +489,17 @@ ipcMain.handle('projects:create', (event, { name, icon }) => {
     status: 'draft',        // draft | in_progress | completed
     model: config.get('selectedModel') || 'nano_banana_pro',
     promptCount: 0,
-    promptFile: null,
+    prompts: [], // Array to hold {id, text, status...}
+    sourceMeta: null,
   };
-  projects.unshift(project);
-  saveProjects(projects);
-
-  // Create project folder structure
+  
+  // Create project folder structure and save project.json
   const projectDir = path.join(config.ensureOutputDir(), folderName);
   if (!fs.existsSync(projectDir)) {
     fs.mkdirSync(projectDir, { recursive: true });
   }
+  saveProject(project);
+
   // Create subfolders
   const generatedDir = path.join(projectDir, 'generated');
   const selectedDir = path.join(projectDir, 'selected');
@@ -488,9 +552,6 @@ ipcMain.handle('projects:delete', (event, { id }) => {
       console.error('[projects] Failed to delete folder:', err);
     }
   }
-
-  projects = projects.filter(p => p.id !== id);
-  saveProjects(projects);
   return { success: true };
 });
 
@@ -498,8 +559,10 @@ ipcMain.handle('projects:update', (event, { id, updates }) => {
   const projects = loadProjects();
   const idx = projects.findIndex(p => p.id === id);
   if (idx === -1) return { success: false, error: 'Project not found' };
+  
   Object.assign(projects[idx], updates);
-  saveProjects(projects);
+  saveProject(projects[idx]);
+  
   return { success: true, project: projects[idx] };
 });
 
@@ -515,18 +578,16 @@ ipcMain.handle('projects:save-prompts', (event, { projectId, prompts, sourceFile
   // Copy source CSV if available
   if (sourceFile && fs.existsSync(sourceFile)) {
     fs.copyFileSync(sourceFile, path.join(projectDir, 'prompts.csv'));
+    project.sourceMeta = {
+      originalFileName: require('path').basename(sourceFile),
+      importedAt: new Date().toISOString()
+    };
   }
 
-  // Save parsed prompts as JSON for easy loading
-  fs.writeFileSync(
-    path.join(projectDir, 'prompts.json'),
-    JSON.stringify(prompts, null, 2),
-    'utf-8'
-  );
-
   // Update project metadata
+  project.prompts = prompts;
   project.promptCount = prompts.length;
-  saveProjects(projects);
+  saveProject(project);
 
   return { success: true, count: prompts.length };
 });
@@ -538,16 +599,19 @@ ipcMain.handle('projects:load-prompts', (event, { projectId }) => {
   if (!project) return { success: false, prompts: [] };
 
   const projectDir = path.join(config.ensureOutputDir(), project.folderName || projectId);
-  const promptsFile = path.join(projectDir, 'prompts.json');
+  const oldPromptsFile = path.join(projectDir, 'prompts.json');
 
-  if (!fs.existsSync(promptsFile)) return { success: true, prompts: [] };
-
-  try {
-    const prompts = JSON.parse(fs.readFileSync(promptsFile, 'utf-8'));
-    return { success: true, prompts };
-  } catch {
-    return { success: false, prompts: [] };
+  // Migration: If old prompts.json exists and project.json doesn't have prompts yet
+  if ((!project.prompts || project.prompts.length === 0) && fs.existsSync(oldPromptsFile)) {
+    try {
+      project.prompts = JSON.parse(fs.readFileSync(oldPromptsFile, 'utf-8'));
+      project.promptCount = project.prompts.length;
+      saveProject(project);
+      fs.renameSync(oldPromptsFile, path.join(projectDir, 'prompts_backup.json'));
+    } catch {}
   }
+
+  return { success: true, prompts: project.prompts || [] };
 });
 
 // ── Get generated images for a prompt ──
@@ -613,7 +677,7 @@ ipcMain.handle('projects:save-selection', (event, { projectId, selections }) => 
 
   // Update project status
   project.status = 'completed';
-  saveProjects(projects);
+  saveProject(project);
 
   return { success: true, copied };
 });

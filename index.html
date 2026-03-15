@@ -413,14 +413,27 @@
           </button>
         </div>
 
-        <!-- File info (shown after import) -->
-        <div class="card file-info mt-md" id="file-info" style="display: none;">
-          <span class="file-info-icon">📊</span>
-          <div style="flex: 1;">
-            <div class="file-info-name" id="file-name">prompts_spring.csv</div>
-            <div class="file-info-meta" id="file-prompt-count">Загружено 12 промптов</div>
+        <!-- File info (shown after import or when opening a filled project) -->
+        <div class="card file-info mt-md" id="file-info" style="display: none; align-items: center; justify-content: space-between;">
+          <div style="display: flex; align-items: center; gap: 12px;">
+            <span class="file-info-icon">📊</span>
+            <div>
+              <div class="file-info-name" id="file-name">prompts.csv</div>
+              <div class="file-info-meta" id="file-prompt-count">Загружено 0 промптов</div>
+            </div>
           </div>
-          <span class="badge badge-success">✓ Готово</span>
+          <div style="display: flex; gap: 8px;">
+            <button class="btn btn-ghost btn-sm" onclick="appUpdatePrompts()" title="Загрузить обновленный файл и сравнить по ID">Обновить 🔄</button>
+            <button class="btn btn-ghost btn-sm" style="color: var(--danger)" onclick="appReplacePrompts()" title="Полностью удалить старые промпты и загрузить новые">Заменить 🗑</button>
+          </div>
+        </div>
+
+        <!-- Prompts Preview List -->
+        <div class="mt-md" id="prompts-preview-container" style="display: none;">
+          <div style="font-size: 13px; font-weight: 600; color: var(--text-secondary); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px;">Текущие промпты</div>
+          <div id="prompts-preview-list" style="max-height: 200px; overflow-y: auto; background: var(--bg-card); border-radius: 12px; border: 1px solid var(--border-color); padding: 4px;">
+            <!-- Rendered by JS -->
+          </div>
         </div>
       </div>
 
@@ -512,8 +525,18 @@
         </div>
         <div class="card settings-card">
           <div class="settings-card-label">Изображений на промпт</div>
-          <div class="settings-card-value">4</div>
-          <div class="settings-card-hint">4 генерации × 1 картинка (Unlimited)</div>
+          <div class="ratio-options mt-sm" id="images-count-buttons">
+            <div class="ratio-option" onclick="selectImagesCount(this, 1)">
+              <span class="ratio-label">1</span>
+            </div>
+            <div class="ratio-option" onclick="selectImagesCount(this, 2)">
+              <span class="ratio-label">2</span>
+            </div>
+            <div class="ratio-option active" onclick="selectImagesCount(this, 4)">
+              <span class="ratio-label">4</span>
+            </div>
+          </div>
+          <div class="settings-card-hint mt-sm" id="images-count-hint">4 генерации × 1 картинка (Unlimited)</div>
         </div>
       </div>
 

@@ -107,6 +107,8 @@ const state = {
   importedPrompts: [],       // [{id, prompt}] from CSV/XLSX
   importedFilePath: null,
   progressCleanup: null,     // cleanup function for progress listener
+
+  imagesPerPrompt: 4,        // Dynamic image quantity
 };
 
 // ── Navigation ──
@@ -590,12 +592,38 @@ document.addEventListener('keydown', (e) => {
 function openProject(id) {
   activeProjectId = id;
   const project = projectsList.find(p => p.id === id);
-  if (project) {
-    console.log(`[app] Opening project: ${project.name} (${id})`);
-  }
-  navigateTo('connection');
-}
+  if (!project) return;
+  
+  console.log(`[app] Opening project: ${project.name} (${id})`);
 
+  // Load state from project DB
+  state.importedPrompts = project.prompts || [];
+  state.promptCount = state.importedPrompts.length;
+  
+  if (project.model) {
+    state.selectedModel = project.model;
+    const modelSelect = document.getElementById('model-select');
+    if (modelSelect) modelSelect.value = project.model;
+  }
+
+  // Update summaries
+  updatePromptSummary(state.promptCount);
+  updateSettingsSummary();
+
+  // Smart Navigation
+  if (!state.isConnected) {
+    navigateTo('connection');
+    return;
+  }
+
+  if (project.status === 'in_progress') {
+    navigateTo('progress');
+  } else if (project.status === 'completed') {
+    navigateTo('selection');
+  } else {
+    navigateTo('settings'); // Settings acts as the prompt import/management screen
+  }
+}
 // ── Connection ──
 async function connectAccount() {
   const api = window.electronAPI;
@@ -729,14 +757,14 @@ async function simulateImport() {
 
     // 3. Update state
     state.fileImported = true;
-    state.importedPrompts = result.rows;
+    state.importedPrompts = result.rows.map(p => ({...p, status: 'pending'}));
     state.importedFilePath = filePath;
     state.promptCount = result.count;
 
     // 4. Save prompts to active project folder
     if (activeProjectId) {
       try {
-        await api.projects.savePrompts(activeProjectId, result.rows, filePath);
+        await api.projects.savePrompts(activeProjectId, state.importedPrompts, filePath);
         console.log(`[app] Saved ${result.count} prompts to project ${activeProjectId}`);
       } catch (e) {
         console.error('[app] Failed to save prompts to project:', e);
@@ -744,15 +772,9 @@ async function simulateImport() {
     }
 
     // 5. Update UI
-    document.getElementById('drop-zone').style.display = 'none';
-    document.getElementById('file-info').style.display = 'flex';
-    const countEl = document.getElementById('file-prompt-count');
-    if (countEl) countEl.textContent = `${result.count} промптов`;
-    const nameEl = document.getElementById('file-name');
-    if (nameEl) nameEl.textContent = filePath.split('/').pop();
-
-    // Update summary cards
-    updatePromptSummary(result.count);
+    updatePromptSummary(state.promptCount);
+    // renderProjectPrompts handles hiding dropzone and showing the list
+    renderProjectPrompts(); 
 
   } catch (err) {
     alert(`❌ Ошибка импорта: ${err.message}`);
@@ -773,6 +795,22 @@ function selectQuality(el, quality) {
   document.querySelectorAll('.quality-option').forEach(q => q.classList.remove('active'));
   el.classList.add('active');
   state.selectedQuality = quality;
+  updateSettingsSummary();
+}
+
+function selectImagesCount(optionEl, count) {
+  const container = document.getElementById('images-count-buttons');
+  if (!container) return;
+  const opts = container.querySelectorAll('.ratio-option');
+  opts.forEach(o => o.classList.remove('active'));
+  optionEl.classList.add('active');
+  
+  state.imagesPerPrompt = count;
+  
+  const hintEl = document.getElementById('images-count-hint');
+  if (hintEl) {
+    hintEl.textContent = `${count} генераци${pluralRu(count) === 'ов' ? 'й' : pluralRu(count) === 'а' ? 'и' : 'я'} × 1 картинка (Unlimited)`;
+  }
   updateSettingsSummary();
 }
 
@@ -833,9 +871,145 @@ function updatePromptSummary(count) {
 
   const totalEl = document.getElementById('settings-total-info');
   if (totalEl) {
-    const totalImages = count * 4;
+    const totalImages = count * state.imagesPerPrompt;
     totalEl.innerHTML = `Будет создано <strong>${totalImages} изображений</strong> для ${count} промпт${pluralRu(count)}`;
   }
+  
+  // Render prompt preview list and manage visibility
+  renderProjectPrompts();
+}
+
+function renderProjectPrompts() {
+  const dropZone = document.getElementById('drop-zone');
+  const fileInfo = document.getElementById('file-info');
+  const listContainer = document.getElementById('prompts-preview-container');
+  const listEl = document.getElementById('prompts-preview-list');
+
+  if (state.promptCount === 0 || state.importedPrompts.length === 0) {
+    if (dropZone) dropZone.style.display = 'flex';
+    if (fileInfo) fileInfo.style.display = 'none';
+    if (listContainer) listContainer.style.display = 'none';
+    return;
+  }
+
+  // We have prompts -> Hide dropzone, show info & list
+  if (dropZone) dropZone.style.display = 'none';
+  if (fileInfo) {
+    fileInfo.style.display = 'flex';
+    const nameEl = document.getElementById('file-name');
+    const metaEl = document.getElementById('file-prompt-count');
+    
+    // Attempt to get file name from project source meta
+    const project = activeProjectId ? projectsList.find(p => p.id === activeProjectId) : null;
+    const fName = project?.sourceMeta?.originalFileName || state.importedFilePath?.split(/[/\\]/).pop() || 'Проектные промпты';
+    
+    if (nameEl) nameEl.textContent = fName;
+    if (metaEl) metaEl.textContent = `В проекте ${state.promptCount} промпт${pluralRu(state.promptCount)}`;
+  }
+
+  if (listContainer && listEl) {
+    listContainer.style.display = 'block';
+    
+    // Define status styling mapping
+    const statusMap = {
+      completed: { icon: '✅', color: 'var(--success)' },
+      generating: { icon: '⚡', color: 'var(--warning)' },
+      error: { icon: '❌', color: 'var(--danger)' },
+      pending: { icon: '⏳', color: 'var(--text-secondary)' },
+    };
+
+    listEl.innerHTML = state.importedPrompts.map(p => {
+      const s = statusMap[p.status] || statusMap.pending;
+      return `
+        <div style="display: flex; align-items: center; padding: 6px 8px; border-bottom: 1px solid var(--border-color); font-size: 13px;">
+          <span style="min-width: 40px; color: ${s.color}; font-weight: 500;" title="ID">${p.id}</span>
+          <span style="margin-right: 8px;">${s.icon}</span>
+          <span style="flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text-primary);" title="${escapeHtml(p.prompt)}">${escapeHtml(p.prompt)}</span>
+        </div>
+      `;
+    }).join('');
+  }
+}
+
+// ── Update / Replace Prompts actions (Step 3) ──
+async function appUpdatePrompts() {
+  const api = window.electronAPI;
+  if (!api || !activeProjectId) return;
+  
+  const filePath = await api.file.select();
+  if (!filePath) return;
+  
+  const result = await api.file.import(filePath);
+  if (!result.success) return alert(`❌ ${result.error}`);
+  
+  const newPrompts = result.rows;
+  const oldPrompts = state.importedPrompts;
+  
+  let updatedCount = 0;
+  let addedCount = 0;
+  
+  const oldMap = new Map();
+  oldPrompts.forEach(p => oldMap.set(String(p.id), p));
+  
+  const merged = [];
+  
+  for (const n of newPrompts) {
+    const id = String(n.id);
+    if (oldMap.has(id)) {
+      const old = oldMap.get(id);
+      if (old.prompt !== n.prompt) {
+         old.prompt = n.prompt;
+         updatedCount++;
+      }
+      merged.push(old);
+      oldMap.delete(id);
+    } else {
+      merged.push({ ...n, status: 'pending' });
+      addedCount++;
+    }
+  }
+  
+  const removedCount = oldMap.size;
+  let msg = `Сверка с проектом завершена:\n✅ Без изменений текстов: ${merged.length - updatedCount - addedCount}\n🔄 Обновлены тексты: ${updatedCount}\n➕ Новых промптов: ${addedCount}\n❌ Отсутствуют в новом файле: ${removedCount}\n\nПрименить изменения?`;
+  
+  if (!confirm(msg)) return;
+  
+  if (removedCount > 0) {
+     if (confirm(`В старом проекте осталось ${removedCount} промптов, которых нет в новом файле.\n[ОК] - Оставить их в проекте\n[Отмена] - Удалить их из проекта`)) {
+       for (const old of oldMap.values()) merged.push(old);
+     }
+  }
+  
+  merged.sort((a,b) => String(a.id).localeCompare(String(b.id), undefined, {numeric: true}));
+  
+  state.importedPrompts = merged;
+  state.promptCount = merged.length;
+  state.importedFilePath = filePath;
+  
+  await api.projects.savePrompts(activeProjectId, merged, filePath);
+  updatePromptSummary(state.promptCount);
+  renderProjectPrompts();
+}
+
+async function appReplacePrompts() {
+  if (!confirm('Внимание! Это полностью удалит текущие промпты из проекта (но не сгенерированные файлы на диске) и позволит загрузить новый файл. Продолжить?')) return;
+  
+  const api = window.electronAPI;
+  if (!api || !activeProjectId) return;
+  
+  const filePath = await api.file.select();
+  if (!filePath) return; // User cancelled select
+  
+  const result = await api.file.import(filePath);
+  if (!result.success) return alert(`❌ ${result.error}`);
+  
+  state.importedPrompts = result.rows.map(p => ({...p, status: 'pending'}));
+  state.promptCount = result.count;
+  state.importedFilePath = filePath;
+  
+  await api.projects.savePrompts(activeProjectId, state.importedPrompts, filePath);
+  updatePromptSummary(state.promptCount);
+  renderProjectPrompts();
 }
 
 // ── Generation ──
@@ -854,22 +1028,37 @@ async function startGeneration() {
   state.generationFinished = false;
   state.selectionInitialized = false; // Reset selection for new generation
 
-  // Use real prompts if available, else mock
-  const prompts = state.importedPrompts.length > 0
-    ? state.importedPrompts
-    : MOCK_PROMPTS.map(p => ({ id: String(p.id), prompt: p.text }));
+  // ── Engine Overwrite Protection (Step 4) ──
+  let promptsToGenerate = state.importedPrompts.length > 0
+    ? [...state.importedPrompts]
+    : MOCK_PROMPTS.map(p => ({ id: String(p.id), prompt: p.text, status: 'pending' }));
+
+  const completedPrompts = promptsToGenerate.filter(p => p.status === 'completed');
+  if (completedPrompts.length > 0) {
+    const skipOld = confirm(`Внимание: ${completedPrompts.length} промптов уже успешно сгенерированы.\n\n[ОК] - Пропустить готовые и генерировать только новые/ожидающие\n[Отмена] - Перегенерировать ВСЁ заново (старые результаты будут удалены)`);
+    if (skipOld) {
+      promptsToGenerate = promptsToGenerate.filter(p => p.status !== 'completed');
+      if (promptsToGenerate.length === 0) {
+        alert('✅ Все промпты в этом проекте уже сгенерированы! Переходите к отбору.');
+        return;
+      }
+    } else {
+      // Force rewrite — mark locally as pending
+      promptsToGenerate.forEach(p => p.status = 'pending');
+    }
+  }
 
   // ── DIAGNOSTIC: Log what prompts we're sending ──
   console.log(`[app] ═══ GENERATION START ═══`);
   console.log(`[app] Prompt source: ${state.importedPrompts.length > 0 ? 'IMPORTED FILE' : 'MOCK DATA'}`);
-  console.log(`[app] Total prompts: ${prompts.length}`);
+  console.log(`[app] Total prompts to run: ${promptsToGenerate.length}`);
   console.log(`[app] activeProjectId: ${activeProjectId || 'NONE'}`);
-  prompts.forEach((p, i) => {
+  promptsToGenerate.forEach((p, i) => {
     console.log(`[app] Prompt ${i + 1}: id=${p.id}, text="${(p.prompt || '').substring(0, 80)}..."`);
   });
 
-  // Init prompt statuses
-  state.promptStatuses = prompts.map((p, i) => ({
+  // Init prompt statuses (Only for the ones we actually sent to Engine!)
+  state.promptStatuses = promptsToGenerate.map((p, i) => ({
     id: p.id,
     text: p.prompt,
     status: i === 0 ? 'in-progress' : 'pending',
@@ -890,7 +1079,7 @@ async function startGeneration() {
   document.getElementById('stat-images').textContent = '0';
   document.getElementById('stat-errors').textContent = '0';
   document.getElementById('current-prompt-text').textContent = state.promptStatuses[0].text;
-  document.getElementById('current-image-sub').textContent = 'Изображение 1 из 4';
+  document.getElementById('current-image-sub').textContent = `Изображение 1 из ${state.imagesPerPrompt || 4}`;
 
   navigateTo('progress');
   renderPromptStatusList();
@@ -910,10 +1099,11 @@ async function startGeneration() {
   });
 
   try {
-    const result = await api.generate.start(prompts, {
+    const result = await api.generate.start(promptsToGenerate, {
       model: state.selectedModel,
       aspect: state.selectedRatio,
       quality: state.selectedQuality,
+      imagesCount: state.imagesPerPrompt,
     }, activeProjectId);
 
     if (!result.success) {
@@ -946,11 +1136,11 @@ function handleGenerationProgress(data) {
     for (let i = 0; i < state.promptStatuses.length; i++) {
       if (i < idx) {
         state.promptStatuses[i].status = 'done';
-        state.promptStatuses[i].imagesGenerated = 4;
+        state.promptStatuses[i].imagesGenerated = state.imagesPerPrompt || 4;
       } else if (i === idx) {
         state.promptStatuses[i].status = 'in-progress';
         if (data.status === 'downloading') {
-          state.promptStatuses[i].imagesGenerated = 3;
+          state.promptStatuses[i].imagesGenerated = Math.max(0, (state.imagesPerPrompt || 4) - 1);
         }
       }
     }
@@ -988,7 +1178,7 @@ function startGenerationSimulation() {
     current.imagesGenerated++;
     state.currentImageIndex = current.imagesGenerated;
 
-    if (current.imagesGenerated >= 4) {
+    if (current.imagesGenerated >= (state.imagesPerPrompt || 4)) {
       current.status = 'done';
       state.currentPromptIndex++;
 
@@ -999,7 +1189,7 @@ function startGenerationSimulation() {
     }
 
     // Calculate overall progress
-    const totalImages = state.promptStatuses.length * 4;
+    const totalImages = state.promptStatuses.length * (state.imagesPerPrompt || 4);
     const doneImages = state.promptStatuses.reduce((sum, p) => sum + p.imagesGenerated, 0);
     state.generationProgress = Math.round((doneImages / totalImages) * 100);
 
@@ -1034,7 +1224,7 @@ function updateProgressUI() {
     const promptTextEl = document.getElementById('current-prompt-text');
     const imageSubEl = document.getElementById('current-image-sub');
     if (promptTextEl) promptTextEl.textContent = cp.text;
-    if (imageSubEl) imageSubEl.textContent = `Генерация ${cp.imagesGenerated + 1} из 4 · Unlimited 🆓`;
+    if (imageSubEl) imageSubEl.textContent = `Генерация ${cp.imagesGenerated + 1} из ${state.imagesPerPrompt || 4} · Unlimited 🆓`;
   }
 
   // ETA
@@ -1056,7 +1246,7 @@ function renderPromptStatusList() {
     };
     const statusTexts = {
       'pending': 'Ожидание',
-      'in-progress': `Генерация… ${p.imagesGenerated}/4 · Unlimited 🆓`,
+      'in-progress': `Генерация… ${p.imagesGenerated}/${state.imagesPerPrompt || 4} · Unlimited 🆓`,
       'done': 'Готово ✓',
       'error': 'Ошибка',
     };
@@ -1097,8 +1287,8 @@ async function stopGeneration() {
 
   // Mark remaining as done
   state.promptStatuses.forEach(p => {
-    if (p.status === 'pending') { p.status = 'done'; p.imagesGenerated = 4; }
-    if (p.status === 'in-progress') { p.status = 'done'; p.imagesGenerated = 4; }
+    if (p.status === 'pending') { p.status = 'done'; p.imagesGenerated = state.imagesPerPrompt || 4; }
+    if (p.status === 'in-progress') { p.status = 'done'; p.imagesGenerated = state.imagesPerPrompt || 4; }
   });
   state.generationProgress = 100;
   updateProgressUI();
@@ -1140,6 +1330,30 @@ function finishGeneration() {
         <button class="btn btn-primary" onclick="goToSelection()">Перейти к отбору</button>
       </div>
     `;
+  }
+
+  // Sync finished statuses to project json
+  const statusMap = new Map();
+  state.promptStatuses.forEach(p => statusMap.set(String(p.id), p.status));
+
+  let needsSave = false;
+  state.importedPrompts.forEach(p => {
+    const newStatus = statusMap.get(String(p.id));
+    if (newStatus && (newStatus === 'done' || newStatus === 'completed')) {
+      if (p.status !== 'completed') {
+        p.status = 'completed';
+        needsSave = true;
+      }
+    } else if (newStatus === 'error') {
+      if (p.status !== 'error') {
+        p.status = 'error';
+        needsSave = true;
+      }
+    }
+  });
+
+  if (needsSave && activeProjectId && window.electronAPI) {
+    window.electronAPI.projects.savePrompts(activeProjectId, state.importedPrompts, state.importedFilePath).catch(console.error);
   }
 }
 
@@ -1228,7 +1442,8 @@ function renderRealImages(grid, promptIdx, images) {
 function renderPlaceholderImages(grid, promptIdx) {
   const colors = IMAGE_COLORS[promptIdx] || IMAGE_COLORS[0];
   const selectedImg = state.selections[promptIdx];
-  grid.innerHTML = colors.map((color, imgIdx) => {
+  const renderCount = state.imagesPerPrompt || 4;
+  grid.innerHTML = colors.slice(0, renderCount).map((color, imgIdx) => {
     const isSelected = selectedImg === imgIdx;
     return `
       <div class="image-card ${isSelected ? 'selected' : ''}" onclick="selectImage(${promptIdx}, ${imgIdx})" style="background: linear-gradient(135deg, ${color}, ${lightenColor(color, 30)});">

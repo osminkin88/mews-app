@@ -172,10 +172,25 @@ ipcMain.handle('file:download-template', async () => {
     if (!fs.existsSync(templateSrc)) {
       return { success: false, error: 'Файл шаблона не найден в папке приложения.' };
     }
-    const desktopPath = require('electron').app.getPath('desktop');
-    const destPath = path.join(desktopPath, 'Шаблон_промптов.xlsx');
-    fs.copyFileSync(templateSrc, destPath);
-    return { success: true, path: destPath };
+
+    // Show native Save-As dialog so user picks destination
+    const { dialog } = require('electron');
+    const desktopPath = app.getPath('desktop');
+    const result = await dialog.showSaveDialog(BrowserWindow.getAllWindows()[0], {
+      title: 'Сохранить шаблон промптов',
+      defaultPath: path.join(desktopPath, 'Шаблон_промптов.xlsx'),
+      filters: [
+        { name: 'Excel', extensions: ['xlsx'] },
+        { name: 'Все файлы', extensions: ['*'] },
+      ],
+    });
+
+    if (result.canceled || !result.filePath) {
+      return { success: false, canceled: true };
+    }
+
+    fs.copyFileSync(templateSrc, result.filePath);
+    return { success: true, path: result.filePath };
   } catch (err) {
     return { success: false, error: err.message };
   }
@@ -798,31 +813,7 @@ ipcMain.handle('fs:read-image', (event, imagePath) => {
   }
 });
 
-ipcMain.handle('fs:select-image', async (event, { promptFolder, imageFile }) => {
-  const srcDir = path.join(getOutputDir(), promptFolder);
-  const selDir = path.join(srcDir, 'selected');
-
-  if (!fs.existsSync(selDir)) fs.mkdirSync(selDir, { recursive: true });
-
-  const src = path.join(srcDir, imageFile);
-  const dest = path.join(selDir, 'selected.jpg');
-
-  if (fs.existsSync(src)) {
-    fs.copyFileSync(src, dest);
-
-    // Update meta.json
-    const metaPath = path.join(srcDir, 'meta.json');
-    if (fs.existsSync(metaPath)) {
-      try {
-        const meta = JSON.parse(fs.readFileSync(metaPath, 'utf-8'));
-        meta.selected = imageFile;
-        fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2), 'utf-8');
-      } catch {}
-    }
-    return true;
-  }
-  return false;
-});
+// FIX L4: Removed legacy fs:select-image handler — use projects:save-selection instead
 
 // ── App Info ─────────────────────────────────────────────────
 ipcMain.handle('app:info', () => ({

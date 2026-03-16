@@ -255,16 +255,22 @@
       </div>
     </div>
 
-    <!-- Step progress mini-indicator -->
+    <!-- Context-aware project status indicator -->
     <div class="sidebar-progress">
-      <div class="step-indicator">
-        <div class="step-dot active" data-step="0"></div>
-        <div class="step-dot" data-step="1"></div>
-        <div class="step-dot" data-step="2"></div>
-        <div class="step-dot" data-step="3"></div>
-        <div class="step-dot" data-step="4"></div>
-        <div class="step-dot" data-step="5"></div>
-        <span class="step-label">Шаг 1 из 6</span>
+      <div class="step-indicator" id="step-indicator">
+        <div class="step-status-icon" id="step-status-icon">📁</div>
+        <div class="step-status-info">
+          <div class="step-status-project" id="step-status-project">Выберите проект</div>
+          <div class="step-status-phase">
+            <div class="step-phase-dots">
+              <div class="step-dot" data-phase="setup"></div>
+              <div class="step-dot" data-phase="generate"></div>
+              <div class="step-dot" data-phase="select"></div>
+              <div class="step-dot" data-phase="done"></div>
+            </div>
+            <span class="step-label" id="step-status-label">Начало</span>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -365,18 +371,17 @@
     <section class="screen" id="screen-connection">
       <div class="screen-header">
         <h1>Подключение</h1>
-        <p>Подключите ваш аккаунт Higgsfield для генерации</p>
+        <p>Статус соединения с Higgsfield AI</p>
       </div>
 
-      <!-- ── Not connected state ── -->
-      <div id="connection-disconnected">
-        <div class="conn-split-layout">
+      <div class="conn-center-layout">
 
-          <!-- LEFT: cat + status -->
+        <!-- ── State 1: Not connected ── -->
+        <div id="connection-disconnected">
           <div class="card conn-status-card">
             <div class="conn-cat-icon">🙀</div>
             <h2 class="conn-status-title">Не подключено</h2>
-            <p class="conn-status-sub">Войдите в аккаунт Higgsfield, чтобы начать</p>
+            <p class="conn-status-sub">Войдите в аккаунт Higgsfield, чтобы начать генерацию</p>
 
             <div class="conn-checks">
               <div class="conn-check-row">
@@ -395,62 +400,61 @@
                 <span class="conn-check-badge neutral">Нет</span>
               </div>
             </div>
-          </div>
 
-          <!-- RIGHT: how to connect -->
-          <div class="conn-next-panel">
-            <div class="conn-next-spacer"></div>
-            <div class="conn-next-title">Как подключиться? 🐾</div>
-
-            <div class="conn-steps">
-              <div class="conn-step">
-                <span class="conn-step-num">1</span>
-                <div class="conn-step-body">
-                  <div class="conn-step-name">Нажмите кнопку ниже</div>
-                  <div class="conn-step-hint">Откроется Chrome с Higgsfield.ai</div>
-                </div>
-              </div>
-              <div class="conn-step">
-                <span class="conn-step-num">2</span>
-                <div class="conn-step-body">
-                  <div class="conn-step-name">Войдите через Google</div>
-                  <div class="conn-step-hint">Авторизация займёт пару секунд</div>
-                </div>
-              </div>
-              <div class="conn-step">
-                <span class="conn-step-num">3</span>
-                <div class="conn-step-body">
-                  <div class="conn-step-name">Вернитесь сюда</div>
-                  <div class="conn-step-hint">Котик зафиксирует сессию автоматически 😸</div>
-                </div>
-              </div>
+            <div class="conn-instructions">
+              <div class="conn-instr-title">Как подключиться</div>
+              <div class="conn-instr-step"><span class="conn-instr-num">1</span> Нажмите кнопку ниже — откроется Chrome</div>
+              <div class="conn-instr-step"><span class="conn-instr-num">2</span> Войдите через Google на Higgsfield.ai</div>
+              <div class="conn-instr-step"><span class="conn-instr-num">3</span> Вернитесь в это окно</div>
             </div>
 
             <button class="btn btn-primary btn-large conn-cta-btn" onclick="connectAccount()">
               🔗 Подключиться к Higgsfield
             </button>
-            <p class="connection-session-hint" style="text-align:center;">Сессия сохраняется автоматически</p>
+            <p class="conn-hint-text">Сессия сохраняется автоматически</p>
           </div>
-
         </div>
-      </div>
 
-      <!-- ── Connected state ── -->
-      <div id="connection-connected" style="display: none;">
-        <div class="conn-split-layout">
+        <!-- ── State 2: Connecting / Checking ── -->
+        <div id="connection-connecting" style="display: none;">
+          <div class="card conn-status-card conn-status-card--checking">
+            <div class="conn-spinner-wrap">
+              <div class="conn-spinner"></div>
+            </div>
+            <h2 class="conn-status-title">Подключение...</h2>
+            <p class="conn-status-sub" id="conn-checking-hint">Войдите в Chrome и вернитесь сюда</p>
 
-          <!-- LEFT: cat + status checks -->
+            <div class="conn-checks">
+              <div class="conn-check-row">
+                <div class="conn-check-icon" id="check-chrome-icon">🌐</div>
+                <span class="conn-check-label">Chrome Browser</span>
+                <span class="conn-check-badge" id="check-chrome-badge">⏳</span>
+              </div>
+              <div class="conn-check-row">
+                <div class="conn-check-icon" id="check-auth-icon">✦</div>
+                <span class="conn-check-label">Higgsfield аккаунт</span>
+                <span class="conn-check-badge" id="check-auth-badge">⏳</span>
+              </div>
+              <div class="conn-check-row">
+                <div class="conn-check-icon" id="check-session-icon">🕐</div>
+                <span class="conn-check-label">Сессия</span>
+                <span class="conn-check-badge" id="check-session-badge">⏳</span>
+              </div>
+            </div>
+
+            <button class="btn btn-secondary conn-cta-btn" onclick="cancelConnect()">
+              Отменить
+            </button>
+          </div>
+        </div>
+
+        <!-- ── State 3: Connected ── -->
+        <div id="connection-connected" style="display: none;">
           <div class="card conn-status-card conn-status-card--connected">
             <div class="conn-heart">💚</div>
             <div class="conn-cat-icon connected">😸</div>
             <h2 class="conn-status-title">Подключено — всё мурчит ✓</h2>
             <p class="conn-status-sub">Сессия активна · Higgsfield AI</p>
-
-            <div class="conn-pills">
-              <span class="conn-pill">😸 Аккаунт</span>
-              <span class="conn-pill">🌐 Сессия</span>
-              <span class="conn-pill">🔗 API</span>
-            </div>
 
             <div class="conn-checks">
               <div class="conn-check-row">
@@ -469,49 +473,16 @@
                 <span class="conn-check-badge ok">∞</span>
               </div>
             </div>
-          </div>
-
-          <!-- RIGHT: what's next -->
-          <div class="conn-next-panel">
-            <div class="conn-next-spacer conn-next-spacer--connected"></div>
-            <div class="conn-next-title">Что дальше? 🐾</div>
-
-            <div class="conn-steps">
-              <div class="conn-step conn-step--clickable" onclick="navigateTo('settings')">
-                <span class="conn-step-num active">1</span>
-                <div class="conn-step-body">
-                  <div class="conn-step-name">Настройки генерации</div>
-                  <div class="conn-step-hint">Выберите модель, качество, пропорции</div>
-                </div>
-                <span class="conn-step-arrow">→</span>
-              </div>
-              <div class="conn-step conn-step--clickable" onclick="navigateTo('settings')">
-                <span class="conn-step-num">2</span>
-                <div class="conn-step-body">
-                  <div class="conn-step-name">Загрузить промпты</div>
-                  <div class="conn-step-hint">CSV или XLSX с вашими идеями</div>
-                </div>
-                <span class="conn-step-arrow">→</span>
-              </div>
-              <div class="conn-step conn-step--clickable" onclick="navigateTo('progress')">
-                <span class="conn-step-num">3</span>
-                <div class="conn-step-body">
-                  <div class="conn-step-name">Запустить генерацию</div>
-                  <div class="conn-step-hint">Котик всё сделает сам 🐾</div>
-                </div>
-                <span class="conn-step-arrow">→</span>
-              </div>
-            </div>
 
             <button class="btn btn-primary btn-large conn-cta-btn" onclick="navigateTo('settings')">
-              Перейти к настройкам →
+              Далее → Настройки
+            </button>
+            <button class="btn btn-ghost conn-reconnect-btn" onclick="reconnectAccount()">
+              🔗 Переподключиться
             </button>
           </div>
-
         </div>
 
-        <!-- Paw confetti container -->
-        <div id="paw-confetti-container"></div>
       </div>
     </section>
 
@@ -534,9 +505,6 @@
           <div class="drop-zone-icon">📄</div>
           <div class="drop-zone-title">Перетащите файл сюда</div>
           <div class="drop-zone-hint">CSV или XLSX · Формат: ID · Промпт · Категория · Стиль · Комментарий</div>
-          <button class="btn-template-download" onclick="event.stopPropagation(); downloadTemplate()">
-            🐾 Скачать шаблон промптов
-          </button>
         </div>
 
         <!-- File info (shown after import or when opening a filled project) -->
@@ -553,6 +521,11 @@
             <button class="btn btn-ghost btn-sm" style="color: var(--danger)" onclick="appReplacePrompts()" title="Полностью удалить старые промпты и загрузить новые">Заменить 🗑</button>
           </div>
         </div>
+
+        <!-- Template download — always visible -->
+        <button class="btn-template-download mt-sm" onclick="downloadTemplate()" style="margin-top: 8px;">
+          🐾 Скачать шаблон промптов
+        </button>
 
         <!-- Prompts Preview List -->
         <div class="mt-md" id="prompts-preview-container" style="display: none;">
@@ -623,13 +596,13 @@
         </span>
       </div>
 
-      <div class="card settings-ready-card mt-lg">
+      <div class="card settings-ready-card mt-lg" id="settings-ready-card">
         <div>
-          <div class="text-heading">Всё готово к генерации</div>
+          <div class="text-heading" id="settings-ready-title">Загрузите промпты</div>
           <div class="text-secondary mt-sm" id="settings-model-info">Nano Banana Pro · 2K · Unlimited 🆓</div>
           <div class="text-secondary mt-sm" id="settings-total-info">Загрузите промпты для начала генерации</div>
         </div>
-        <button class="btn btn-primary btn-large" onclick="startGeneration()">
+        <button class="btn btn-primary btn-large" id="btn-start-generation" onclick="startGeneration()" disabled>
           ▶ Запустить генерацию
         </button>
       </div>
@@ -644,50 +617,62 @@
         <p>Генерируем изображения для ваших промптов</p>
       </div>
 
-      <!-- Unified compact progress header -->
-      <div class="card progress-header-card">
-        <!-- Row 1: Progress bar + counter -->
-        <div class="progress-header-top">
-          <div class="progress-bar progress-bar-large" style="flex: 1;">
-            <div class="progress-fill" id="progress-bar-fill" style="width: 0%;"></div>
+      <!-- Ring progress card -->
+      <div class="card progress-ring-card">
+        <div class="progress-ring-layout">
+          <!-- SVG Ring: current prompt images -->
+          <div class="progress-ring-wrapper">
+            <svg class="progress-ring-svg" viewBox="0 0 120 120">
+              <circle class="progress-ring-bg" cx="60" cy="60" r="54" />
+              <circle class="progress-ring-circle" id="progress-ring-circle" cx="60" cy="60" r="54" />
+            </svg>
+            <div class="progress-ring-label">
+              <div class="ring-fraction">
+                <span class="ring-current" id="ring-current">0</span>
+                <span class="ring-divider">/</span>
+                <span class="ring-total" id="ring-total">4</span>
+              </div>
+              <span class="ring-pct" id="ring-pct">0%</span>
+            </div>
           </div>
-          <span class="progress-counter" id="progress-counter">0/0</span>
-          <span class="text-accent progress-pct" id="progress-percent">0%</span>
-        </div>
 
-        <!-- Row 2: Current prompt -->
-        <div class="progress-current" id="progress-current-row">
-          <span class="progress-current-arrow">→</span>
-          <span class="progress-current-num" id="progress-current-num">#1</span>
-          <span class="progress-current-text" id="current-prompt-text">Ожидание запуска…</span>
-        </div>
-
-        <!-- Row 3: Controls + stats -->
-        <div class="progress-controls-row">
-          <button class="btn btn-secondary btn-sm" id="btn-pause" onclick="togglePause()">⏸ Пауза</button>
-          <button class="btn btn-danger btn-sm" onclick="stopGeneration()">⏹ Стоп</button>
-          <div class="progress-stats-mini">
-            <span class="stat-chip done" id="stat-done-chip">✓ 0</span>
-            <span class="stat-chip error" id="stat-errors-chip" style="display: none;">✗ 0</span>
+          <!-- Right side: current prompt + overall bar -->
+          <div class="progress-ring-info">
+            <div class="progress-current-prompt">
+              <span class="progress-current-text" id="current-prompt-text">Ожидание запуска…</span>
+            </div>
+            <div class="progress-bar progress-bar-slim">
+              <div class="progress-fill" id="progress-bar-fill" style="width: 0%;"></div>
+            </div>
+            <div class="progress-bar-label" id="progress-bar-label">Промпт 0 из 0 · 0%</div>
+            <div class="progress-controls-compact">
+              <button class="btn btn-secondary btn-sm" id="btn-pause" onclick="togglePause()">⏸ Пауза</button>
+              <button class="btn btn-danger btn-sm" onclick="stopGeneration()">⏹ Стоп</button>
+              <div style="flex: 1;"></div>
+              <span class="text-secondary" id="eta-text">—</span>
+            </div>
           </div>
-          <div style="flex: 1;"></div>
-          <span class="text-secondary" id="eta-text">—</span>
         </div>
+        <!-- Hidden legacy elements for backward compat -->
+        <span id="progress-percent" style="display:none;">0%</span>
+        <span id="progress-counter" style="display:none;">0/0</span>
+        <span id="stat-done-chip" style="display:none;">✓ 0</span>
+        <span id="stat-errors-chip" style="display:none;">✗ 0</span>
+        <span id="progress-current-num" style="display:none;">1</span>
       </div>
 
-      <!-- Filter tabs + prompt list -->
+      <!-- Prompt list (no filter tabs — info is in the ring) -->
       <div class="section mt-lg">
-        <div class="progress-filter-tabs" id="progress-filter-tabs">
-          <button class="filter-tab active" onclick="filterPrompts('all', this)">Все <span class="filter-count" id="filter-all">0</span></button>
-          <button class="filter-tab" onclick="filterPrompts('in-progress', this)">Генерируется <span class="filter-count" id="filter-progress">0</span></button>
-          <button class="filter-tab" onclick="filterPrompts('done', this)">Готово <span class="filter-count" id="filter-done">0</span></button>
-          <button class="filter-tab" onclick="filterPrompts('error', this)">Ошибки <span class="filter-count" id="filter-errors">0</span></button>
-        </div>
-        <div class="status-list-scroll" id="status-list-scroll">
+        <div class="status-list-scroll card" id="status-list-scroll">
           <ul class="status-list" id="prompt-status-list">
             <!-- Generated by JS -->
           </ul>
         </div>
+        <!-- Hidden filter count elements for backward compat -->
+        <span id="filter-all" style="display:none;">0</span>
+        <span id="filter-progress" style="display:none;">0</span>
+        <span id="filter-done" style="display:none;">0</span>
+        <span id="filter-errors" style="display:none;">0</span>
       </div>
     </section>
 

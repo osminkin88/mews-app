@@ -6,6 +6,29 @@ const { app, BrowserWindow, ipcMain, shell, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
+// ── FORENSIC LOGGER ──────────────────────────────────────────
+// Captures ALL console output with millisecond timestamps to a file.
+const LOG_FILE = '/tmp/higgsfield-forensic.log';
+try {
+  // Clear log on startup
+  fs.writeFileSync(LOG_FILE, `\n${'═'.repeat(80)}\n[FORENSIC LOG STARTED] ${new Date().toISOString()}\n${'═'.repeat(80)}\n`, 'utf-8');
+} catch(e) {}
+
+const _origLog = console.log.bind(console);
+const _origErr = console.error.bind(console);
+const _origWarn = console.warn.bind(console);
+
+function _forensicLog(level, args) {
+  const ts = new Date().toISOString().replace('T', ' ').replace('Z', '');
+  const line = `${ts} [${level}] ${args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ')}\n`;
+  try { fs.appendFileSync(LOG_FILE, line, 'utf-8'); } catch(e) {}
+}
+
+console.log = (...args) => { _origLog(...args); _forensicLog('LOG', args); };
+console.error = (...args) => { _origErr(...args); _forensicLog('ERR', args); };
+console.warn = (...args) => { _origWarn(...args); _forensicLog('WRN', args); };
+// ─────────────────────────────────────────────────────────────
+
 // ── Modules ──────────────────────────────────────────────────
 const chrome = require('./chrome-manager');
 const engine = require('./higgsfield-engine');
@@ -14,7 +37,7 @@ const config = require('./config-manager');
 
 // ── Constants ────────────────────────────────────────────────
 const IS_DEV = !app.isPackaged;
-const APP_NAME = 'Higgsfield Studio';
+const APP_NAME = 'Mews';
 const WINDOW_CONFIG = {
   width: 1440,
   height: 900,
@@ -33,6 +56,7 @@ function createWindow() {
   mainWindow = new BrowserWindow({
     ...WINDOW_CONFIG,
     title: APP_NAME,
+    icon: path.join(__dirname, 'icon.png'),
     titleBarStyle: 'hiddenInset',
     trafficLightPosition: { x: 20, y: 18 },
     backgroundColor: '#0a0a0f',
@@ -69,6 +93,10 @@ function createWindow() {
 
 // ── App Lifecycle ────────────────────────────────────────────
 app.whenReady().then(() => {
+  // Set macOS dock icon
+  if (process.platform === 'darwin' && app.dock) {
+    app.dock.setIcon(path.join(__dirname, 'icon.png'));
+  }
   createWindow();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
@@ -86,9 +114,13 @@ app.on('before-quit', async () => {
 // ── Helper: Send to Renderer ─────────────────────────────────
 function sendToRenderer(channel, data) {
   if (mainWindow && !mainWindow.isDestroyed()) {
+    // FORENSIC: log what we send
+    const snap = { status: data.status, step: data.step, current: data.current, total: data.total, message: (data.message || '').substring(0,60) };
+    console.log(`[main] →renderer [${channel}]: ${JSON.stringify(snap)}`);
     mainWindow.webContents.send(channel, data);
   }
 }
+
 
 // =============================================================
 //  IPC HANDLERS — Chrome Management
@@ -204,6 +236,7 @@ ipcMain.handle('generate:start', async (event, { prompts, settings, projectId })
   }
 
   const results = [];
+  let crossPromptExcludeFingerprints = []; // Барьер: UUID от предыдущего промпта
   for (let i = 0; i < prompts.length; i++) {
     // Check if stopped by user (only via explicit stop button)
     if (engine.getShouldStop()) {
@@ -274,6 +307,7 @@ ipcMain.handle('generate:start', async (event, { prompts, settings, projectId })
         quality,
         imagesCount: targetCount,
         outputDir: promptDir,
+        excludeFingerprints: crossPromptExcludeFingerprints,
         onProgress: (progress) => {
           sendToRenderer('generate:progress', {
             current: runIndex,
@@ -283,6 +317,18 @@ ipcMain.handle('generate:start', async (event, { prompts, settings, projectId })
           });
         },
       });
+
+      // ── МЕЖПРОМПТОВЫЙ БАРЬЕР (RC-3, RC-6) ──
+      // Ждём стабилизации ленты и фиксируем ТЕКУЩИЕ UUID для защиты следующего промпта
+      if (i < prompts.length - 1 && !engine.getShouldStop()) {
+        console.log(`[main] ⏳ После промпта ${runIndex}: ждём стабилизации ленты...`);
+        const page = require('./chrome-manager').getActivePage();
+        if (page) {
+          await engine.waitForFeedStable(page, 45_000);
+          crossPromptExcludeFingerprints = await engine.snapshotFeedFingerprints(page, 20);
+          console.log(`[main] ✅ Барьер: зафиксировано ${crossPromptExcludeFingerprints.length} UUID для исключения`);
+        }
+      }
 
       // Engine returns { images, savedCount, failedCount, stoppedCount, total, promptStatus }
       const savedImages = (result.images || []).filter(r => r.state === 'saved' && r.file);

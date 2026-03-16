@@ -257,28 +257,84 @@ async function checkAuth() {
 
   try {
     const url = activePage.url();
-    const isSignIn = url.includes('sign-in');
+    const isSignIn = url.includes('sign-in') || url.includes('login');
+    console.log(`[chrome-manager] checkAuth: url=${url.substring(0, 80)}, isSignIn=${isSignIn}`);
 
-    // Check if user is logged in by looking for user avatar or menu
-    let isAuthenticated = false;
-    if (!isSignIn) {
-      try {
-        isAuthenticated = await activePage.evaluate(() => {
-          // Look for signs of being logged in
-          const avatar = document.querySelector('[class*="avatar"], [class*="Avatar"], img[alt*="avatar"]');
-          const userMenu = document.querySelector('[class*="user-menu"], [class*="userMenu"], [class*="profile"]');
-          const signOut = document.querySelector('button:has-text("Sign Out"), a:has-text("Sign Out")');
-          return !!(avatar || userMenu || signOut);
-        });
-      } catch {}
+    if (isSignIn) return { connected: true, authenticated: false, url };
+    if (!url.includes('higgsfield.ai')) {
+      console.log('[chrome-manager] checkAuth: not on higgsfield.ai');
+      return { connected: true, authenticated: false, url };
     }
 
-    return {
-      connected: true,
-      authenticated: isAuthenticated || (!isSignIn && url.includes('higgsfield.ai')),
-      url,
-    };
+    let authenticated = false;
+
+    // ── Level 1: DOM + localStorage ──
+    try {
+      const evalPromise = activePage.evaluate(() => {
+        const r = { hasToken: false, avatar: null, menuCount: 0, lsKeys: 0, lsPreview: '', signInVisible: false };
+
+        // JWT / session token in localStorage
+        for (let i = 0; i < window.localStorage.length; i++) {
+          const key = window.localStorage.key(i);
+          const val = window.localStorage.getItem(key) || '';
+          if (val.length > 30 && (val.startsWith('ey') || val.includes('"token"') || val.includes('"user"') || val.includes('"id"'))) {
+            r.hasToken = true; break;
+          }
+        }
+        r.lsKeys = window.localStorage.length;
+        r.lsPreview = Object.keys(window.localStorage).slice(0, 8).join(',');
+
+        // Avatar with user-related alt
+        for (const img of document.querySelectorAll('img')) {
+          const alt = (img.alt || '').toLowerCase();
+          if (alt.includes('avatar') || alt.includes('user') || alt.includes('profile')) {
+            r.avatar = img.src.substring(0, 60); break;
+          }
+        }
+        // Menus / profile-related elements
+        r.menuCount = document.querySelectorAll('[class*="user"],[class*="User"],[class*="account"],[class*="Account"],[class*="profile"],[class*="Profile"]').length;
+
+        // Sign-in link visible
+        const sl = document.querySelector('a[href*="sign-in"], a[href*="login"]');
+        r.signInVisible = !!(sl && sl.offsetParent !== null);
+
+        return r;
+      });
+
+      const timeout = new Promise(res => setTimeout(() => res(null), 5000));
+      const ev = await Promise.race([evalPromise, timeout]);
+
+      if (ev) {
+        console.log('[chrome-manager] checkAuth DOM:', JSON.stringify(ev));
+        if (ev.signInVisible) return { connected: true, authenticated: false, url };
+        if (ev.hasToken || ev.avatar || (ev.lsKeys > 3 && ev.menuCount > 0)) {
+          authenticated = true;
+        }
+      } else {
+        console.log('[chrome-manager] checkAuth DOM: timeout');
+      }
+    } catch (e) {
+      console.log('[chrome-manager] checkAuth DOM error:', e.message);
+    }
+
+    // ── Level 2: Cookie fallback ──
+    if (!authenticated) {
+      try {
+        const client = await activePage.createCDPSession();
+        const { cookies } = await client.send('Network.getAllCookies');
+        const hfCookies = cookies.filter(c => c.domain.includes('higgsfield'));
+        console.log(`[chrome-manager] checkAuth cookies: total=${cookies.length}, higgsfield=${hfCookies.length}`);
+        if (hfCookies.length >= 3) authenticated = true;
+        await client.detach().catch(() => {});
+      } catch (e) {
+        console.log('[chrome-manager] checkAuth cookie error:', e.message);
+      }
+    }
+
+    console.log(`[chrome-manager] checkAuth → authenticated=${authenticated}`);
+    return { connected: true, authenticated, url };
   } catch (err) {
+    console.error('[chrome-manager] checkAuth fatal:', err.message);
     return { connected: false, authenticated: false, error: err.message };
   }
 }

@@ -54,7 +54,23 @@ async function generatePrompt(prompt, options = {}) {
     imagesCount = 4,
     outputDir = null,
     onProgress = () => {},
+    excludeFingerprints = [], // UUID от предыдущего промпта — нельзя принять за своих
   } = options;
+
+  // ── FORENSIC: Prompt entry point ──
+  const promptPrefix = (prompt || '').substring(0, 60);
+  console.log(`\n[engine] ╔${'═'.repeat(70)}`);
+  console.log(`[engine] ║ GENERATE PROMPT START`);
+  console.log(`[engine] ║ prompt  : "${promptPrefix}"`);
+  console.log(`[engine] ║ model   : ${model}`);
+  console.log(`[engine] ║ aspect  : ${aspect}`);
+  console.log(`[engine] ║ images  : ${imagesCount}`);
+  console.log(`[engine] ║ output  : ${outputDir}`);
+  console.log(`[engine] ║ excludeFingerprints: ${excludeFingerprints.length} UUIDs`);
+  if (excludeFingerprints.length > 0) {
+    console.log(`[engine] ║ exclude[0]: ${excludeFingerprints[0]}`);
+  }
+  console.log(`[engine] ╚${'═'.repeat(70)}`);
 
   const page = chrome.getActivePage();
   if (!page) throw new Error('Chrome не подключён');
@@ -94,7 +110,7 @@ async function generatePrompt(prompt, options = {}) {
     await clearPromptField(page);
     console.log('[engine] ✅ Prompt field cleared (safe for toggle clicks)');
 
-    // ── Step 5: Turn OFF "Extra free gens" FIRST (prevents multi-model generation) ──
+    // ── Step 5: Turn OFF "Extra free gens" FIRST ──
     onProgress({ step: 'preflight', message: 'Отключаю Extra free gens...' });
     await ensureExtraFreeGensOff(page);
     console.log('[engine] ✅ Extra free gens: OFF');
@@ -107,7 +123,7 @@ async function generatePrompt(prompt, options = {}) {
     }
     console.log('[engine] ✅ Batch size: 1/4');
 
-    // ── Step 7: Ensure Unlimited is ON — LAST! (ExtraFree toggle can disable it) ──
+    // ── Step 7: Ensure Unlimited is ON — LAST toggle action ──
     onProgress({ step: 'preflight', message: 'Включаю Unlimited...' });
     const unlimitedOk = await ensureUnlimited(page);
     if (!unlimitedOk) {
@@ -184,8 +200,31 @@ async function generatePrompt(prompt, options = {}) {
             throw err;
           }
 
-          // Check 2: Batch MUST be 1/4 (safe to fix, doesn't submit)
+          // ── FORENSIC: PRE-SLOT STATE SNAPSHOT ──
           const batchNow = await getBatchSize(page);
+          const extraOnPre = await isExtraFreeGensOn(page);
+          const unlimitedNowPre = await isUnlimitedOn(page);
+          const promptInField = await page.evaluate((sels) => {
+            for (const sel of sels) {
+              const el = document.querySelector(sel);
+              if (el) return el.innerText.trim().substring(0, 80);
+            }
+            return '(not found)';
+          }, ['div[id="hf:tour-image-prompt"]', 'div[role="textbox"][contenteditable="true"]']);
+          const queuedPre = await countQueuedItems(page);
+
+          console.log(`[engine] ┌─── PRE-SLOT ${img.index} (attempt ${attempt}) ────────────────────────`);
+          console.log(`[engine] │ batch       : ${batchNow ? `${batchNow.current}/${batchNow.max}` : 'NOT FOUND'}`);
+          console.log(`[engine] │ extra_free  : ${extraOnPre ? 'ON ⚠️' : 'OFF ✅'}`);
+          console.log(`[engine] │ unlimited   : ${unlimitedNowPre ? 'ON ✅' : 'OFF ⚠️'}`);
+          console.log(`[engine] │ queued_now  : ${queuedPre}`);
+          console.log(`[engine] │ prompt_field: "${promptInField}"`);
+          console.log(`[engine] │ expected_pr : "${(prompt || '').substring(0, 80)}"`);
+          const promptMatch = promptInField.length > 5 && (prompt || '').includes(promptInField.substring(0, Math.min(20, promptInField.length)));
+          console.log(`[engine] │ field_match : ${promptMatch ? '✅ yes' : '⚠️ NO MATCH'}`);
+          console.log(`[engine] └──────────────────────────────────────────────────────`);
+
+          // Check 2: Batch MUST be 1/4 (safe to fix, doesn't submit)
           if (!batchNow || batchNow.current !== 1) {
             console.log(`[engine] ⚠️ Batch = ${batchNow ? batchNow.current : '?'} перед слотом ${img.index}! Исправляю...`);
             const batchFixed = await ensureBatchSize1(page);
@@ -195,20 +234,42 @@ async function generatePrompt(prompt, options = {}) {
               err.errorReason = 'batch_setup_failed';
               throw err;
             }
+            const batchAfter = await getBatchSize(page);
+            console.log(`[engine] Batch after fix: ${batchAfter ? `${batchAfter.current}/${batchAfter.max}` : 'NOT FOUND'}`);
           }
 
-          // Check 3&4: LOG toggle state only, do NOT click (would trigger generation)
-          const extraOn = await isExtraFreeGensOn(page);
-          if (extraOn) console.log(`[engine] ⚠️ Extra free gens ON перед слотом ${img.index} (не трогаем)`);
-          const unlimitedNow = await isUnlimitedOn(page);
-          if (!unlimitedNow) console.log(`[engine] ⚠️ Unlimited OFF перед слотом ${img.index} (не трогаем)`);
-
           await dismissOverlays(page);
+
+          // ═══ STRICT GUARD: Wait for queued==0 before clicking ═══
+          const queuedBeforeClick = await countQueuedItems(page);
+          if (queuedBeforeClick > 0) {
+            console.log(`[engine] ⏳ GUARD: queued=${queuedBeforeClick} before slot ${img.index} — waiting for queue to clear...`);
+            const guardTimeout = 300000; // 5 minutes max (Higgsfield gen can take 4+ min)
+            const guardStart = Date.now();
+            let guardCleared = false;
+            while (Date.now() - guardStart < guardTimeout) {
+              await chrome.sleep(3000);
+              const q = await countQueuedItems(page);
+              const elapsed = Math.round((Date.now() - guardStart) / 1000);
+              console.log(`[engine] ⏳ GUARD: queued=${q} (${elapsed}s)`);
+              if (q === 0) {
+                console.log(`[engine] ✅ GUARD: queue cleared after ${elapsed}s`);
+                guardCleared = true;
+                break;
+              }
+            }
+            if (!guardCleared) {
+              const err = new Error(`GUARD: очередь не очистилась за 5 минут (queued=${await countQueuedItems(page)}). Слот ${img.index} пропущен.`);
+              err.errorClass = 'recoverable';
+              err.errorReason = 'guard_timeout';
+              throw err;
+            }
+          }
 
           // ═══ SNAPSHOT FEED ═══
           const feedCountBefore = await countFeedImages(page);
           const fingerprintsBefore = await snapshotFeedFingerprints(page, 10);
-          console.log(`[engine] 📊 Slot ${img.index} pre-click: feedCount=${feedCountBefore}, fingerprints=${fingerprintsBefore.length}`);
+          console.log(`[engine] 📊 Slot ${img.index} pre-click: feedCount=${feedCountBefore}, fingerprints=${fingerprintsBefore.length}, exclude=${excludeFingerprints.length}`);
 
           // ═══ CLICK GENERATE ═══
           const clicked = await clickGenerate(page);
@@ -229,9 +290,16 @@ async function generatePrompt(prompt, options = {}) {
           // Give the site time to process before polling
           await chrome.sleep(2000);
 
+          // ── FORENSIC: POST-CLICK STATE ──
+          const queuedPost = await countQueuedItems(page);
+          const feedPost = await countFeedImages(page);
+          const topUrlPost = await getFirstFeedImgUrl(page);
+          const topUUIDPost = extractUUID(topUrlPost);
+          console.log(`[engine] 📡 POST-CLICK (2s): queued=${queuedPost}, feed=${feedPost} (was ${feedCountBefore}), topUUID=${topUUIDPost || 'none'}, isForbidden=${topUUIDPost ? (excludeFingerprints.includes(topUUIDPost) || fingerprintsBefore.includes(topUUIDPost)) : 'N/A'}`);
+
           // ═══ WAIT FOR NEW IMAGE (fingerprint primary detection) ═══
           onProgress({ step: 'waiting', message: `Слот ${img.index}/${imagesCount}: жду результат...`, state: 'generating' });
-          const imageUrl = await waitForSingleImage(page, feedCountBefore, fingerprintsBefore, img.index, imagesCount, onProgress);
+          const imageUrl = await waitForSingleImage(page, feedCountBefore, fingerprintsBefore, img.index, imagesCount, onProgress, excludeFingerprints);
 
           if (!imageUrl) {
             // Check if feed shows a site-side failure
@@ -260,16 +328,19 @@ async function generatePrompt(prompt, options = {}) {
           }
 
           img.url = imageUrl;
-          console.log(`[engine] ✅ Slot ${img.index} image URL acquired: ${imageUrl.substring(0, 80)}...`);
+          const acceptedUUID = extractUUID(imageUrl);
+          console.log(`[engine] ✅ Slot ${img.index} image URL acquired`);
+          console.log(`[engine]    URL     : ${imageUrl.substring(0, 100)}`);
+          console.log(`[engine]    UUID    : ${acceptedUUID}`);
+          console.log(`[engine]    excluded: ${acceptedUUID ? (excludeFingerprints.includes(acceptedUUID) ? '⚠️ YES (BAD!)' : 'no ✅') : 'N/A'}`);
 
           // ═══ DOWNLOAD ═══
           img.state = 'downloading';
-          console.log(`[engine] ═══ SLOT ${img.index} — downloading ═══`);
-          onProgress({ step: 'downloading', message: `Слот ${img.index}/${imagesCount}: скачиваю...`, state: 'downloading' });
-
           const destPath = outputDir
             ? path.join(outputDir, `gen_${img.index}.jpg`)
             : path.join(__dirname, 'output', 'temp', `gen_${img.index}.jpg`);
+          console.log(`[engine] 💾 Slot ${img.index} — downloading to: ${destPath}`);
+          onProgress({ step: 'downloading', message: `Слот ${img.index}/${imagesCount}: скачиваю...`, state: 'downloading' });
 
           const destDir = path.dirname(destPath);
           if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
@@ -584,29 +655,65 @@ async function ensureUnlimited(page) {
  * It MUST be OFF for strict single-model generation.
  */
 async function isExtraFreeGensOn(page) {
-  return await page.evaluate(() => {
-    // Find text containing "Extra" near a switch
-    const allText = document.querySelectorAll('span, div, p, label');
-    for (const el of allText) {
-      const text = el.textContent.trim();
-      if (text.includes('Extra') && text.includes('free')) {
-        const parent = el.closest('div') || el.parentElement;
-        if (parent) {
-          const sw = parent.querySelector('button[role="switch"]');
-          if (sw) return sw.getAttribute('aria-checked') === 'true';
+  const result = await page.evaluate(() => {
+    // DEBUG: dump ALL switches and their context
+    const allSwitches = document.querySelectorAll('button[role="switch"]');
+    const debugInfo = [];
+    allSwitches.forEach((sw, idx) => {
+      const parent = sw.parentElement;
+      const grandparent = parent ? parent.parentElement : null;
+      debugInfo.push({
+        idx,
+        checked: sw.getAttribute('aria-checked'),
+        parentTag: parent ? parent.tagName : null,
+        parentText: parent ? parent.textContent.trim().substring(0, 60) : null,
+        grandparentText: grandparent ? grandparent.textContent.trim().substring(0, 80) : null,
+      });
+    });
+
+    // Strategy: find the switch whose IMMEDIATE label/sibling contains "Extra free gens"
+    // Walk through all switches and find the one labeled "Extra free gens"
+    for (const sw of allSwitches) {
+      // Check previous sibling text
+      const prev = sw.previousElementSibling;
+      if (prev && prev.textContent.trim().includes('Extra free gens')) {
+        return { state: sw.getAttribute('aria-checked') === 'true', strategy: 'prevSibling', debug: debugInfo };
+      }
+      // Check next sibling text
+      const next = sw.nextElementSibling;
+      if (next && next.textContent.trim().includes('Extra free gens')) {
+        return { state: sw.getAttribute('aria-checked') === 'true', strategy: 'nextSibling', debug: debugInfo };
+      }
+      // Check parent's DIRECT text (not grandparent) — only if parent is small
+      const parent = sw.parentElement;
+      if (parent && parent.children.length <= 3) {
+        const pText = parent.textContent.trim();
+        if (pText.includes('Extra free gens') && !pText.includes('Unlimited')) {
+          return { state: sw.getAttribute('aria-checked') === 'true', strategy: 'parentDirect', debug: debugInfo };
         }
       }
     }
-    // Fallback: find switches and check parent text
-    const switches = document.querySelectorAll('button[role="switch"]');
-    for (const sw of switches) {
-      const parent = sw.parentElement;
-      if (parent && parent.textContent.includes('Extra')) {
-        return sw.getAttribute('aria-checked') === 'true';
+
+    // Fallback: old approach
+    const allText = document.querySelectorAll('span, div, p, label');
+    for (const el of allText) {
+      const text = el.textContent.trim();
+      if (text === 'Extra free gens' || (text.includes('Extra') && text.includes('free') && text.length < 30)) {
+        const parent = el.closest('div') || el.parentElement;
+        if (parent) {
+          const sw = parent.querySelector('button[role="switch"]');
+          if (sw) return { state: sw.getAttribute('aria-checked') === 'true', strategy: 'textFallback', debug: debugInfo };
+        }
       }
     }
-    return false; // If can't find, assume OFF
+    return { state: false, strategy: 'notFound', debug: debugInfo };
   });
+
+  console.log(`[engine] 🔍 isExtraFreeGensOn: state=${result.state}, strategy=${result.strategy}`);
+  if (result.debug) {
+    console.log(`[engine] 🔍 All switches dump: ${JSON.stringify(result.debug)}`);
+  }
+  return result.state;
 }
 
 /**
@@ -706,69 +813,128 @@ async function ensureBatchSize1(page) {
   const batch = await getBatchSize(page);
   if (!batch) {
     console.log('[engine] ⚠️ Cannot find batch size indicator');
+    const genText = await page.evaluate(() => {
+      const btn = document.querySelector('button[id="hf:image-form-submit"]');
+      return btn ? btn.textContent.trim() : 'not found';
+    });
+    console.log(`[engine] Generate button text: "${genText}"`);
     return false;
   }
 
   console.log(`[engine] Current batch: ${batch.current}/${batch.max}`);
 
   if (batch.current === 1) {
-    return true; // Already 1/4
+    console.log('[engine] ✅ Batch already 1/4');
+    return true;
   }
 
-  // Click "-" button to reduce batch to 1
-  // The "-" button is adjacent to the batch indicator
-  let clicksNeeded = batch.current - 1;
+  // Click "−" button to reduce batch to 1.
+  // Higgsfield uses SVG icons — we cannot rely on button text content.
+  // Use 4-strategy position-based approach.
+  const clicksNeeded = batch.current - 1;
   for (let i = 0; i < clicksNeeded; i++) {
     const clicked = await page.evaluate(() => {
-      const buttons = document.querySelectorAll('button');
-      for (const btn of buttons) {
-        const text = btn.textContent.trim();
-        // Find the batch display, then look for "-" button before it
-        if (/^\d+\/\d+$/.test(text)) {
-          // The "-" is the previous sibling button
-          let prev = btn.previousElementSibling;
-          while (prev) {
-            if (prev.tagName === 'BUTTON' && (prev.textContent.trim() === '−' || prev.textContent.trim() === '-' || prev.textContent.trim() === '–')) {
-              prev.click();
-              return true;
+      // ── Strategy 1: Find "N/N" leaf node → walk up → find leftmost button in container ──
+      const allEls = Array.from(document.querySelectorAll('*'));
+      for (const el of allEls) {
+        if (el.children.length > 0) continue;
+        const text = (el.textContent || '').trim();
+        if (!/^\d+\/\d+$/.test(text)) continue;
+
+        let container = el.parentElement;
+        for (let depth = 0; depth < 6 && container; depth++) {
+          const btns = Array.from(container.querySelectorAll('button')).filter(b => b.offsetParent !== null);
+          if (btns.length >= 2) {
+            // Sort by horizontal position — leftmost button is "−"
+            btns.sort((a, b) => a.getBoundingClientRect().left - b.getBoundingClientRect().left);
+            const counterRect = el.getBoundingClientRect();
+            // Pick the button to the LEFT of the counter
+            const leftBtns = btns.filter(b => b.getBoundingClientRect().right <= counterRect.left + 10);
+            if (leftBtns.length > 0) {
+              const minusBtn = leftBtns[leftBtns.length - 1]; // rightmost of the left buttons
+              minusBtn.click();
+              return `s1_position_depth${depth}`;
             }
-            prev = prev.previousElementSibling;
+            // Fallback: just use index 0 if all fail
+            btns[0].click();
+            return `s1_position_first_depth${depth}`;
           }
-          // Also check parent's children
-          const parent = btn.parentElement;
-          if (parent) {
-            const children = Array.from(parent.children);
-            const myIdx = children.indexOf(btn);
-            for (let j = myIdx - 1; j >= 0; j--) {
-              if (children[j].tagName === 'BUTTON') {
-                children[j].click();
-                return true;
-              }
-            }
-          }
+          container = container.parentElement;
         }
       }
+
+      // ── Strategy 2: aria-label search (Higgsfield uses 'Decrement') ──
+      const ariaBtn = document.querySelector('button[aria-label="Decrement"], button[aria-label="decrease"], button[aria-label="minus"], button[aria-label="-"]');
+      if (ariaBtn) { ariaBtn.click(); return 's2_aria'; }
+
+
+      // ── Strategy 3: button immediately before N/N sibling ──
+      const buttons = Array.from(document.querySelectorAll('button'));
+      for (let bi = 0; bi < buttons.length - 1; bi++) {
+        let next = buttons[bi].nextElementSibling;
+        let steps = 0;
+        while (next && next.tagName !== 'BUTTON' && steps < 5) {
+          if (/^\d+\/\d+$/.test((next.textContent || '').trim())) {
+            buttons[bi].click();
+            return 's3_sibling';
+          }
+          next = next.nextElementSibling;
+          steps++;
+        }
+      }
+
+      // ── Strategy 4: Generate button toolbar scan ──
+      const genBtn = document.querySelector('button[id="hf:image-form-submit"]');
+      if (genBtn) {
+        let toolbar = genBtn.parentElement;
+        for (let d = 0; d < 5 && toolbar; d++) {
+          const counterEl = Array.from(toolbar.querySelectorAll('*')).find(
+            e => e.children.length === 0 && /^\d+\/\d+$/.test((e.textContent || '').trim())
+          );
+          if (counterEl) {
+            const btnsInRow = Array.from(toolbar.querySelectorAll('button')).filter(b => b.offsetParent !== null);
+            const cr = counterEl.getBoundingClientRect();
+            const leftBtns = btnsInRow.filter(b => b.getBoundingClientRect().right <= cr.left + 10);
+            if (leftBtns.length > 0) {
+              leftBtns[leftBtns.length - 1].click();
+              return 's4_genBtn';
+            }
+          }
+          toolbar = toolbar.parentElement;
+        }
+      }
+
       return false;
     });
 
     if (!clicked) {
-      console.log('[engine] ⚠️ Could not click "-" button');
+      console.log('[engine] ⚠️ All strategies failed for "−" button');
+      // Debug dump
+      const debug = await page.evaluate(() =>
+        Array.from(document.querySelectorAll('button')).slice(0, 20).map(b => ({
+          text: b.textContent.trim().substring(0, 15),
+          id: b.id || null,
+          aria: b.getAttribute('aria-label'),
+          rect: (() => { const r = b.getBoundingClientRect(); return `${Math.round(r.left)},${Math.round(r.top)}`; })(),
+        }))
+      );
+      console.log(`[engine] Button dump: ${JSON.stringify(debug)}`);
       return false;
     }
-    await chrome.sleep(300);
+    console.log(`[engine] Minus click ${i + 1}/${clicksNeeded} via ${clicked}`);
+    await chrome.sleep(400);
   }
 
-  // Verify
-  await chrome.sleep(500);
+  await chrome.sleep(600);
   const after = await getBatchSize(page);
   if (after && after.current === 1) {
     console.log('[engine] ✅ Batch set to 1/4');
     return true;
   }
-
   console.log(`[engine] ⚠️ Batch after fix: ${after ? after.current : '?'}/${after ? after.max : '?'}`);
   return false;
 }
+
 
 
 // ══════════════════════════════════════════════════════════════
@@ -1338,11 +1504,76 @@ async function countQueuedItems(page) {
  * @param {Function} onProgress - Progress callback
  * @returns {string|null} - New image URL or null if timeout
  */
-async function waitForSingleImage(page, feedCountBefore, fingerprintsBefore, index, total, onProgress) {
+/**
+ * Ждёт стабилизации ленты: нет Queued-элементов и количество изображений
+ * не меняется два цикла подряд. Вызывается на границе между промптами.
+ * @param {Object} page - Puppeteer страница
+ * @param {number} maxWaitMs - максимум ожидания (по умолчанию 60с)
+ */
+async function waitForFeedStable(page, maxWaitMs = 60_000) {
+  const deadline = Date.now() + maxWaitMs;
+  let prevCount = -1;
+  let stableCount = 0;
+
+  console.log('[engine] ⏳ waitForFeedStable: ждём стабилизации ленты...');
+
+  while (Date.now() < deadline) {
+    await chrome.sleep(POLL_INTERVAL);
+
+    const queued = await countQueuedItems(page);
+    const feedCount = await countFeedImages(page);
+
+    if (queued === 0 && feedCount === prevCount) {
+      stableCount++;
+      if (stableCount >= 2) {
+        console.log(`[engine] ✅ waitForFeedStable: лента стабильна (feedCount=${feedCount})`);
+        return;
+      }
+    } else {
+      stableCount = 0; // сброс при изменении
+    }
+
+    prevCount = feedCount;
+
+    if (queued > 0) {
+      console.log(`[engine] ⏳ waitForFeedStable: всё ещё Queued=${queued}, feedCount=${feedCount}`);
+    }
+  }
+
+  console.log('[engine] ⚠️ waitForFeedStable: таймаут, продолжаем несмотря на нестабильность');
+}
+
+/**
+ * Wait for 1 new image to appear after a single Generate click.
+ *
+ * PRIMARY DETECTION: UUID fingerprinting.
+ * Higgsfield often REMOVES old feed images when adding new ones,
+ * so feed count may stay the same (e.g. 9 → 8 during Queued → 9 when done).
+ * Count-based detection (9 > 9) fails in this case.
+ *
+ * Strategy:
+ * 1. Snapshot UUIDs of top feed images BEFORE clicking Generate.
+ * 2. Poll: on each cycle check the TOP feed image's UUID.
+ * 3. If top UUID is NOT in the pre-click snapshot AND NOT in excludeFingerprints → accept.
+ * 4. Count-based check is kept as a SECONDARY fast path.
+ *
+ * @param {Object} page - Puppeteer page
+ * @param {number} feedCountBefore - Number of images in feed before Generate click
+ * @param {string[]} fingerprintsBefore - UUIDs of top images before Generate click
+ * @param {number} index - Current image index (1-based)
+ * @param {number} total - Total images expected
+ * @param {Function} onProgress - Progress callback
+ * @param {string[]} [excludeFingerprints=[]] - UUIDs от предыдущего промпта (нельзя принять за свои)
+ * @returns {string|null} - New image URL or null if timeout
+ */
+async function waitForSingleImage(page, feedCountBefore, fingerprintsBefore, index, total, onProgress, excludeFingerprints = []) {
   const startTime = Date.now();
   const deadline = startTime + GENERATION_TIMEOUT;
   let generationDetected = false;
   let queuedGone = false;
+
+  // Набор всех запрещённых UUID: до клика + от прошлого промпта
+  const forbiddenUUIDs = new Set([...fingerprintsBefore, ...excludeFingerprints]);
 
   while (Date.now() < deadline && !shouldStop) {
     await chrome.sleep(POLL_INTERVAL);
@@ -1352,51 +1583,82 @@ async function waitForSingleImage(page, feedCountBefore, fingerprintsBefore, ind
     const queued = await countQueuedItems(page);
     if (queued > 0 && !generationDetected) {
       generationDetected = true;
-      console.log(`[engine] 🎬 Image ${index}: generation started (Queued)`);
+      console.log(`[engine] 🎬 Image ${index}: generation started (Queued=${queued})`);
+    } else if (queued > 1) {
+      // Multiple queued items — potential ghost generation!
+      console.log(`[engine] ⚠️ MULTI-QUEUED: Image ${index}: queued=${queued} — possible ghost generation!`);
     }
 
     // Detect when Queued disappears = image should be ready
     if (generationDetected && queued === 0 && !queuedGone) {
       queuedGone = true;
-      console.log(`[engine] 🎬 Image ${index}: Queued disappeared, checking for new img...`);
-      await chrome.sleep(2000); // Wait for DOM update
+      console.log(`[engine] 🎬 Image ${index}: Queued disappeared at ${elapsed}s, checking for new img...`);
+      await chrome.sleep(1500); // Wait for DOM update
     }
 
     const feedCountNow = await countFeedImages(page);
 
-    // ── PRIMARY DETECTION: Check if the TOP feed image has a NEW UUID ──
-    // This works even when Higgsfield removes old images (count stays same)
-    // We only check after either:
-    //   a) Queued has disappeared (generation done), OR
-    //   b) Feed count increased (image just appeared), OR
-    //   c) Enough time passed that we should keep checking anyway (> 10s)
+    // ── FORENSIC: Every 3 seconds log feed state ──
+    if (elapsed % 9 === 3) {
+      const topForeUrl = await getFirstFeedImgUrl(page);
+      const topForeUUID = extractUUID(topForeUrl);
+      const isForbidden = topForeUUID ? forbiddenUUIDs.has(topForeUUID) : null;
+      console.log(`[engine] 🔍 POLL[${elapsed}s] img=${index}: queued=${queued}, feed=${feedCountNow}/${feedCountBefore}, topUUID=${topForeUUID || 'none'}, forbidden=${isForbidden}, genDetected=${generationDetected}, queuedGone=${queuedGone}`);
+    }
+
     const shouldCheckUUID = queuedGone || feedCountNow > feedCountBefore || elapsed > 10;
 
-    if (shouldCheckUUID && queued === 0) {
+    if (shouldCheckUUID) {
+      // ── FIX RC-4: Захватываем URL СРАЗУ при обнаружении UUID, без повторного fetch после sleep ──
       const topUrl = await getFirstFeedImgUrl(page);
       const topUUID = extractUUID(topUrl);
 
-      if (topUUID && !fingerprintsBefore.includes(topUUID)) {
-        // This is a GENUINELY NEW image — not in pre-click snapshot!
-        await chrome.sleep(1500); // Let it fully render
-        // Re-fetch to get potentially better URL after render
-        const finalUrl = await getFirstFeedImgUrl(page);
-        console.log(`[engine] ✅ Image ${index} ready via UUID detection (${elapsed}s, feedCount: ${feedCountBefore}→${feedCountNow}, uuid=${topUUID}): ${(finalUrl || '').substring(0, 80)}...`);
-        return finalUrl;
+      if (topUUID && !forbiddenUUIDs.has(topUUID)) {
+        // Genuinely new image — not in pre-click snapshot and not from prior prompt!
+        console.log(`[engine] ✅ Image ${index} ready via UUID detection (${elapsed}s, feedCount: ${feedCountBefore}→${feedCountNow}, queued=${queued}, uuid=${topUUID}): ${(topUrl || '').substring(0, 80)}...`);
+        // Небольшое ожидание для полной загрузки, но URL уже зафиксирован
+        await chrome.sleep(800);
+        return topUrl;
       }
 
-      // Top UUID matches a pre-existing image — the new one hasn't rendered yet
-      if (queuedGone && elapsed > 5) {
-        // After Queued disappeared, also check 2nd/3rd position (sometimes new image
-        // doesn't appear at position 0 immediately)
+      // Top UUID is known — scan deeper positions
+      if ((queuedGone || elapsed > 15) && elapsed > 5) {
         const allCurrentFingerprints = await snapshotFeedFingerprints(page, 5);
-        const newFingerprints = allCurrentFingerprints.filter(fp => !fingerprintsBefore.includes(fp));
+        const newFingerprints = allCurrentFingerprints.filter(fp => !forbiddenUUIDs.has(fp));
         if (newFingerprints.length > 0) {
-          // Found a new UUID somewhere in the top-5
-          await chrome.sleep(1500);
-          const finalUrl = await getFirstFeedImgUrl(page);
-          console.log(`[engine] ✅ Image ${index} ready via deep UUID scan (${elapsed}s, newUUIDs=${newFingerprints.length}): ${(finalUrl || '').substring(0, 80)}...`);
-          return finalUrl;
+          // Берём URL первого подходящего нового UUID
+          const urls = await page.evaluate((count) => {
+            const feed = document.querySelector('#soul-feed-scroll');
+            if (!feed) return [];
+            const result = [];
+            const imgs = feed.querySelectorAll('img');
+            for (let i = 0; i < Math.min(imgs.length, count); i++) {
+              const img = imgs[i];
+              if (img.src && img.src.startsWith('http') && !img.src.includes('avatar')) {
+                try {
+                  const u = new URL(img.src);
+                  const inner = u.searchParams.get('url');
+                  result.push(inner || img.src);
+                } catch {
+                  result.push(img.src);
+                }
+              }
+            }
+            return result;
+          }, 5);
+
+          // Находим первый URL с новым UUID
+          let foundUrl = null;
+          for (const u of urls) {
+            const uuid = extractUUID(u);
+            if (uuid && !forbiddenUUIDs.has(uuid)) { foundUrl = u; break; }
+          }
+
+          if (foundUrl) {
+            console.log(`[engine] ✅ Image ${index} ready via deep UUID scan (${elapsed}s, queued=${queued}, newUUIDs=${newFingerprints.length}): ${foundUrl.substring(0, 80)}...`);
+            await chrome.sleep(800);
+            return foundUrl;
+          }
         }
       }
     }
@@ -1412,8 +1674,8 @@ async function waitForSingleImage(page, feedCountBefore, fingerprintsBefore, ind
     if (elapsed % 15 === 0 && elapsed > 0) {
       const topUrl = await getFirstFeedImgUrl(page);
       const topUUID = extractUUID(topUrl);
-      const isKnown = topUUID ? fingerprintsBefore.includes(topUUID) : 'N/A';
-      console.log(`[engine] DEBUG: queued=${queued}, queuedGone=${queuedGone}, feedCount=${feedCountNow}/${feedCountBefore}, topUUID=${topUUID || 'none'}, isKnown=${isKnown}, elapsed=${elapsed}s`);
+      const isKnown = topUUID ? forbiddenUUIDs.has(topUUID) : 'N/A';
+      console.log(`[engine] DEBUG: queued=${queued}, queuedGone=${queuedGone}, feedCount=${feedCountNow}/${feedCountBefore}, topUUID=${topUUID || 'none'}, isForbidden=${isKnown}, elapsed=${elapsed}s`);
     }
 
     // Dismiss overlays periodically
@@ -2001,6 +2263,8 @@ module.exports = {
   isUnlimitedOn,
   ensureUnlimited,
   verifyActiveModel,
+  waitForFeedStable,
+  snapshotFeedFingerprints,
   IMAGES_PER_PROMPT,
   DEFAULT_MODEL,
   UNLIMITED_MODELS,

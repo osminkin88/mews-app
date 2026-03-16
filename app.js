@@ -74,6 +74,46 @@ const PROGRESS_CONTROLS_HTML = `
   <span class="text-secondary" id="eta-text">≈ 0 мин. осталось</span>
 `;
 
+// ── Meow Sound (preload for instant playback) ──
+const meowSound = new Audio('meow.m4a');
+meowSound.volume = 0.4;
+
+// ── Splash Screen ──
+function dismissSplash() {
+  const splash = document.getElementById('splash-screen');
+  if (!splash) return;
+  splash.classList.add('fade-out');
+  setTimeout(() => { splash.style.display = 'none'; }, 700);
+}
+
+// ── Cat Mascot State Machine ──
+let mascotTimer = null;
+function setMascotState(newState) {
+  const mascot = document.getElementById('mascot');
+  const cat = document.getElementById('mascot-cat');
+  const status = document.getElementById('mascot-status');
+  if (!mascot || !cat || !status) return;
+
+  if (mascotTimer) { clearTimeout(mascotTimer); mascotTimer = null; }
+
+  mascot.className = 'mascot ' + newState;
+
+  const states = {
+    sleeping: { emoji: '😴', text: 'Дремлет...' },
+    working:  { emoji: '😼', text: 'Генерирует...' },
+    happy:    { emoji: '😸', text: 'Мур! Готово!' },
+  };
+
+  const s = states[newState] || states.sleeping;
+  cat.textContent = s.emoji;
+  status.textContent = s.text;
+
+  // Auto-return to sleeping after happy
+  if (newState === 'happy') {
+    mascotTimer = setTimeout(() => setMascotState('sleeping'), 8000);
+  }
+}
+
 // ── App State ──
 const state = {
   currentScreen: 'projects',
@@ -84,7 +124,7 @@ const state = {
   selectedModel: 'nano_banana_pro',
   selectedQuality: '2K',
   selectedRatio: '1:1',
-  promptCount: 12,
+  promptCount: 0,
 
   // Generation
   isGenerating: false,
@@ -700,7 +740,12 @@ function updateConnectionUI() {
 
   if (state.isConnected) {
     if (disconnectedEl) disconnectedEl.style.display = 'none';
-    if (connectedEl) connectedEl.style.display = 'block';
+    if (connectedEl) {
+      const wasHidden = connectedEl.style.display === 'none';
+      connectedEl.style.display = 'block';
+      // Fire paw confetti only on first reveal
+      if (wasHidden) showPawConfetti();
+    }
     // Update sidebar nav status for connection
     const connNav = document.querySelector('.nav-item[data-screen="connection"] .nav-status');
     if (connNav) connNav.textContent = '✓';
@@ -714,6 +759,40 @@ function updateConnectionUI() {
     if (connectedEl) connectedEl.style.display = 'none';
   }
 }
+
+// 🐾 Paw confetti burst
+function showPawConfetti() {
+  const container = document.getElementById('paw-confetti-container');
+  if (!container) return;
+  container.innerHTML = '';
+
+  const cx = window.innerWidth * 0.55; // approx center of main area
+  const cy = window.innerHeight * 0.4;
+
+  for (let i = 0; i < 14; i++) {
+    const angle = (i / 14) * Math.PI * 2;
+    const dist = 100 + Math.random() * 120;
+    const dx = Math.cos(angle) * dist;
+    const dy = Math.sin(angle) * dist - 40;
+    const rot = Math.random() * 360;
+    const size = 16 + Math.random() * 14;
+    const delay = i * 55;
+
+    const paw = document.createElement('div');
+    paw.className = 'paw-particle';
+    paw.textContent = '🐾';
+    paw.style.cssText = `
+      left: ${cx}px;
+      top: ${cy}px;
+      font-size: ${size}px;
+      animation-delay: ${delay}ms;
+      --paw-end-transform: translate(${dx}px, ${dy}px) rotate(${rot}deg) scale(0.3);
+    `;
+    container.appendChild(paw);
+    setTimeout(() => paw.remove(), 1400 + delay);
+  }
+}
+
 
 // ── Settings ──
 async function downloadTemplate() {
@@ -877,7 +956,16 @@ function updateSettingsSummary() {
     const qualityStr = state.selectedQuality ? ` · ${state.selectedQuality}` : '';
     modelInfoEl.textContent = `${model.name}${qualityStr} · Unlimited 🆓`;
   }
-  // Also update total if we have prompts
+  // Also update total info
+  const totalEl = document.getElementById('settings-total-info');
+  if (totalEl) {
+    if (state.promptCount > 0) {
+      const totalImages = state.promptCount * state.imagesPerPrompt;
+      totalEl.innerHTML = `Будет создано <strong>${totalImages} изображений</strong> для ${state.promptCount} промпт${pluralRu(state.promptCount)}`;
+    } else {
+      totalEl.textContent = 'Загрузите промпты для начала генерации';
+    }
+  }
   if (state.promptCount > 0) {
     updatePromptSummary(state.promptCount);
   }
@@ -1102,6 +1190,7 @@ async function startGeneration(promptOverride) {
   }
 
   state.isGenerating = true;
+  setMascotState('working');
   state.isPaused = false;
   state.generationProgress = 0;
   state.currentPromptIndex = 0;
@@ -1216,8 +1305,17 @@ async function startGeneration(promptOverride) {
 
 // Handle real-time progress events from backend
 function handleGenerationProgress(data) {
+  // ── FORENSIC: Log every incoming event ──
+  const ts = new Date().toISOString().replace('T',' ').replace('Z','');
+  const stateSnap = `idx=${state.currentPromptIndex} statuses=[${state.promptStatuses.map(p=>`${p.status}:${p.imagesGenerated}`).join(',')}]`;
+  console.log(`[app] 📨 PROGRESS[${ts}]: status=${data.status||'?'} step=${data.step||'?'} current=${data.current||'?'}/${data.total||'?'} ${stateSnap}`);
+  if (data.step === 'saved' || data.status === 'complete' || data.current) {
+    console.log(`[app]    data: ${JSON.stringify(data).substring(0, 200)}`);
+  }
+
   if (data.status === 'complete') {
     // ── FIX: Pass backend results to finishGeneration for honest completion ──
+    console.log(`[app] ✅ COMPLETE received, results.length=${(data.results||[]).length}`);
     finishGeneration(data.results || []);
     return;
   }
@@ -1228,43 +1326,60 @@ function handleGenerationProgress(data) {
     return;
   }
 
+  // FIX RC-5: Честный счётчик картинок — только из реального step:'saved'
+  if (data.step === 'saved') {
+    const cp = state.promptStatuses[state.currentPromptIndex];
+    if (cp) {
+      const before = cp.imagesGenerated;
+      cp.imagesGenerated = (cp.imagesGenerated || 0) + 1;
+      console.log(`[app] 💾 SAVED: promptIdx=${state.currentPromptIndex} imagesGenerated: ${before}→${cp.imagesGenerated}`);
+      // FIX RC-1: Субтитр обновляется только из реального события, не спекулятивно
+      const imageSubEl = document.getElementById('current-image-sub');
+      if (imageSubEl && data.savedSlot) {
+        imageSubEl.textContent = `Изображение ${data.savedSlot} из ${state.imagesPerPrompt || 4} — сохранено ✅`;
+      }
+    } else {
+      console.log(`[app] ⚠️ SAVED event but no currentPrompt at idx=${state.currentPromptIndex}!`);
+    }
+    updateProgressUI();
+    renderPromptStatusList();
+    return;
+  }
+
   if (data.current && data.total) {
     const idx = data.current - 1;
 
-    // ── FIX: Only mark prior prompts as done if they aren't already error/partial ──
-    for (let i = 0; i < state.promptStatuses.length; i++) {
-      if (i < idx) {
-        // Don't overwrite error/partial — they were set by the backend
-        if (state.promptStatuses[i].status !== 'error' && state.promptStatuses[i].status !== 'partial') {
-          state.promptStatuses[i].status = 'done';
-          state.promptStatuses[i].imagesGenerated = state.imagesPerPrompt || 4;
-        }
-      } else if (i === idx) {
-        state.promptStatuses[i].status = 'in-progress';
-        if (data.status === 'downloading') {
-          state.promptStatuses[i].imagesGenerated = Math.max(0, (state.imagesPerPrompt || 4) - 1);
-        }
-      }
+    console.log(`[app] 📍 PROMPT ADVANCE: current=${data.current} → idx=${idx} (was ${state.currentPromptIndex})`);
+
+    // FIX RC-2: Убран спекулятивный цикл «промпты до idx → done».
+    // Статус прошлых промптов устанавливается только через finishGeneration()
+    // из реальных backendResults. Здесь мы только помечаем текущий как in-progress.
+    if (idx >= 0 && idx < state.promptStatuses.length) {
+      state.promptStatuses[idx].status = 'in-progress';
     }
 
     state.currentPromptIndex = idx;
 
-    // Calculate progress — count done + error + partial as "processed"
-    const processedCount = state.promptStatuses.filter(p => 
+    // Прогресс по уже реально завершённым промптам (done/error/partial)
+    const processedCount = state.promptStatuses.filter(p =>
       p.status === 'done' || p.status === 'error' || p.status === 'partial'
     ).length;
     state.generationProgress = Math.round((processedCount / data.total) * 100);
 
-    // Update current prompt text
+    // Обновляем текст текущего промпта
     const promptTextEl = document.getElementById('current-prompt-text');
     const imageSubEl = document.getElementById('current-image-sub');
     if (promptTextEl && data.prompt) promptTextEl.textContent = data.prompt;
-    if (imageSubEl && data.message) imageSubEl.textContent = data.message;
+    // current-image-sub обновляется только из step:saved — здесь не трогаем
+    if (imageSubEl && data.message && data.step !== 'saved') {
+      imageSubEl.textContent = data.message;
+    }
 
     updateProgressUI();
     renderPromptStatusList();
   }
 }
+
 
 function startGenerationSimulation() {
   if (state.generationTimer) clearInterval(state.generationTimer);
@@ -1410,6 +1525,13 @@ function finishGeneration(backendResults) {
   // FIX: Prevent double finishing
   if (state.generationFinished) return;
   state.generationFinished = true;
+
+  // ── Sound + Notification + Mascot ──
+  setMascotState('happy');
+  try { meowSound.currentTime = 0; meowSound.play().catch(() => {}); } catch {}
+  if (document.hidden && Notification.permission === 'granted') {
+    new Notification('Mews 🐱', { body: 'Генерация завершена! Мяу!' });
+  }
 
   if (state.generationTimer) {
     clearInterval(state.generationTimer);
@@ -2016,13 +2138,19 @@ document.addEventListener('DOMContentLoaded', async () => {
         console.log('[app] CDP connect result:', JSON.stringify(connectResult));
 
         if (connectResult.success) {
-          // Save/refresh session
-          const saveResult = await api.chrome.saveSession();
-          console.log('[app] Session save result:', JSON.stringify(saveResult));
+          // Проверяем реальную авторизацию на Higgsfield
+          const auth = await api.chrome.checkAuth();
+          console.log('[app] Auth check on startup:', JSON.stringify(auth));
 
-          state.isConnected = true;
-          updateConnectionUI();
-          console.log('[app] ✅ Auto-connected!');
+          if (auth.authenticated) {
+            await api.chrome.saveSession();
+            state.isConnected = true;
+            updateConnectionUI();
+            console.log('[app] ✅ Auto-connected and authenticated!');
+          } else {
+            console.log('[app] Chrome подключён, но пользователь НЕ авторизован на Higgsfield');
+            // state.isConnected остаётся false — UI покажет «Не подключено»
+          }
         }
       } else if (status.hasSession) {
         // Has saved session but Chrome not running — show hint
@@ -2036,7 +2164,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     try {
       const info = await api.app.info();
       const versionEl = document.querySelector('.sidebar-footer-text');
-      if (versionEl) versionEl.textContent = `Higgsfield Studio v${info.version}`;
+      if (versionEl) versionEl.textContent = `Mews v${info.version}`;
     } catch {}
+  }
+
+  // ── Dismiss splash screen ──
+  setTimeout(dismissSplash, 2500);
+
+  // ── Request notification permission ──
+  if (Notification.permission === 'default') {
+    Notification.requestPermission();
   }
 });

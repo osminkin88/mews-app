@@ -3,11 +3,24 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Higgsfield Studio — Генерация изображений</title>
+  <title>Mews — Генерация изображений</title>
   <meta name="description" content="Премиальное приложение для генерации и отбора изображений через Higgsfield">
   <link rel="stylesheet" href="index.css">
 </head>
 <body>
+
+<!-- ════════════════════════════════════════ -->
+<!-- SPLASH SCREEN -->
+<!-- ════════════════════════════════════════ -->
+<div id="splash-screen">
+  <div class="splash-content">
+    <div class="splash-star">✦</div>
+    <div class="splash-title">
+      <span class="splash-letter" style="--i:0">M</span><span class="splash-letter" style="--i:1">e</span><span class="splash-letter" style="--i:2">w</span><span class="splash-letter" style="--i:3">s</span>
+    </div>
+    <div class="splash-tagline">AI Image Studio</div>
+  </div>
+</div>
 
 <!-- ════════════════════════════════════════ -->
 <!-- FIRST LAUNCH WIZARD (overlay) -->
@@ -26,7 +39,7 @@
     <!-- ── Step 0: Welcome ── -->
     <div class="wizard-step active" id="wizard-step-0">
       <div class="wizard-icon">🐱</div>
-      <h1 class="wizard-title">Добро пожаловать в<br>Higgsfield Studio</h1>
+      <h1 class="wizard-title">Добро пожаловать в<br>Mews</h1>
       <p class="wizard-text">
         Генерируйте изображения через Higgsfield AI —<br>
         автоматически, пакетно и в полном качестве.
@@ -125,7 +138,7 @@
       <div class="wizard-icon wizard-icon-success">😺</div>
       <h1 class="wizard-title">Всё мурчит!</h1>
       <p class="wizard-text">
-        Higgsfield Studio настроен и готов к работе.<br>
+        Mews настроен и готов к работе.<br>
         Пора создать свой первый проект 🐾
       </p>
 
@@ -298,7 +311,11 @@
 
     <!-- Footer -->
     <div class="sidebar-footer">
-      <div class="sidebar-footer-text">Higgsfield Studio v1.0</div>
+      <div class="mascot sleeping" id="mascot">
+        <div class="mascot-cat" id="mascot-cat">😴</div>
+        <div class="mascot-status" id="mascot-status">Дремлет...</div>
+      </div>
+      <div class="sidebar-footer-text">Mews v1.0</div>
     </div>
   </aside>
 
@@ -351,41 +368,150 @@
         <p>Подключите ваш аккаунт Higgsfield для генерации</p>
       </div>
 
-      <!-- Not connected state -->
+      <!-- ── Not connected state ── -->
       <div id="connection-disconnected">
-        <div class="card" style="max-width: 520px;">
-          <div class="connection-center">
-            <div class="connection-lock-icon">🔐</div>
-            <h2 class="text-title" style="margin-bottom: var(--space-sm);">Подключите аккаунт</h2>
-            <p class="text-secondary connection-desc">
-              Для генерации изображений нужно один раз войти в ваш аккаунт Higgsfield. Это безопасно и занимает пару секунд.
-            </p>
-            <button class="btn btn-primary btn-large" onclick="connectAccount()">
+        <div class="conn-split-layout">
+
+          <!-- LEFT: cat + status -->
+          <div class="card conn-status-card">
+            <div class="conn-cat-icon">🙀</div>
+            <h2 class="conn-status-title">Не подключено</h2>
+            <p class="conn-status-sub">Войдите в аккаунт Higgsfield, чтобы начать</p>
+
+            <div class="conn-checks">
+              <div class="conn-check-row">
+                <div class="conn-check-icon neutral">🌐</div>
+                <span class="conn-check-label">Chrome Browser</span>
+                <span class="conn-check-badge neutral">—</span>
+              </div>
+              <div class="conn-check-row">
+                <div class="conn-check-icon neutral">✦</div>
+                <span class="conn-check-label">Higgsfield аккаунт</span>
+                <span class="conn-check-badge neutral">—</span>
+              </div>
+              <div class="conn-check-row">
+                <div class="conn-check-icon neutral">🕐</div>
+                <span class="conn-check-label">Сессия</span>
+                <span class="conn-check-badge neutral">Нет</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- RIGHT: how to connect -->
+          <div class="conn-next-panel">
+            <div class="conn-next-spacer"></div>
+            <div class="conn-next-title">Как подключиться? 🐾</div>
+
+            <div class="conn-steps">
+              <div class="conn-step">
+                <span class="conn-step-num">1</span>
+                <div class="conn-step-body">
+                  <div class="conn-step-name">Нажмите кнопку ниже</div>
+                  <div class="conn-step-hint">Откроется Chrome с Higgsfield.ai</div>
+                </div>
+              </div>
+              <div class="conn-step">
+                <span class="conn-step-num">2</span>
+                <div class="conn-step-body">
+                  <div class="conn-step-name">Войдите через Google</div>
+                  <div class="conn-step-hint">Авторизация займёт пару секунд</div>
+                </div>
+              </div>
+              <div class="conn-step">
+                <span class="conn-step-num">3</span>
+                <div class="conn-step-body">
+                  <div class="conn-step-name">Вернитесь сюда</div>
+                  <div class="conn-step-hint">Котик зафиксирует сессию автоматически 😸</div>
+                </div>
+              </div>
+            </div>
+
+            <button class="btn btn-primary btn-large conn-cta-btn" onclick="connectAccount()">
               🔗 Подключиться к Higgsfield
             </button>
-            <p class="connection-session-hint">
-              Сессия сохраняется автоматически
-            </p>
+            <p class="connection-session-hint" style="text-align:center;">Сессия сохраняется автоматически</p>
           </div>
+
         </div>
       </div>
 
-      <!-- Connected state -->
+      <!-- ── Connected state ── -->
       <div id="connection-connected" style="display: none;">
-        <div class="card connection-card" style="max-width: 520px;">
-          <div class="connection-status-dot connected"></div>
-          <div style="flex: 1;">
-            <div class="text-heading">Подключено — всё мурчит ✓</div>
-            <div class="text-secondary mt-sm">Сессия активна. Можно приступать к генерации.</div>
+        <div class="conn-split-layout">
+
+          <!-- LEFT: cat + status checks -->
+          <div class="card conn-status-card conn-status-card--connected">
+            <div class="conn-heart">💚</div>
+            <div class="conn-cat-icon connected">😸</div>
+            <h2 class="conn-status-title">Подключено — всё мурчит ✓</h2>
+            <p class="conn-status-sub">Сессия активна · Higgsfield AI</p>
+
+            <div class="conn-pills">
+              <span class="conn-pill">😸 Аккаунт</span>
+              <span class="conn-pill">🌐 Сессия</span>
+              <span class="conn-pill">🔗 API</span>
+            </div>
+
+            <div class="conn-checks">
+              <div class="conn-check-row">
+                <div class="conn-check-icon ok">🌐</div>
+                <span class="conn-check-label">Chrome Browser</span>
+                <span class="conn-check-badge ok">✓</span>
+              </div>
+              <div class="conn-check-row">
+                <div class="conn-check-icon ok">✦</div>
+                <span class="conn-check-label">Higgsfield аккаунт</span>
+                <span class="conn-check-badge ok">✓</span>
+              </div>
+              <div class="conn-check-row">
+                <div class="conn-check-icon ok">🕐</div>
+                <span class="conn-check-label">Сессия</span>
+                <span class="conn-check-badge ok">∞</span>
+              </div>
+            </div>
           </div>
-          <span class="badge badge-success">Активно</span>
+
+          <!-- RIGHT: what's next -->
+          <div class="conn-next-panel">
+            <div class="conn-next-spacer conn-next-spacer--connected"></div>
+            <div class="conn-next-title">Что дальше? 🐾</div>
+
+            <div class="conn-steps">
+              <div class="conn-step conn-step--clickable" onclick="navigateTo('settings')">
+                <span class="conn-step-num active">1</span>
+                <div class="conn-step-body">
+                  <div class="conn-step-name">Настройки генерации</div>
+                  <div class="conn-step-hint">Выберите модель, качество, пропорции</div>
+                </div>
+                <span class="conn-step-arrow">→</span>
+              </div>
+              <div class="conn-step conn-step--clickable" onclick="navigateTo('settings')">
+                <span class="conn-step-num">2</span>
+                <div class="conn-step-body">
+                  <div class="conn-step-name">Загрузить промпты</div>
+                  <div class="conn-step-hint">CSV или XLSX с вашими идеями</div>
+                </div>
+                <span class="conn-step-arrow">→</span>
+              </div>
+              <div class="conn-step conn-step--clickable" onclick="navigateTo('progress')">
+                <span class="conn-step-num">3</span>
+                <div class="conn-step-body">
+                  <div class="conn-step-name">Запустить генерацию</div>
+                  <div class="conn-step-hint">Котик всё сделает сам 🐾</div>
+                </div>
+                <span class="conn-step-arrow">→</span>
+              </div>
+            </div>
+
+            <button class="btn btn-primary btn-large conn-cta-btn" onclick="navigateTo('settings')">
+              Перейти к настройкам →
+            </button>
+          </div>
+
         </div>
 
-        <div class="banner banner-success mt-lg" style="max-width: 520px;">
-          <span class="banner-icon">🐾</span>
-          <span class="banner-text">Аккаунт подключён. Переходите к настройкам генерации →</span>
-          <button class="btn btn-ghost" onclick="navigateTo('settings')">Перейти</button>
-        </div>
+        <!-- Paw confetti container -->
+        <div id="paw-confetti-container"></div>
       </div>
     </section>
 
@@ -571,7 +697,7 @@
 
       <!-- Overall progress -->
       <div class="card mb-lg">
-        <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: var(--space-md);">
+        <div class="progress-bar-header">
           <span class="text-heading">Общий прогресс</span>
           <span class="text-heading text-accent" id="progress-percent">0%</span>
         </div>
@@ -584,7 +710,7 @@
             <div class="progress-stat-label">Готово</div>
           </div>
           <div class="progress-stat">
-            <div class="progress-stat-value" id="stat-total">—</div>
+            <div class="progress-stat-value" id="stat-total">0</div>
             <div class="progress-stat-label">Всего</div>
           </div>
           <div class="progress-stat">
@@ -625,7 +751,7 @@
         <div class="section-header">
           <span class="section-title">Статус промптов</span>
         </div>
-        <div class="card" style="padding: 0; overflow: hidden;">
+        <div class="card status-list-card">
           <ul class="status-list" id="prompt-status-list">
             <!-- Generated by JS -->
           </ul>
@@ -654,7 +780,7 @@
       </div>
 
       <!-- Mini-map -->
-      <div class="card mb-lg" style="padding: var(--space-sm);">
+      <div class="card minimap-card mb-lg">
         <div class="mini-map" id="selection-minimap">
           <!-- Generated by JS -->
         </div>
@@ -708,7 +834,7 @@
           </div>
         </div>
 
-        <div style="display: flex; gap: var(--space-md); justify-content: center;">
+        <div class="results-actions">
           <button class="btn btn-primary btn-large" onclick="openResultsFolder()">
             📂 Открыть папку с результатами
           </button>
@@ -717,7 +843,7 @@
           </button>
         </div>
 
-        <div class="banner banner-success mt-xl" style="max-width: 480px; margin-left: auto; margin-right: auto;">
+        <div class="banner banner-success results-banner">
           <span class="banner-icon">🐾</span>
           <span class="banner-text">Все файлы сохранены в папку проекта. Всё мурчит как надо!</span>
         </div>

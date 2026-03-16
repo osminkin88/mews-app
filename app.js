@@ -90,6 +90,28 @@ function dismissSplash() {
   setTimeout(() => { splash.style.display = 'none'; }, 700);
 }
 
+// ── Theme Switch (Dark Mode) ──
+function setTheme(theme, btnEl) {
+  document.documentElement.setAttribute('data-theme', theme);
+  localStorage.setItem('mews-theme', theme);
+  // Update toggle buttons
+  const btns = document.querySelectorAll('#theme-buttons .ratio-option');
+  btns.forEach(b => b.classList.remove('active'));
+  if (btnEl) btnEl.classList.add('active');
+}
+
+// Restore saved theme on load
+(function restoreTheme() {
+  const saved = localStorage.getItem('mews-theme') || 'auto';
+  document.documentElement.setAttribute('data-theme', saved);
+  document.addEventListener('DOMContentLoaded', () => {
+    const themeMap = { light: 0, dark: 1, auto: 2 };
+    const btns = document.querySelectorAll('#theme-buttons .ratio-option');
+    btns.forEach(b => b.classList.remove('active'));
+    if (btns[themeMap[saved]]) btns[themeMap[saved]].classList.add('active');
+  });
+})();
+
 // ── Cat Mascot State Machine ──
 let mascotTimer = null;
 function setMascotState(newState) {
@@ -104,8 +126,8 @@ function setMascotState(newState) {
 
   const states = {
     sleeping: { img: 'cat-sleeping.png', text: 'Дремлет...' },
-    working:  { img: 'cat-working.png',  text: 'Генерирует...' },
-    happy:    { img: 'cat-happy.png',    text: 'Мур! Готово!' },
+    working: { img: 'cat-working.png', text: 'Генерирует...' },
+    happy: { img: 'cat-happy.png', text: 'Мур! Готово!' },
   };
 
   const s = states[newState] || states.sleeping;
@@ -236,8 +258,6 @@ function navigateTo(screenId) {
 
   updateStepIndicator();
   updateNavStatuses();
-
-  // ── Persist session on every navigation ──
   saveSession();
 }
 
@@ -308,9 +328,9 @@ function renderProjects() {
   if (counterEl) counterEl.textContent = `(${projectsList.length})`;
 
   const statusConfig = {
-    draft:       { label: 'Черновик',    badge: 'badge-neutral', icon: '📝' },
-    in_progress: { label: 'В процессе',  badge: 'badge-warning', icon: '⚡' },
-    completed:   { label: 'Завершён',    badge: 'badge-success', icon: '✅' },
+    draft: { label: 'Черновик', badge: 'badge-neutral', icon: '📝' },
+    in_progress: { label: 'В процессе', badge: 'badge-warning', icon: '⚡' },
+    completed: { label: 'Завершён', badge: 'badge-success', icon: '✅' },
   };
 
   container.innerHTML = projectsList.map((p, i) => {
@@ -621,7 +641,7 @@ async function createProject() {
       const dir = await api.config.get('outputDir');
       const dirEl = document.getElementById('project-output-dir');
       if (dirEl) dirEl.textContent = shortenPath(dir);
-    } catch {}
+    } catch { }
   }
 }
 
@@ -684,16 +704,10 @@ function openProject(id) {
   if (typeof project.selectionCurrentPrompt === 'number') {
     state.selectionCurrentPrompt = project.selectionCurrentPrompt;
   }
-  if (project.imagesPerPrompt) {
-    state.imagesPerPrompt = project.imagesPerPrompt;
-  }
-  if (project.selectedRatio) {
-    state.selectedRatio = project.selectedRatio;
-  }
-  if (project.selectedQuality) {
-    state.selectedQuality = project.selectedQuality;
-  }
-  
+  if (project.imagesPerPrompt) state.imagesPerPrompt = project.imagesPerPrompt;
+  if (project.selectedRatio) state.selectedRatio = project.selectedRatio;
+  if (project.selectedQuality) state.selectedQuality = project.selectedQuality;
+
   console.log(`[app] Opening project: ${project.name} (${id})`);
 
   // FIX: Reset file-imported state for new project context
@@ -702,12 +716,12 @@ function openProject(id) {
   // Load state from project DB
   state.importedPrompts = project.prompts || [];
   state.promptCount = state.importedPrompts.length;
-  
+
   // FIX: Mark as imported if project has prompts
   if (state.importedPrompts.length > 0) {
     state.fileImported = true;
   }
-  
+
   if (project.model) {
     state.selectedModel = project.model;
     const modelSelect = document.getElementById('model-select');
@@ -904,7 +918,7 @@ async function simulateImport() {
 
     // 3. Update state
     state.fileImported = true;
-    state.importedPrompts = result.rows.map(p => ({...p, status: 'pending'}));
+    state.importedPrompts = result.rows.map(p => ({ ...p, status: 'pending' }));
     state.importedFilePath = filePath;
     state.promptCount = result.count;
 
@@ -921,7 +935,7 @@ async function simulateImport() {
     // 5. Update UI
     updatePromptSummary(state.promptCount);
     // renderProjectPrompts handles hiding dropzone and showing the list
-    renderProjectPrompts(); 
+    renderProjectPrompts();
 
   } catch (err) {
     alert(`❌ Ошибка импорта: ${err.message}`);
@@ -953,9 +967,9 @@ function selectImagesCount(optionEl, count) {
   const opts = container.querySelectorAll('.ratio-option');
   opts.forEach(o => o.classList.remove('active'));
   optionEl.classList.add('active');
-  
+
   state.imagesPerPrompt = count;
-  
+
   const hintEl = document.getElementById('images-count-hint');
   if (hintEl) {
     const genWord = count === 1 ? 'генерация' : (count >= 2 && count <= 4 ? 'генерации' : 'генераций');
@@ -1044,7 +1058,7 @@ function updatePromptSummary(count) {
     const totalImages = count * state.imagesPerPrompt;
     totalEl.innerHTML = `Будет создано <strong>${totalImages} изображений</strong> для ${count} промпт${pluralRu(count)}`;
   }
-  
+
   // Render prompt preview list and manage visibility
   renderProjectPrompts();
 }
@@ -1068,18 +1082,18 @@ function renderProjectPrompts() {
     fileInfo.style.display = 'flex';
     const nameEl = document.getElementById('file-name');
     const metaEl = document.getElementById('file-prompt-count');
-    
+
     // Attempt to get file name from project source meta
     const project = activeProjectId ? projectsList.find(p => p.id === activeProjectId) : null;
     const fName = project?.sourceMeta?.originalFileName || state.importedFilePath?.split(/[/\\]/).pop() || 'Проектные промпты';
-    
+
     if (nameEl) nameEl.textContent = fName;
     if (metaEl) metaEl.textContent = `В проекте ${state.promptCount} промпт${pluralRu(state.promptCount)}`;
   }
 
   if (listContainer && listEl) {
     listContainer.style.display = 'block';
-    
+
     // Define status styling mapping
     const statusMap = {
       completed: { icon: '✅', color: 'var(--success)' },
@@ -1105,31 +1119,31 @@ function renderProjectPrompts() {
 async function appUpdatePrompts() {
   const api = window.electronAPI;
   if (!api || !activeProjectId) return;
-  
+
   const filePath = await api.file.select();
   if (!filePath) return;
-  
+
   const result = await api.file.import(filePath);
   if (!result.success) return alert(`❌ ${result.error}`);
-  
+
   const newPrompts = result.rows;
   const oldPrompts = state.importedPrompts;
-  
+
   let updatedCount = 0;
   let addedCount = 0;
-  
+
   const oldMap = new Map();
   oldPrompts.forEach(p => oldMap.set(String(p.id), p));
-  
+
   const merged = [];
-  
+
   for (const n of newPrompts) {
     const id = String(n.id);
     if (oldMap.has(id)) {
       const old = oldMap.get(id);
       if (old.prompt !== n.prompt) {
-         old.prompt = n.prompt;
-         updatedCount++;
+        old.prompt = n.prompt;
+        updatedCount++;
       }
       merged.push(old);
       oldMap.delete(id);
@@ -1138,24 +1152,24 @@ async function appUpdatePrompts() {
       addedCount++;
     }
   }
-  
+
   const removedCount = oldMap.size;
   let msg = `Сверка с проектом завершена:\n✅ Без изменений текстов: ${merged.length - updatedCount - addedCount}\n🔄 Обновлены тексты: ${updatedCount}\n➕ Новых промптов: ${addedCount}\n❌ Отсутствуют в новом файле: ${removedCount}\n\nПрименить изменения?`;
-  
+
   if (!confirm(msg)) return;
-  
+
   if (removedCount > 0) {
-     if (confirm(`В старом проекте осталось ${removedCount} промптов, которых нет в новом файле.\n[ОК] - Оставить их в проекте\n[Отмена] - Удалить их из проекта`)) {
-       for (const old of oldMap.values()) merged.push(old);
-     }
+    if (confirm(`В старом проекте осталось ${removedCount} промптов, которых нет в новом файле.\n[ОК] - Оставить их в проекте\n[Отмена] - Удалить их из проекта`)) {
+      for (const old of oldMap.values()) merged.push(old);
+    }
   }
-  
-  merged.sort((a,b) => String(a.id).localeCompare(String(b.id), undefined, {numeric: true}));
-  
+
+  merged.sort((a, b) => String(a.id).localeCompare(String(b.id), undefined, { numeric: true }));
+
   state.importedPrompts = merged;
   state.promptCount = merged.length;
   state.importedFilePath = filePath;
-  
+
   await api.projects.savePrompts(activeProjectId, merged, filePath);
   updatePromptSummary(state.promptCount);
   renderProjectPrompts();
@@ -1163,20 +1177,20 @@ async function appUpdatePrompts() {
 
 async function appReplacePrompts() {
   if (!confirm('Внимание! Это полностью удалит текущие промпты из проекта (но не сгенерированные файлы на диске) и позволит загрузить новый файл. Продолжить?')) return;
-  
+
   const api = window.electronAPI;
   if (!api || !activeProjectId) return;
-  
+
   const filePath = await api.file.select();
   if (!filePath) return; // User cancelled select
-  
+
   const result = await api.file.import(filePath);
   if (!result.success) return alert(`❌ ${result.error}`);
-  
-  state.importedPrompts = result.rows.map(p => ({...p, status: 'pending'}));
+
+  state.importedPrompts = result.rows.map(p => ({ ...p, status: 'pending' }));
   state.promptCount = result.count;
   state.importedFilePath = filePath;
-  
+
   await api.projects.savePrompts(activeProjectId, state.importedPrompts, filePath);
   updatePromptSummary(state.promptCount);
   renderProjectPrompts();
@@ -1373,16 +1387,16 @@ async function startGeneration(promptOverride) {
 // Handle real-time progress events from backend
 function handleGenerationProgress(data) {
   // ── FORENSIC: Log every incoming event ──
-  const ts = new Date().toISOString().replace('T',' ').replace('Z','');
-  const stateSnap = `idx=${state.currentPromptIndex} statuses=[${state.promptStatuses.map(p=>`${p.status}:${p.imagesGenerated}`).join(',')}]`;
-  console.log(`[app] 📨 PROGRESS[${ts}]: status=${data.status||'?'} step=${data.step||'?'} current=${data.current||'?'}/${data.total||'?'} ${stateSnap}`);
+  const ts = new Date().toISOString().replace('T', ' ').replace('Z', '');
+  const stateSnap = `idx=${state.currentPromptIndex} statuses=[${state.promptStatuses.map(p => `${p.status}:${p.imagesGenerated}`).join(',')}]`;
+  console.log(`[app] 📨 PROGRESS[${ts}]: status=${data.status || '?'} step=${data.step || '?'} current=${data.current || '?'}/${data.total || '?'} ${stateSnap}`);
   if (data.step === 'saved' || data.status === 'complete' || data.current) {
     console.log(`[app]    data: ${JSON.stringify(data).substring(0, 200)}`);
   }
 
   if (data.status === 'complete') {
     // ── FIX: Pass backend results to finishGeneration for honest completion ──
-    console.log(`[app] ✅ COMPLETE received, results.length=${(data.results||[]).length}`);
+    console.log(`[app] ✅ COMPLETE received, results.length=${(data.results || []).length}`);
     finishGeneration(data.results || []);
     return;
   }
@@ -1549,9 +1563,9 @@ function renderPromptStatusList() {
   const filtered = _currentFilter === 'all'
     ? state.promptStatuses
     : state.promptStatuses.filter(p => {
-        if (_currentFilter === 'error') return p.status === 'error' || p.status === 'partial';
-        return p.status === _currentFilter;
-      });
+      if (_currentFilter === 'error') return p.status === 'error' || p.status === 'partial';
+      return p.status === _currentFilter;
+    });
 
   list.innerHTML = filtered.map((p) => {
     const origIdx = state.promptStatuses.indexOf(p);
@@ -1627,7 +1641,7 @@ async function stopGeneration() {
   // Tell backend to stop
   const api = window.electronAPI;
   if (api) {
-    try { await api.generate.stop(); } catch {}
+    try { await api.generate.stop(); } catch { }
   }
 
   // FIX: Honest stop — only mark truly completed prompts as done
@@ -1649,7 +1663,7 @@ function finishGeneration(backendResults) {
 
   // ── Sound + Notification + Mascot ──
   setMascotState('happy');
-  try { meowSound.currentTime = 0; meowSound.play().catch(() => {}); } catch {}
+  try { meowSound.currentTime = 0; meowSound.play().catch(() => { }); } catch { }
   if (document.hidden && Notification.permission === 'granted') {
     new Notification('Mews 🐱', { body: 'Генерация завершена! Мяу!' });
   }
@@ -1893,7 +1907,7 @@ function selectImage(promptIdx, imageIdx) {
   renderSelectionContent();
   renderSelectionMinimap();
   updateSelectionCounter();
-  saveProjectState(); // ── Persist selection immediately ──
+  saveProjectState();
 
   const totalPrompts = state.importedPrompts.length > 0
     ? state.importedPrompts.length
@@ -2134,7 +2148,7 @@ async function wizardCheckChrome() {
       skipBtn.style.display = 'none';
       nextBtn.style.display = '';
     }
-  } catch {}
+  } catch { }
 }
 
 async function wizardConnectChrome() {
@@ -2178,7 +2192,7 @@ async function wizardConnectChrome() {
             return;
           }
         }
-      } catch {}
+      } catch { }
 
       label.textContent = `Жду авторизации... (${i + 1}/60)`;
     }
@@ -2210,7 +2224,7 @@ async function wizardFinish() {
   if (api) {
     try {
       await api.config.set('isFirstLaunch', false);
-    } catch {}
+    } catch { }
   }
   // Hide wizard
   const overlay = document.getElementById('wizard-overlay');
@@ -2262,8 +2276,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (project) {
           console.log(`[persist] Restoring session: project="${project.name}", id=${lastProjectId}`);
           activeProjectId = lastProjectId;
-
-          // Restore project-level state
           if (project.selections) state.selections = { ...project.selections };
           if (typeof project.selectionCurrentPrompt === 'number') {
             state.selectionCurrentPrompt = project.selectionCurrentPrompt;
@@ -2331,7 +2343,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       const info = await api.app.info();
       const versionEl = document.querySelector('.sidebar-footer-text');
       if (versionEl) versionEl.textContent = `Mews v${info.version}`;
-    } catch {}
+    } catch { }
   }
 
   // ── Dismiss splash screen ──

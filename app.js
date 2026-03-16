@@ -2,33 +2,25 @@
    HIGGSFIELD STUDIO — App Logic (v2 · Unlimited Models)
    ============================================================ */
 
-// ── Higgsfield Models (Unlimited text-to-image only) ──
-const MODELS = [
-  { id: 'nano_banana_pro', name: 'Nano Banana Pro', desc: 'Google — flagship generation model', badge: 'Unlimited', quality: ['1K', '2K'], defaultQuality: '2K' },
-  { id: 'gpt_image', name: 'GPT Image', desc: 'Versatile text-to-image AI', badge: 'Unlimited', quality: ['High'], defaultQuality: 'High' },
-  { id: 'seedream_5_lite', name: 'Seedream 5.0 lite', desc: 'Intelligent visual reasoning', badge: 'Unlimited', quality: ['2K'], defaultQuality: '2K' },
-  { id: 'seedream_4_5', name: 'Seedream 4.5', desc: 'ByteDance — next-gen 4K image model', badge: 'Unlimited', quality: ['2K'], defaultQuality: '2K' },
-  { id: 'flux_2_pro', name: 'FLUX.2 Pro', desc: 'Speed-optimized detail', badge: 'Unlimited', quality: ['1K'], defaultQuality: '1K' },
-  { id: 'kling_o1', name: 'Kling O1', desc: 'Kling\'s Photorealistic Image Model', badge: 'Unlimited', quality: ['1K'], defaultQuality: '1K' },
-  { id: 'z_image', name: 'Z-Image', desc: 'Instant lifelike portraits', badge: 'Unlimited', quality: [], defaultQuality: null },
-  { id: 'nano_banana', name: 'Nano Banana', desc: 'Google — standard generation model', badge: 'Unlimited', quality: [], defaultQuality: null },
-  { id: 'higgsfield_soul', name: 'Higgsfield Soul', desc: 'Ultra-realistic fashion visuals', badge: 'Unlimited', quality: ['2K'], defaultQuality: '2K' },
-];
+// ── Models — derived from model-capabilities.js (loaded before app.js via index.html) ──
+// MODEL_REGISTRY, MODEL_ORDER, ALL_ASPECTS, resolveCompatibleSettings, getModelCapabilities
+// are globals from model-capabilities.js
+const MODELS = getUnlimitedModelList();
 
-// ── Aspect Ratios ──
-const ASPECT_RATIOS = [
-  { id: 'auto', label: 'Auto', w: 28, h: 28 },
-  { id: '1:1', label: '1:1', w: 28, h: 28 },
-  { id: '3:4', label: '3:4', w: 24, h: 32 },
-  { id: '4:3', label: '4:3', w: 32, h: 24 },
-  { id: '2:3', label: '2:3', w: 22, h: 34 },
-  { id: '3:2', label: '3:2', w: 34, h: 22 },
-  { id: '9:16', label: '9:16', w: 20, h: 36 },
-  { id: '16:9', label: '16:9', w: 36, h: 20 },
-  { id: '5:4', label: '5:4', w: 30, h: 24 },
-  { id: '4:5', label: '4:5', w: 24, h: 30 },
-  { id: '21:9', label: '21:9', w: 40, h: 18 },
-];
+// ── Aspect ratio definitions (visual sizing for UI boxes) ──
+const ASPECT_RATIO_VISUALS = {
+  'Auto': { w: 28, h: 28, round: true },
+  '1:1':  { w: 28, h: 28 },
+  '3:4':  { w: 24, h: 32 },
+  '4:3':  { w: 32, h: 24 },
+  '2:3':  { w: 22, h: 34 },
+  '3:2':  { w: 34, h: 22 },
+  '9:16': { w: 20, h: 36 },
+  '16:9': { w: 36, h: 20 },
+  '5:4':  { w: 30, h: 24 },
+  '4:5':  { w: 24, h: 30 },
+  '21:9': { w: 40, h: 18 },
+};
 
 // ── Mock Data ──
 const MOCK_PROMPTS = [
@@ -251,9 +243,11 @@ function navigateTo(screenId) {
     updateConnectionUI();
   }
 
-  // Render dynamic quality options when visiting settings
+  // Render dynamic controls when visiting settings
   if (screenId === 'settings') {
+    renderModelSelect();
     renderQualityOptions();
+    renderAspectOptions();
   }
 
   updateStepIndicator();
@@ -944,11 +938,32 @@ async function simulateImport() {
 
 function selectModel(modelId) {
   state.selectedModel = modelId;
-  const model = MODELS.find(m => m.id === modelId);
-  if (model) {
-    state.selectedQuality = model.defaultQuality;
+  const caps = getModelCapabilities(modelId);
+  if (caps) {
+    // Resolve all settings against new model capabilities
+    const resolved = resolveCompatibleSettings({
+      model: modelId,
+      quality: state.selectedQuality,
+      aspect: state.selectedRatio,
+      imagesPerPrompt: state.imagesPerPrompt,
+    });
+
+    // Apply effective settings
+    state.selectedQuality = resolved.effective.quality;
+    state.selectedRatio = resolved.effective.aspect;
+    state.imagesPerPrompt = resolved.effective.imagesPerPrompt;
+
+    // Show auto-correction warnings as a toast
+    if (resolved.warnings.length > 0) {
+      const msgs = resolved.warnings.map(w => w.message);
+      showCompatibilityToast(msgs);
+      console.log(`[app] ⚠️ Auto-corrected settings for ${caps.name}:`, msgs);
+    }
   }
+  // Re-render all dynamic controls
+  renderModelSelect();
   renderQualityOptions();
+  renderAspectOptions();
   updateSettingsSummary();
   saveProjectState();
 }
@@ -999,9 +1014,9 @@ function renderQualityOptions() {
   const card = document.getElementById('quality-card');
   if (!card) return;
 
-  const model = MODELS.find(m => m.id === state.selectedModel);
-  if (!model || model.quality.length === 0) {
-    // No quality options — hide card
+  const caps = getModelCapabilities(state.selectedModel);
+  if (!caps || caps.qualities.length === 0) {
+    // No quality options for this model — hide card
     card.style.display = 'none';
     return;
   }
@@ -1011,7 +1026,7 @@ function renderQualityOptions() {
   const hint = document.getElementById('quality-hint');
   if (!container) return;
 
-  container.innerHTML = model.quality.map(q => {
+  container.innerHTML = caps.qualities.map(q => {
     const isActive = q === state.selectedQuality ? 'active' : '';
     return `<div class="quality-option ${isActive}" onclick="selectQuality(this, '${q}')">
       <span class="quality-label">${q}</span>
@@ -1019,20 +1034,79 @@ function renderQualityOptions() {
   }).join('');
 
   if (hint) {
-    if (model.quality.length === 1) {
-      hint.textContent = `${model.quality[0]} — Unlimited`;
+    if (caps.qualities.length === 1) {
+      hint.textContent = `${caps.qualities[0]} — Unlimited`;
     } else {
-      hint.textContent = model.quality.map(q => q).join(' и ') + ' — без ограничений';
+      hint.textContent = caps.qualities.join(' / ') + ' — Unlimited';
     }
   }
 }
 
+/**
+ * Dynamically render aspect ratio options based on the selected model's capabilities.
+ * Non-supported aspects are hidden (not just disabled).
+ */
+function renderAspectOptions() {
+  const container = document.querySelector('#screen-settings .ratio-options');
+  if (!container) return;
+
+  // Don't touch the images-count-buttons container
+  if (container.id === 'images-count-buttons') return;
+
+  const caps = getModelCapabilities(state.selectedModel);
+  const allowedAspects = caps ? caps.aspects : ALL_ASPECTS;
+
+  container.innerHTML = allowedAspects.map(ratio => {
+    const vis = ASPECT_RATIO_VISUALS[ratio] || { w: 28, h: 28 };
+    const isActive = ratio === state.selectedRatio ? 'active' : '';
+    const borderRadius = vis.round ? 'border-radius: 50%;' : '';
+    return `<div class="ratio-option ${isActive}" onclick="selectRatio(this, '${ratio}')">
+      <div class="ratio-box" style="width: ${vis.w}px; height: ${vis.h}px; ${borderRadius}"></div>
+      <span class="ratio-label">${ratio}</span>
+    </div>`;
+  }).join('');
+}
+
+/**
+ * Render the model <select> dropdown with only Unlimited models.
+ */
+function renderModelSelect() {
+  const select = document.getElementById('model-select');
+  if (!select) return;
+
+  select.innerHTML = MODELS.map(m => {
+    const selected = m.id === state.selectedModel ? 'selected' : '';
+    return `<option value="${m.id}" ${selected}>${m.name}</option>`;
+  }).join('');
+}
+
+/**
+ * Show a brief toast notification for auto-corrected settings.
+ */
+function showCompatibilityToast(messages) {
+  // Remove existing toast
+  const existing = document.getElementById('compatibility-toast');
+  if (existing) existing.remove();
+
+  const toast = document.createElement('div');
+  toast.id = 'compatibility-toast';
+  toast.className = 'compatibility-toast';
+  toast.innerHTML = `<span class="toast-icon">⚠️</span><div class="toast-messages">${messages.map(m => `<div>${m}</div>`).join('')}</div>`;
+  document.body.appendChild(toast);
+
+  // Auto-remove after 4 seconds
+  setTimeout(() => {
+    toast.classList.add('toast-fade-out');
+    setTimeout(() => toast.remove(), 400);
+  }, 4000);
+}
+
 function updateSettingsSummary() {
-  const model = MODELS.find(m => m.id === state.selectedModel);
+  const caps = getModelCapabilities(state.selectedModel);
   const modelInfoEl = document.getElementById('settings-model-info');
-  if (modelInfoEl && model) {
+  if (modelInfoEl && caps) {
     const qualityStr = state.selectedQuality ? ` · ${state.selectedQuality}` : '';
-    modelInfoEl.textContent = `${model.name}${qualityStr} · Unlimited 🆓`;
+    modelInfoEl.textContent = `${caps.name}${qualityStr} · Unlimited 🆓`;
   }
   // Also update total info
   const totalEl = document.getElementById('settings-total-info');
@@ -1367,11 +1441,42 @@ async function startGeneration(promptOverride) {
   });
 
   try {
-    const result = await api.generate.start(promptsToGenerate, {
+    // ── Settings validation via capability matrix ──
+    const resolved = resolveCompatibleSettings({
       model: state.selectedModel,
-      aspect: state.selectedRatio,
       quality: state.selectedQuality,
-      imagesCount: state.imagesPerPrompt,
+      aspect: state.selectedRatio,
+      imagesPerPrompt: state.imagesPerPrompt,
+    });
+
+    // Block if model is incompatible
+    if (resolved.blocked) {
+      alert(`❌ ${resolved.blockReason}`);
+      state.isGenerating = false;
+      return;
+    }
+
+    // Apply effective settings (auto-corrected if needed)
+    const eff = resolved.effective;
+    if (resolved.warnings.length > 0) {
+      const msgs = resolved.warnings.map(w => w.message);
+      console.log(`[app] ⚠️ Pre-generation auto-corrections:`, msgs);
+    }
+
+    // ── Log settings being sent to engine ──
+    const caps = getModelCapabilities(eff.model);
+    console.log(`[app] ┌── SETTINGS BEING SENT TO ENGINE ─────────────`);
+    console.log(`[app] │ model     : ${eff.model} (${caps?.name || '?'})`);
+    console.log(`[app] │ quality   : ${eff.quality || 'N/A (no quality for this model)'}`);
+    console.log(`[app] │ aspect    : ${eff.aspect}`);
+    console.log(`[app] │ images    : ${eff.imagesPerPrompt} (app-level iterations, site batch always 1)`);
+    console.log(`[app] └──────────────────────────────────────────────`);
+
+    const result = await api.generate.start(promptsToGenerate, {
+      model: eff.model,
+      aspect: eff.aspect,
+      quality: eff.quality,
+      imagesCount: eff.imagesPerPrompt,
     }, activeProjectId);
 
     if (!result.success) {
@@ -1414,11 +1519,12 @@ function handleGenerationProgress(data) {
       const before = cp.imagesGenerated;
       cp.imagesGenerated = (cp.imagesGenerated || 0) + 1;
       console.log(`[app] 💾 SAVED: promptIdx=${state.currentPromptIndex} imagesGenerated: ${before}→${cp.imagesGenerated}`);
-      // FIX RC-1: Субтитр обновляется только из реального события, не спекулятивно
-      // Compact header does not have sub-line, skip
     } else {
       console.log(`[app] ⚠️ SAVED event but no currentPrompt at idx=${state.currentPromptIndex}!`);
     }
+
+    // RC-4 FIX: Compute live hybrid progress after each saved slot
+    _updateLiveProgress();
     updateProgressUI();
     renderPromptStatusList();
     return;
@@ -1429,7 +1535,6 @@ function handleGenerationProgress(data) {
 
     console.log(`[app] 📍 PROMPT ADVANCE: current=${data.current} → idx=${idx} (was ${state.currentPromptIndex})`);
 
-    // FIX RC-2: Убран спекулятивный цикл «промпты до idx → done».
     // Статус прошлых промптов устанавливается только через finishGeneration()
     // из реальных backendResults. Здесь мы только помечаем текущий как in-progress.
     if (idx >= 0 && idx < state.promptStatuses.length) {
@@ -1438,11 +1543,8 @@ function handleGenerationProgress(data) {
 
     state.currentPromptIndex = idx;
 
-    // Прогресс по уже реально завершённым промптам (done/error/partial)
-    const processedCount = state.promptStatuses.filter(p =>
-      p.status === 'done' || p.status === 'error' || p.status === 'partial'
-    ).length;
-    state.generationProgress = Math.round((processedCount / data.total) * 100);
+    // RC-4 FIX: Compute live hybrid progress on prompt advance
+    _updateLiveProgress();
 
     // Обновляем текст текущего промпта
     const promptTextEl = document.getElementById('current-prompt-text');
@@ -1454,6 +1556,33 @@ function handleGenerationProgress(data) {
     updateProgressUI();
     renderPromptStatusList();
   }
+}
+
+/**
+ * RC-4 FIX: Compute live hybrid progress during generation.
+ * Formula: (fullyProcessedPrompts + currentPromptFraction) / totalPrompts * 100
+ * Where currentPromptFraction = savedSlots / targetSlots for the in-progress prompt.
+ * This gives smooth, truthful progress instead of 0% → 100% jump.
+ */
+function _updateLiveProgress() {
+  const total = state.promptStatuses.length;
+  if (total === 0) { state.generationProgress = 0; return; }
+
+  const target = state.imagesPerPrompt || 4;
+  let progress = 0;
+
+  for (const p of state.promptStatuses) {
+    if (p.status === 'done' || p.status === 'error' || p.status === 'partial' || p.status === 'stopped') {
+      progress += 1; // Fully processed prompt
+    } else if (p.status === 'in-progress') {
+      // Fractional credit based on saved images so far
+      const saved = p.imagesGenerated || 0;
+      progress += saved / target;
+    }
+    // 'pending' contributes 0
+  }
+
+  state.generationProgress = Math.min(99, Math.round((progress / total) * 100)); // Cap at 99% until finishGeneration
 }
 
 
@@ -1508,11 +1637,15 @@ function updateProgressUI() {
 
   const donePr = state.promptStatuses.filter(p => p.status === 'done').length;
   const errPr = state.promptStatuses.filter(p => p.status === 'error' || p.status === 'partial').length;
+  const processedPr = state.promptStatuses.filter(p =>
+    p.status === 'done' || p.status === 'error' || p.status === 'partial' || p.status === 'stopped'
+  ).length;
   const totalPr = state.promptStatuses.length;
 
   pctEl.textContent = `${state.generationProgress}%`;
   fillEl.style.width = `${state.generationProgress}%`;
-  if (counterEl) counterEl.textContent = `${donePr}/${totalPr}`;
+  // RC-3/RC-4 FIX: Counter shows processed/total (done + error + partial + stopped)
+  if (counterEl) counterEl.textContent = `${processedPr}/${totalPr}`;
 
   // Stat chips
   if (doneChip) doneChip.textContent = `✓ ${donePr}`;
@@ -1649,7 +1782,7 @@ async function stopGeneration() {
     if (p.status === 'pending') { p.status = 'stopped'; }
     if (p.status === 'in-progress') { p.status = 'stopped'; }
   });
-  state.generationProgress = 100;
+  // RC-2 FIX: Do NOT force 100% here. Let finishGeneration() compute real progress.
   updateProgressUI();
   renderPromptStatusList();
 
@@ -1660,13 +1793,6 @@ function finishGeneration(backendResults) {
   // FIX: Prevent double finishing
   if (state.generationFinished) return;
   state.generationFinished = true;
-
-  // ── Sound + Notification + Mascot ──
-  setMascotState('happy');
-  try { meowSound.currentTime = 0; meowSound.play().catch(() => { }); } catch { }
-  if (document.hidden && Notification.permission === 'granted') {
-    new Notification('Mews 🐱', { body: 'Генерация завершена! Мяу!' });
-  }
 
   if (state.generationTimer) {
     clearInterval(state.generationTimer);
@@ -1707,9 +1833,37 @@ function finishGeneration(backendResults) {
   const totalCount = state.promptStatuses.length;
   const processedCount = doneCount + partialCount + errorCount + stoppedCount;
 
-  state.generationProgress = totalCount > 0 ? Math.round((processedCount / totalCount) * 100) : 100;
+  // ── RC-3 FIX: Honest progress = processed / total (not always 100%) ──
+  state.generationProgress = totalCount > 0 ? Math.round((processedCount / totalCount) * 100) : 0;
 
-  // Update progress UI
+  // ── Determine batch outcome category ──
+  const allPerfect = doneCount === totalCount && totalCount > 0;
+  const hasProblems = errorCount > 0 || partialCount > 0;
+  const wasStopped = stoppedCount > 0;
+  const totalFailure = savedSlots === 0 && totalCount > 0;
+
+  // ── RC-1 FIX: Conditional mascot + sound based on REAL outcome ──
+  if (allPerfect) {
+    setMascotState('happy');
+    try { meowSound.currentTime = 0; meowSound.play().catch(() => {}); } catch {}
+    if (document.hidden && Notification.permission === 'granted') {
+      new Notification('Mews 🐱', { body: 'Мур! Все изображения сохранены!' });
+    }
+  } else if (savedSlots > 0) {
+    // Partial success — no happy cat, but gentle notification
+    setMascotState('sleeping');
+    if (document.hidden && Notification.permission === 'granted') {
+      new Notification('Mews 🐱', { body: `Генерация завершена: ${savedSlots}/${totalSlots} сохранено.` });
+    }
+  } else {
+    // Total failure or stopped with 0 saved — no celebration
+    setMascotState('sleeping');
+    if (document.hidden && Notification.permission === 'granted') {
+      new Notification('Mews 🐱', { body: wasStopped ? 'Генерация остановлена.' : 'Генерация завершена с ошибками.' });
+    }
+  }
+
+  // ── Update progress UI elements ──
   const pctEl = document.getElementById('progress-percent');
   const fillEl = document.getElementById('progress-bar-fill');
   const etaEl = document.getElementById('eta-text');
@@ -1717,32 +1871,57 @@ function finishGeneration(backendResults) {
   const errEl = document.getElementById('stat-errors-chip');
 
   if (pctEl) pctEl.textContent = `${state.generationProgress}%`;
-  if (fillEl) fillEl.style.width = `${state.generationProgress}%`;
-  if (etaEl) etaEl.textContent = 'Генерация завершена!';
+  if (fillEl) {
+    fillEl.style.width = `${state.generationProgress}%`;
+    // RC-7 FIX: Color-code progress bar by outcome
+    fillEl.classList.remove('fill-success', 'fill-warning', 'fill-error');
+    if (totalFailure) {
+      fillEl.classList.add('fill-error');
+    } else if (hasProblems || wasStopped) {
+      fillEl.classList.add('fill-warning');
+    } else {
+      fillEl.classList.add('fill-success');
+    }
+  }
+
+  if (etaEl) {
+    if (totalFailure) {
+      etaEl.textContent = 'Генерация завершилась с ошибками';
+    } else if (wasStopped) {
+      etaEl.textContent = 'Генерация остановлена';
+    } else {
+      etaEl.textContent = 'Генерация завершена!';
+    }
+  }
   if (doneEl) doneEl.textContent = `✓ ${savedSlots}`;
   if (errEl) { errEl.textContent = `✗ ${failedSlots}`; errEl.style.display = failedSlots > 0 ? 'inline' : 'none'; }
-  const cntEl2 = document.getElementById('progress-counter');
-  if (cntEl2) cntEl2.textContent = `${state.promptStatuses.length}/${state.promptStatuses.length}`;
 
-  // ── Honest banner based on real slot counts ──
+  // RC-3 FIX: Counter shows processedCount / totalCount (not total/total)
+  const cntEl2 = document.getElementById('progress-counter');
+  if (cntEl2) cntEl2.textContent = `${processedCount}/${totalCount}`;
+
+  // ── RC-5, RC-6 FIX: Honest banner with guarded buttons ──
   const controls = document.querySelector('.progress-controls-row');
   if (controls) {
-    const allPerfect = doneCount === totalCount && totalCount > 0;
-    const hasProblems = errorCount > 0 || partialCount > 0;
-    const wasStopped = stoppedCount > 0;
-    const hasFailedSlots = failedSlots > 0;
-
     let bannerClass = 'banner-success';
     let bannerIcon = '🐾';
     let bannerText = '';
 
     if (allPerfect) {
       bannerText = `Мур! Все ${savedSlots}/${totalSlots} изображений сохранены!`;
+    } else if (totalFailure && wasStopped) {
+      bannerClass = 'banner-warning';
+      bannerIcon = '⏹';
+      bannerText = `Остановлено до сохранения. 0/${totalSlots} изображений.`;
+    } else if (totalFailure) {
+      bannerClass = 'banner-error';
+      bannerIcon = '❌';
+      bannerText = `Ошибка: ни одного изображения не сохранено (0/${totalSlots}).`;
     } else if (wasStopped && !hasProblems) {
       bannerClass = 'banner-warning';
       bannerIcon = '⏹';
       bannerText = `Остановлено: сохранено ${savedSlots}/${totalSlots} изображений.`;
-    } else if (hasProblems || hasFailedSlots) {
+    } else if (hasProblems) {
       bannerClass = 'banner-warning';
       bannerIcon = '⚠️';
       bannerText = `Сохранено ${savedSlots}/${totalSlots} изображений, не удалось: ${failedSlots}.`;
@@ -1750,15 +1929,25 @@ function finishGeneration(backendResults) {
       bannerText = `Готово: ${savedSlots}/${totalSlots} изображений.`;
     }
 
-    const retryBtn = hasFailedSlots || hasProblems
-      ? `<button class="btn btn-secondary" onclick="retryFailedSlots()" style="margin-left:8px">🔄 Добить упавшие (${failedSlots})</button>`
+    // RC-6 FIX: Retry button shows retryable PROMPT count, not slot count
+    const retryablePrompts = state.promptStatuses.filter(p =>
+      p.status === 'error' || p.status === 'partial' || p.status === 'stopped'
+    ).length;
+
+    const retryBtn = retryablePrompts > 0
+      ? `<button class="btn btn-secondary" onclick="retryFailedSlots()" style="margin-left:8px">🔄 Добить упавшие (${retryablePrompts})</button>`
       : '';
+
+    // RC-5 FIX: "Перейти к отбору" only when there are saved images
+    const selectionBtn = savedSlots > 0
+      ? `<button class="btn btn-primary" onclick="goToSelection()">Перейти к отбору</button>`
+      : `<button class="btn btn-secondary" onclick="navigateTo('settings')">← Назад к настройкам</button>`;
 
     controls.innerHTML = `
       <div class="banner ${bannerClass}" style="width: 100%; margin: 0; display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
         <span class="banner-icon">${bannerIcon}</span>
         <span class="banner-text" style="flex:1">${bannerText}</span>
-        <button class="btn btn-primary" onclick="goToSelection()">Перейти к отбору</button>
+        ${selectionBtn}
         ${retryBtn}
       </div>
     `;
@@ -1794,6 +1983,12 @@ function finishGeneration(backendResults) {
 
 // ── Selection ──
 function goToSelection() {
+  // RC-5 FIX: Guard — don't navigate to selection if no images were saved
+  const savedSlots = state.promptStatuses.reduce((sum, p) => sum + (p.savedCount || p.imagesGenerated || 0), 0);
+  if (savedSlots === 0) {
+    alert('Нет сохранённых изображений для отбора. Сначала добейте упавшие промпты или перегенерируйте.');
+    return;
+  }
   initSelection();
   navigateTo('selection');
 }

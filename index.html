@@ -568,17 +568,9 @@
         <div class="card settings-card">
           <div class="settings-card-label">Модель <span class="badge-unlimited">∞ Unlimited</span></div>
           <select class="form-select" id="model-select" onchange="selectModel(this.value)">
-            <option value="nano_banana_pro" selected>Nano Banana Pro</option>
-            <option value="gpt_image">GPT Image</option>
-            <option value="seedream_5_lite">Seedream 5.0 lite</option>
-            <option value="seedream_4_5">Seedream 4.5</option>
-            <option value="flux_2_pro">FLUX.2 Pro</option>
-            <option value="kling_o1">Kling O1</option>
-            <option value="z_image">Z-Image</option>
-            <option value="nano_banana">Nano Banana</option>
-            <option value="higgsfield_soul">Higgsfield Soul</option>
+            <!-- Rendered dynamically by renderModelSelect() -->
           </select>
-          <div class="settings-card-hint">Все модели — Unlimited (бесплатно)</div>
+          <div class="settings-card-hint">Только Unlimited-совместимые модели</div>
         </div>
 
         <div class="card settings-card" id="quality-card">
@@ -595,50 +587,7 @@
         <div class="card settings-card" style="grid-column: 1 / -1;">
           <div class="settings-card-label">Соотношение сторон</div>
           <div class="ratio-options mt-sm">
-            <div class="ratio-option" onclick="selectRatio(this, 'auto')">
-              <div class="ratio-box" style="width: 28px; height: 28px; border-radius: 50%;"></div>
-              <span class="ratio-label">Auto</span>
-            </div>
-            <div class="ratio-option active" onclick="selectRatio(this, '1:1')">
-              <div class="ratio-box" style="width: 28px; height: 28px;"></div>
-              <span class="ratio-label">1:1</span>
-            </div>
-            <div class="ratio-option" onclick="selectRatio(this, '3:4')">
-              <div class="ratio-box" style="width: 24px; height: 32px;"></div>
-              <span class="ratio-label">3:4</span>
-            </div>
-            <div class="ratio-option" onclick="selectRatio(this, '4:3')">
-              <div class="ratio-box" style="width: 32px; height: 24px;"></div>
-              <span class="ratio-label">4:3</span>
-            </div>
-            <div class="ratio-option" onclick="selectRatio(this, '2:3')">
-              <div class="ratio-box" style="width: 22px; height: 34px;"></div>
-              <span class="ratio-label">2:3</span>
-            </div>
-            <div class="ratio-option" onclick="selectRatio(this, '3:2')">
-              <div class="ratio-box" style="width: 34px; height: 22px;"></div>
-              <span class="ratio-label">3:2</span>
-            </div>
-            <div class="ratio-option" onclick="selectRatio(this, '9:16')">
-              <div class="ratio-box" style="width: 20px; height: 36px;"></div>
-              <span class="ratio-label">9:16</span>
-            </div>
-            <div class="ratio-option" onclick="selectRatio(this, '16:9')">
-              <div class="ratio-box" style="width: 36px; height: 20px;"></div>
-              <span class="ratio-label">16:9</span>
-            </div>
-            <div class="ratio-option" onclick="selectRatio(this, '5:4')">
-              <div class="ratio-box" style="width: 30px; height: 24px;"></div>
-              <span class="ratio-label">5:4</span>
-            </div>
-            <div class="ratio-option" onclick="selectRatio(this, '4:5')">
-              <div class="ratio-box" style="width: 24px; height: 30px;"></div>
-              <span class="ratio-label">4:5</span>
-            </div>
-            <div class="ratio-option" onclick="selectRatio(this, '21:9')">
-              <div class="ratio-box" style="width: 40px; height: 18px;"></div>
-              <span class="ratio-label">21:9</span>
-            </div>
+            <!-- Rendered dynamically by renderAspectOptions() -->
           </div>
         </div>
       </div>
@@ -836,6 +785,7 @@
   </main>
 </div>
 
+<script src="model-capabilities.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

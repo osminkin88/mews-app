@@ -9,30 +9,17 @@
 const fs = require('fs');
 const path = require('path');
 const chrome = require('./chrome-manager');
+const {
+  MODEL_REGISTRY, MODEL_ORDER,
+  UNLIMITED_MODELS, PAID_ONLY_MODELS, MODEL_QUALITY_OPTIONS,
+  getModelCapabilities, resolveCompatibleSettings,
+} = require('./model-capabilities');
 
 // ── Config ────────────────────────────────────────────────────
 const IMAGES_PER_PROMPT = 4;
 const GENERATION_TIMEOUT = 4 * 60 * 1000; // 4 minutes per image
 const POLL_INTERVAL = 3000;         // 3s polling
 const DEFAULT_MODEL = 'nano_banana_pro';
-
-// ── Unlimited-compatible models ──────────────────────────────
-// Only these models support the Unlimited toggle
-const UNLIMITED_MODELS = {
-  nano_banana_pro: { slug: 'nano_banana_2', name: 'Nano Banana Pro' },
-  nano_banana: { slug: 'nano_banana', name: 'Nano Banana' },
-  higgsfield_soul: { slug: 'soul', name: 'Higgsfield Soul' },
-  z_image: { slug: 'z-image', name: 'Z-Image' },
-};
-
-// Models that do NOT support Unlimited (blocked)
-const PAID_ONLY_MODELS = {
-  gpt_image: 'GPT Image',
-  seedream_5_lite: 'Seedream 5.0 lite',
-  seedream_4_5: 'Seedream 4.5',
-  flux_2_pro: 'FLUX.2 Pro',
-  kling_o1: 'Kling O1',
-};
 
 // ── State ─────────────────────────────────────────────────────
 let isGenerating = false;
@@ -91,58 +78,21 @@ async function generatePrompt(prompt, options = {}) {
     await chrome.navigateToModel(modelInfo.slug);
     await chrome.sleep(2000);
 
-    // ── Step 3: VERIFY the active model matches the selected one ──
-    onProgress({ step: 'preflight', message: `Проверяю модель ${modelInfo.name}...` });
-    const modelOk = await verifyActiveModel(page, modelInfo);
-    if (!modelOk) {
-      throw new Error(`Не удалось активировать модель "${modelInfo.name}". В интерфейсе активна другая модель.`);
-    }
-    console.log(`[engine] ✅ Model verified: ${modelInfo.name}`);
+    // ── Step 3: UNIFIED SETTINGS SYNC ──
+    // Applies + verifies ALL settings: model, quality, aspect, batch, unlimited, extra free gens.
+    // Throws on ANY mismatch — generation will NOT proceed with wrong settings.
+    onProgress({ step: 'preflight', message: 'Синхронизирую настройки...' });
+    await preflightSettingsSync(page, { model, modelInfo, quality, aspect }, onProgress);
 
-    // ── Step 4: Dismiss any overlays ──
-    await dismissOverlays(page);
-
-    // ── Step 4.5: CLEAR the prompt field BEFORE any toggle clicks! ──
-    // CRITICAL: Toggle clicks (Extra free gens, Unlimited) trigger form submission
-    // on Higgsfield. If old prompt text is in the field, it generates a ghost image
-    // from the PREVIOUS prompt. Clearing the field first prevents this.
-    onProgress({ step: 'preflight', message: 'Очищаю поле промпта...' });
-    await clearPromptField(page);
-    console.log('[engine] ✅ Prompt field cleared (safe for toggle clicks)');
-
-    // ── Step 5: Turn OFF "Extra free gens" FIRST ──
-    onProgress({ step: 'preflight', message: 'Отключаю Extra free gens...' });
-    await ensureExtraFreeGensOff(page);
-    console.log('[engine] ✅ Extra free gens: OFF');
-
-    // ── Step 6: Force batch size to 1/4 ──
-    onProgress({ step: 'preflight', message: 'Устанавливаю batch 1/4...' });
-    const batchOk = await ensureBatchSize1(page);
-    if (!batchOk) {
-      throw new Error('Не удалось установить batch size 1/4. Генерация невозможна.');
-    }
-    console.log('[engine] ✅ Batch size: 1/4');
-
-    // ── Step 7: Ensure Unlimited is ON — LAST toggle action ──
-    onProgress({ step: 'preflight', message: 'Включаю Unlimited...' });
-    const unlimitedOk = await ensureUnlimited(page);
-    if (!unlimitedOk) {
-      throw new Error('Не удалось включить Unlimited. Генерация невозможна.');
-    }
-    console.log('[engine] ✅ Unlimited confirmed ON');
-
-    // ── Step 8: Verify controls are available ──
-    onProgress({ step: 'preflight', message: 'Проверяю интерфейс...' });
-    await preflight(page);
-    console.log('[engine] ✅ Preflight passed');
-
-    // ── Step 9: Enter prompt (AFTER all toggles are set!) ──
+    // ── Step 4: Enter prompt (AFTER all settings are confirmed!) ──
     onProgress({ step: 'prompt', message: 'Ввожу промпт...' });
     await enterPrompt(page, prompt);
 
-    // ── Step 10: Set aspect ratio ──
-    onProgress({ step: 'settings', message: `Aspect: ${aspect}...` });
-    await setAspectRatio(page, aspect);
+    // ── NOTE: imagesCount vs site batch ──
+    // imagesCount = how many times the app clicks Generate (app-level loop).
+    // Site batch is ALWAYS forced to 1/4 by preflightSettingsSync().
+    // They are independent: "4 images" = 4 separate Generate clicks, each producing 1 image.
+
 
     // ── Step 9: SEQUENTIAL STATE MACHINE — generate + download + validate per image ──
     // Each slot (i) is an independent unit with its own 2-attempt retry loop.
@@ -1178,64 +1128,431 @@ async function enterPrompt(page, prompt) {
 
 
 // ══════════════════════════════════════════════════════════════
-//  ASPECT RATIO
+//  ASPECT RATIO — Apply + Verify
 // ══════════════════════════════════════════════════════════════
 
-
-async function setAspectRatio(page, aspect) {
-  try {
-    // Find and click the aspect ratio button to open panel
-    const changed = await page.evaluate((targetRatio) => {
-      // Find current aspect ratio button in bottom controls
-      const buttons = document.querySelectorAll('button');
-      let ratioButton = null;
-
-      for (const btn of buttons) {
-        const text = btn.textContent.trim();
-        // Match patterns like "16:9", "1:1", "9:16" etc
-        if (/^\d+:\d+$/.test(text)) {
-          ratioButton = btn;
-          // If already the target ratio, no action needed
-          if (text === targetRatio) return 'already_set';
-          break;
-        }
+/**
+ * Read the currently active aspect ratio from the site.
+ * Returns the button text (e.g. "16:9", "1:1") or null if not found.
+ */
+async function getActiveAspectRatio(page) {
+  return await page.evaluate(() => {
+    const buttons = document.querySelectorAll('button');
+    for (const btn of buttons) {
+      const text = btn.textContent.trim();
+      if (/^\d+:\d+$/.test(text) && btn.offsetParent !== null) {
+        return text;
       }
-
-      if (!ratioButton) return 'not_found';
-
-      // Click to open aspect ratio panel
-      ratioButton.click();
-      return 'opened';
-    }, aspect);
-
-    if (changed === 'already_set') {
-      console.log(`[engine] Aspect ratio already ${aspect}`);
-      return;
     }
+    return null;
+  });
+}
 
-    if (changed === 'not_found') {
-      console.log('[engine] ⚠️ Aspect ratio button not found');
-      return;
-    }
-
-    // Wait for panel to open, then click target ratio
-    await chrome.sleep(500);
-
-    await page.evaluate((targetRatio) => {
-      const buttons = document.querySelectorAll('button');
-      for (const btn of buttons) {
-        if (btn.textContent.trim() === targetRatio) {
-          btn.click();
-          return;
-        }
-      }
-    }, aspect);
-
-    await chrome.sleep(300);
-    console.log(`[engine] Aspect ratio set to ${aspect}`);
-  } catch (e) {
-    console.log(`[engine] ⚠️ Aspect ratio warning: ${e.message}`);
+/**
+ * Verify that the site's aspect ratio matches the expected value.
+ * @returns {{ ok: boolean, actual: string|null }}
+ */
+async function verifyAspectRatio(page, expectedRatio) {
+  const actual = await getActiveAspectRatio(page);
+  const ok = actual === expectedRatio;
+  if (!ok) {
+    console.log(`[engine] ❌ Aspect ratio mismatch: expected "${expectedRatio}", actual "${actual}"`);
   }
+  return { ok, actual };
+}
+
+/**
+ * Set the aspect ratio on the site, then verify it was applied.
+ * Throws on failure (no silent swallowing).
+ */
+async function setAspectRatio(page, aspect) {
+  // Read current ratio
+  const current = await getActiveAspectRatio(page);
+
+  if (current === aspect) {
+    console.log(`[engine] ✅ Aspect ratio already ${aspect}`);
+    return;
+  }
+
+  console.log(`[engine] Aspect ratio: "${current}" → "${aspect}", switching...`);
+
+  // Click the current ratio button to open the aspect ratio panel
+  const opened = await page.evaluate(() => {
+    const buttons = document.querySelectorAll('button');
+    for (const btn of buttons) {
+      const text = btn.textContent.trim();
+      // Match ratio buttons like "16:9", "1:1", or "Auto"
+      if ((/^\d+:\d+$/.test(text) || text === 'Auto') && btn.offsetParent !== null) {
+        btn.click();
+        return true;
+      }
+    }
+    return false;
+  });
+
+  if (!opened) {
+    throw new Error(`Aspect ratio: не найдена кнопка текущего ratio для открытия панели`);
+  }
+
+  // Wait for panel to open, then click target ratio
+  await chrome.sleep(600);
+
+  const clicked = await page.evaluate((targetRatio) => {
+    // Higgsfield uses <div role="option"> for aspect ratio choices, NOT <button>
+    // Try role="option" elements first (primary selector)
+    const options = document.querySelectorAll('div[role="option"]');
+    for (const opt of options) {
+      const text = opt.textContent.trim();
+      if (text === targetRatio && opt.offsetParent !== null) {
+        opt.click();
+        return 'option';
+      }
+    }
+    // Fallback: try buttons (in case site layout changes)
+    const buttons = document.querySelectorAll('button');
+    for (const btn of buttons) {
+      if (btn.textContent.trim() === targetRatio && btn.offsetParent !== null) {
+        btn.click();
+        return 'button';
+      }
+    }
+    return false;
+  }, aspect);
+
+  if (!clicked) {
+    // Close any open panel by pressing Escape
+    await page.keyboard.press('Escape');
+    await chrome.sleep(200);
+    throw new Error(`Aspect ratio: не найдена опция "${aspect}" в панели выбора`);
+  }
+
+  console.log(`[engine] Aspect ratio clicked via ${clicked} element`);
+
+  await chrome.sleep(400);
+
+  // Verify
+  const verify = await verifyAspectRatio(page, aspect);
+  if (!verify.ok) {
+    // One retry: maybe panel is still open, click again
+    console.log(`[engine] ⚠️ Aspect ratio verify failed, retrying...`);
+    await chrome.sleep(500);
+    const retryVerify = await verifyAspectRatio(page, aspect);
+    if (!retryVerify.ok) {
+      throw new Error(`Aspect ratio: после установки "${aspect}" сайт показывает "${retryVerify.actual}". Генерация остановлена.`);
+    }
+  }
+
+  console.log(`[engine] ✅ Aspect ratio set and verified: ${aspect}`);
+}
+
+
+// ══════════════════════════════════════════════════════════════
+//  QUALITY / RESOLUTION — Apply + Verify
+// ══════════════════════════════════════════════════════════════
+
+// MODEL_QUALITY_OPTIONS is now imported from model-capabilities.js
+// Mapping: { modelId: ['quality1', 'quality2'] } — only models with quality selectors.
+
+/**
+ * Read the currently active quality/resolution from the site.
+ * Higgsfield shows quality as buttons like "1K", "2K", "High", etc.
+ * Returns the active button text or null if no quality selector found.
+ */
+async function getActiveQuality(page) {
+  return await page.evaluate(() => {
+    // Strategy 1: Find quality-related buttons by text content
+    // Quality buttons are typically small toggles with "1K", "2K", "HD", etc.
+    const allButtons = document.querySelectorAll('button');
+    const qualityPatterns = /^(1K|2K|4K|HD|High|Standard|Low)$/i;
+    const qualityBtns = [];
+
+    for (const btn of allButtons) {
+      const text = btn.textContent.trim();
+      if (qualityPatterns.test(text) && btn.offsetParent !== null) {
+        qualityBtns.push(btn);
+      }
+    }
+
+    if (qualityBtns.length === 0) return null; // No quality selector on this model
+
+    // Find the active/selected one
+    for (const btn of qualityBtns) {
+      // Check various "active" indicators
+      const classes = btn.className || '';
+      const ariaSelected = btn.getAttribute('aria-selected');
+      const ariaPressed = btn.getAttribute('aria-pressed');
+      const dataState = btn.getAttribute('data-state');
+
+      if (
+        ariaSelected === 'true' ||
+        ariaPressed === 'true' ||
+        dataState === 'on' || dataState === 'active' ||
+        classes.includes('active') || classes.includes('selected') ||
+        classes.includes('bg-') // Higgsfield uses bg-* for active state
+      ) {
+        return btn.textContent.trim();
+      }
+    }
+
+    // Strategy 2: Look for styling differences (opacity, bg-color, font-weight)
+    // The active quality button typically has different styling
+    for (const btn of qualityBtns) {
+      const style = window.getComputedStyle(btn);
+      const opacity = parseFloat(style.opacity);
+      const bgColor = style.backgroundColor;
+      // Active buttons tend to have full opacity and a background
+      if (opacity >= 0.9 && bgColor !== 'rgba(0, 0, 0, 0)' && bgColor !== 'transparent') {
+        return btn.textContent.trim();
+      }
+    }
+
+    // Fallback: if only one quality button exists, it's the active one
+    if (qualityBtns.length === 1) {
+      return qualityBtns[0].textContent.trim();
+    }
+
+    // Return first found as best guess (with warning)
+    return { ambiguous: true, buttons: qualityBtns.map(b => b.textContent.trim()) };
+  });
+}
+
+/**
+ * Verify that the site's quality matches the expected value.
+ * @returns {{ ok: boolean, actual: string|null, noSelector: boolean }}
+ */
+async function verifyQuality(page, expectedQuality, modelKey) {
+  const modelQualityOpts = MODEL_QUALITY_OPTIONS[modelKey];
+
+  // If this model has no quality options at all, any quality is "OK" (N/A)
+  if (!modelQualityOpts) {
+    console.log(`[engine] Quality: model "${modelKey}" has no quality selector — N/A, skipping`);
+    return { ok: true, actual: 'N/A', noSelector: true };
+  }
+
+  const raw = await getActiveQuality(page);
+
+  // No quality selector found on the page
+  if (raw === null) {
+    console.log(`[engine] ⚠️ Quality: expected selector for "${modelKey}" but none found on page`);
+    return { ok: false, actual: null, noSelector: true };
+  }
+
+  // Ambiguous result — multiple buttons, can't determine which is active
+  if (raw && typeof raw === 'object' && raw.ambiguous) {
+    console.log(`[engine] ⚠️ Quality: ambiguous — found buttons [${raw.buttons.join(', ')}], can't determine active`);
+    return { ok: false, actual: raw.buttons.join('/'), noSelector: false };
+  }
+
+  const actual = String(raw);
+  const ok = actual.toLowerCase() === String(expectedQuality).toLowerCase();
+
+  if (!ok) {
+    console.log(`[engine] ❌ Quality mismatch: expected "${expectedQuality}", actual "${actual}"`);
+  }
+  return { ok, actual, noSelector: false };
+}
+
+/**
+ * Set the quality/resolution on the site. Click the target quality button.
+ * For models without a quality selector, this is a no-op.
+ */
+async function setQuality(page, quality, modelKey) {
+  const modelQualityOpts = MODEL_QUALITY_OPTIONS[modelKey];
+
+  // Model has no quality selector → skip
+  if (!modelQualityOpts) {
+    console.log(`[engine] Quality: model "${modelKey}" has no quality selector — skipping`);
+    return;
+  }
+
+  // Validate that the requested quality is valid for this model
+  if (!modelQualityOpts.includes(quality)) {
+    console.log(`[engine] ⚠️ Quality "${quality}" not valid for "${modelKey}" (valid: [${modelQualityOpts.join(', ')}]). Using "${modelQualityOpts[0]}".`);
+    quality = modelQualityOpts[0];
+  }
+
+  // Check if already set correctly
+  const currentVerify = await verifyQuality(page, quality, modelKey);
+  if (currentVerify.ok && !currentVerify.noSelector) {
+    console.log(`[engine] ✅ Quality already set to "${quality}"`);
+    return;
+  }
+
+  // Click the target quality button
+  console.log(`[engine] Quality: setting to "${quality}"...`);
+
+  const clicked = await page.evaluate((targetQuality) => {
+    const allButtons = document.querySelectorAll('button');
+    const qualityPatterns = /^(1K|2K|4K|HD|High|Standard|Low)$/i;
+
+    for (const btn of allButtons) {
+      const text = btn.textContent.trim();
+      if (qualityPatterns.test(text) && btn.offsetParent !== null) {
+        if (text.toLowerCase() === targetQuality.toLowerCase()) {
+          btn.click();
+          return true;
+        }
+      }
+    }
+    return false;
+  }, quality);
+
+  if (!clicked) {
+    console.log(`[engine] ⚠️ Quality: button "${quality}" not found on page`);
+    // Not a fatal error for models where quality is uncertain
+    return;
+  }
+
+  await chrome.sleep(500);
+
+  // Verify after click
+  const afterVerify = await verifyQuality(page, quality, modelKey);
+  if (!afterVerify.ok && !afterVerify.noSelector) {
+    // Retry once
+    console.log(`[engine] ⚠️ Quality: verify failed after click, retrying...`);
+    await chrome.sleep(500);
+    const retryVerify = await verifyQuality(page, quality, modelKey);
+    if (!retryVerify.ok && !retryVerify.noSelector) {
+      throw new Error(`Quality: после установки "${quality}" сайт показывает "${retryVerify.actual}". Генерация остановлена.`);
+    }
+  }
+
+  console.log(`[engine] ✅ Quality set and verified: ${quality}`);
+}
+
+
+// ══════════════════════════════════════════════════════════════
+//  UNIFIED PREFLIGHT SETTINGS SYNC
+//  Applies + verifies ALL settings before generation.
+//  Outputs a structured log table for debugging.
+// ══════════════════════════════════════════════════════════════
+
+/**
+ * preflightSettingsSync — single entry point for all settings.
+ * Called once per prompt AFTER navigation, BEFORE entering prompt text.
+ *
+ * @param {Object} page - Puppeteer page
+ * @param {Object} settings - { model, modelInfo, quality, aspect }
+ * @param {Function} onProgress - progress callback
+ * @returns {Object} sync result with all setting states
+ */
+async function preflightSettingsSync(page, settings, onProgress = () => {}) {
+  const { model, modelInfo, quality, aspect } = settings;
+  const results = {};
+
+  console.log(`\n[engine] ╔══════════ PREFLIGHT SETTINGS SYNC ══════════`);
+
+  // ── 1. Model verification ──
+  onProgress({ step: 'preflight', message: `Проверяю модель ${modelInfo.name}...` });
+  const modelOk = await verifyActiveModel(page, modelInfo);
+  results.model = { expected: modelInfo.name, actual: modelOk ? modelInfo.name : '???', ok: modelOk };
+  if (!modelOk) {
+    logPreflightTable(results);
+    throw new Error(`Preflight: модель "${modelInfo.name}" не активна. В интерфейсе другая модель.`);
+  }
+
+  // ── 2. Dismiss overlays ──
+  await dismissOverlays(page);
+
+  // ── 3. Clear prompt field (prevent ghost gens from toggle clicks) ──
+  onProgress({ step: 'preflight', message: 'Очищаю поле промпта...' });
+  await clearPromptField(page);
+
+  // ── 4. Extra Free Gens → OFF ──
+  onProgress({ step: 'preflight', message: 'Отключаю Extra free gens...' });
+  const extraOk = await ensureExtraFreeGensOff(page);
+  const extraState = await isExtraFreeGensOn(page);
+  results.extraFreeGens = { expected: 'OFF', actual: extraState ? 'ON' : 'OFF', ok: !extraState };
+  if (extraState) {
+    logPreflightTable(results);
+    throw new Error('Preflight: "Extra free gens" не удалось отключить. Генерация остановлена.');
+  }
+
+  // ── 5. Batch size → 1/4 ──
+  onProgress({ step: 'preflight', message: 'Устанавливаю batch 1/4...' });
+  const batchOk = await ensureBatchSize1(page);
+  const batchNow = await getBatchSize(page);
+  const batchStr = batchNow ? `${batchNow.current}/${batchNow.max}` : '???';
+  results.batch = { expected: '1/4', actual: batchStr, ok: batchOk && batchNow && batchNow.current === 1 };
+  if (!results.batch.ok) {
+    logPreflightTable(results);
+    throw new Error(`Preflight: batch не удалось установить в 1/4 (сейчас: ${batchStr}). Генерация остановлена.`);
+  }
+
+  // ── 6. Unlimited → ON (LAST toggle action) ──
+  onProgress({ step: 'preflight', message: 'Включаю Unlimited...' });
+  const unlimitedOk = await ensureUnlimited(page);
+  const unlimitedState = await isUnlimitedOn(page);
+  results.unlimited = { expected: 'ON', actual: unlimitedState === true ? 'ON' : unlimitedState === false ? 'OFF' : '???', ok: unlimitedState === true };
+  if (!results.unlimited.ok) {
+    logPreflightTable(results);
+    throw new Error('Preflight: Unlimited не удалось включить. Генерация остановлена.');
+  }
+
+  // ── 7. Quality / Resolution ──
+  onProgress({ step: 'preflight', message: `Устанавливаю качество ${quality || 'auto'}...` });
+  if (quality) {
+    await setQuality(page, quality, model);
+  }
+  const qualityVerify = await verifyQuality(page, quality, model);
+  results.quality = {
+    expected: quality || 'N/A',
+    actual: qualityVerify.actual || 'N/A',
+    ok: qualityVerify.ok,
+    noSelector: qualityVerify.noSelector,
+  };
+  // Quality mismatch is fatal only if model actually has a quality selector
+  if (!results.quality.ok && !results.quality.noSelector) {
+    logPreflightTable(results);
+    throw new Error(`Preflight: качество "${quality}" не совпадает с сайтом ("${qualityVerify.actual}"). Генерация остановлена.`);
+  }
+
+  // ── 8. Aspect Ratio ──
+  onProgress({ step: 'preflight', message: `Устанавливаю aspect ${aspect}...` });
+  await setAspectRatio(page, aspect);
+  const aspectVerify = await verifyAspectRatio(page, aspect);
+  results.aspect = { expected: aspect, actual: aspectVerify.actual || '???', ok: aspectVerify.ok };
+  if (!results.aspect.ok) {
+    logPreflightTable(results);
+    throw new Error(`Preflight: aspect ratio "${aspect}" не совпадает с сайтом ("${aspectVerify.actual}"). Генерация остановлена.`);
+  }
+
+  // ── 9. Verify controls (prompt field + generate button) ──
+  onProgress({ step: 'preflight', message: 'Проверяю интерфейс...' });
+  await preflight(page);
+
+  // ── Log final table ──
+  logPreflightTable(results);
+  console.log(`[engine] ✅ PREFLIGHT PASSED — all settings verified\n`);
+
+  return results;
+}
+
+/**
+ * Pretty-print the preflight results as a table.
+ */
+function logPreflightTable(results) {
+  const rows = [
+    ['Model',           results.model],
+    ['Quality',         results.quality],
+    ['Aspect Ratio',    results.aspect],
+    ['Batch',           results.batch],
+    ['Unlimited',       results.unlimited],
+    ['Extra Free Gens', results.extraFreeGens],
+  ];
+
+  console.log(`[engine] ║ Setting          │ Expected   │ Actual     │ Status`);
+  console.log(`[engine] ║──────────────────┼────────────┼────────────┼───────`);
+
+  for (const [name, r] of rows) {
+    if (!r) continue;
+    const exp = String(r.expected || '—').padEnd(10);
+    const act = String(r.actual || '—').padEnd(10);
+    const status = r.ok ? '✅ MATCH' : (r.noSelector ? '⏭️ N/A' : '❌ MISMATCH');
+    console.log(`[engine] ║ ${name.padEnd(16)} │ ${exp} │ ${act} │ ${status}`);
+  }
+
+  console.log(`[engine] ╚═════════════════════════════════════════════`);
 }
 
 
@@ -2265,8 +2582,15 @@ module.exports = {
   verifyActiveModel,
   waitForFeedStable,
   snapshotFeedFingerprints,
+  preflightSettingsSync,
+  setQuality,
+  verifyQuality,
+  verifyAspectRatio,
+  setAspectRatio,
   IMAGES_PER_PROMPT,
   DEFAULT_MODEL,
   UNLIMITED_MODELS,
   PAID_ONLY_MODELS,
+  MODEL_QUALITY_OPTIONS,
 };
+

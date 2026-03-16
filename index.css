@@ -702,6 +702,19 @@ body::before {
   border-radius: var(--radius-full);
 }
 
+/* RC-7: Progress bar color variants for outcome state */
+.progress-fill.fill-success {
+  background: linear-gradient(90deg, var(--accent), var(--accent-light));
+}
+
+.progress-fill.fill-warning {
+  background: linear-gradient(90deg, #ff9f0a, #ffcc00);
+}
+
+.progress-fill.fill-error {
+  background: linear-gradient(90deg, #ff3b30, #ff6b6b);
+}
+
 /* ── Status List ── */
 .status-list {
   list-style: none;
@@ -1409,6 +1422,16 @@ body::before {
   color: var(--text-primary);
 }
 
+.banner-error {
+  background: linear-gradient(
+    135deg,
+    rgba(255, 59, 48, 0.1) 0%,
+    rgba(255, 59, 48, 0.05) 100%
+  );
+  border-color: rgba(255, 59, 48, 0.3);
+  color: var(--text-primary);
+}
+
 .banner-icon {
   font-size: 18px;
   flex-shrink: 0;
@@ -1587,6 +1610,51 @@ body::before {
 
 .quality-option.active .quality-label {
   color: var(--accent-hover);
+}
+
+/* ── Compatibility Toast ── */
+.compatibility-toast {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 9999;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 20px;
+  background: rgba(30, 30, 30, 0.95);
+  color: #fff;
+  border-radius: 12px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.25);
+  font-size: 13px;
+  line-height: 1.5;
+  max-width: 420px;
+  animation: toastSlideUp 0.3s ease;
+  backdrop-filter: blur(10px);
+}
+
+.compatibility-toast .toast-icon {
+  font-size: 18px;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.compatibility-toast .toast-messages {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.toast-fade-out {
+  opacity: 0;
+  transform: translateX(-50%) translateY(10px);
+  transition: all 0.4s ease;
+}
+
+@keyframes toastSlideUp {
+  from { opacity: 0; transform: translateX(-50%) translateY(20px); }
+  to { opacity: 1; transform: translateX(-50%) translateY(0); }
 }
 
 /* ── Spinner (for loading states) ── */

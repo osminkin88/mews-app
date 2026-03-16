@@ -2643,9 +2643,11 @@ body::before {
 }
 
 .mascot-cat {
-  font-size: 24px;
-  line-height: 1;
-  transition: transform 0.3s ease;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  object-fit: cover;
+  transition: transform 0.3s ease, opacity 0.3s ease;
 }
 
 .mascot-status {
@@ -2693,4 +2695,172 @@ body::before {
   0%, 100% { transform: translateY(0) scale(1); }
   40%      { transform: translateY(-8px) scale(1.15); }
   60%      { transform: translateY(-4px) scale(1.1); }
+}
+
+/* ============================================================
+   PROGRESS PAGE — Compact Redesign
+   ============================================================ */
+
+/* Unified progress header card */
+.progress-header-card {
+  padding: var(--space-lg) var(--space-xl);
+}
+
+.progress-header-top {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+}
+
+.progress-counter {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+
+.progress-pct {
+  font-size: 14px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.progress-current {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  margin-top: var(--space-sm);
+  padding: var(--space-sm) var(--space-md);
+  background: var(--accent-soft);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.progress-current-arrow {
+  color: var(--accent);
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.progress-current-num {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.progress-current-text {
+  font-size: 13px;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.progress-controls-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  margin-top: var(--space-md);
+}
+
+.progress-stats-mini {
+  display: flex;
+  gap: var(--space-xs);
+  margin-left: var(--space-sm);
+}
+
+.stat-chip {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+}
+
+.stat-chip.done {
+  color: var(--status-success);
+  background: rgba(52, 199, 89, 0.10);
+}
+
+.stat-chip.error {
+  color: var(--status-error);
+  background: rgba(255, 59, 48, 0.10);
+}
+
+/* Filter tabs */
+.progress-filter-tabs {
+  display: flex;
+  gap: var(--space-xs);
+  margin-bottom: var(--space-md);
+}
+
+.filter-tab {
+  font-size: 13px;
+  font-weight: 500;
+  padding: 6px 14px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--border-light);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.filter-tab:hover {
+  background: var(--bg-card);
+  color: var(--text-primary);
+}
+
+.filter-tab.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: var(--border-accent);
+}
+
+.filter-count {
+  font-weight: 700;
+  margin-left: 2px;
+}
+
+/* Scrollable list container */
+.status-list-scroll {
+  max-height: 420px;
+  overflow-y: auto;
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-md);
+  background: var(--bg-card);
+}
+
+/* Compact status rows */
+.status-list .status-item {
+  padding: 10px var(--space-md);
+  border-bottom: 1px solid var(--border-light);
+}
+
+.status-list .status-item:last-child {
+  border-bottom: none;
+}
+
+.status-list .status-text-title {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+  font-size: 13px;
+}
+
+.status-list .status-text-sub {
+  font-size: 11px;
+}
+
+.status-item.current {
+  background: var(--accent-soft);
+}
+
+.status-item-num {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-tertiary);
+  flex-shrink: 0;
+  min-width: 28px;
 }

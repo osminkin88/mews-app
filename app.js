@@ -64,14 +64,18 @@ const IMAGE_COLORS = [
 
 // Original progress controls HTML (to restore after generation)
 const PROGRESS_CONTROLS_HTML = `
-  <button class="btn btn-secondary" id="btn-pause" onclick="togglePause()">
+  <button class="btn btn-secondary btn-sm" id="btn-pause" onclick="togglePause()">
     ⏸ Пауза
   </button>
-  <button class="btn btn-danger" onclick="stopGeneration()">
-    ⏹ Остановить
+  <button class="btn btn-danger btn-sm" onclick="stopGeneration()">
+    ⏹ Стоп
   </button>
+  <div class="progress-stats-mini">
+    <span class="stat-chip done" id="stat-done-chip">✓ 0</span>
+    <span class="stat-chip error" id="stat-errors-chip" style="display: none;">✗ 0</span>
+  </div>
   <div style="flex: 1;"></div>
-  <span class="text-secondary" id="eta-text">≈ 0 мин. осталось</span>
+  <span class="text-secondary" id="eta-text">—</span>
 `;
 
 // ── Meow Sound (preload for instant playback) ──
@@ -99,13 +103,13 @@ function setMascotState(newState) {
   mascot.className = 'mascot ' + newState;
 
   const states = {
-    sleeping: { emoji: '😴', text: 'Дремлет...' },
-    working:  { emoji: '😼', text: 'Генерирует...' },
-    happy:    { emoji: '😸', text: 'Мур! Готово!' },
+    sleeping: { img: 'cat-sleeping.png', text: 'Дремлет...' },
+    working:  { img: 'cat-working.png',  text: 'Генерирует...' },
+    happy:    { img: 'cat-happy.png',    text: 'Мур! Готово!' },
   };
 
   const s = states[newState] || states.sleeping;
-  cat.textContent = s.emoji;
+  cat.src = s.img;
   status.textContent = s.text;
 
   // Auto-return to sleeping after happy
@@ -134,6 +138,7 @@ const state = {
   currentPromptIndex: 0,
   currentImageIndex: 0,
   generationFinished: false,
+  generationStartTime: null,
 
   // Selection
   selectionCurrentPrompt: 0,
@@ -150,6 +155,41 @@ const state = {
 
   imagesPerPrompt: 4,        // Dynamic image quantity
 };
+
+// ── Persistence: Auto-Save (debounced) ──────────────────────
+let _saveSessionTimer = null;
+function saveSession() {
+  if (_saveSessionTimer) clearTimeout(_saveSessionTimer);
+  _saveSessionTimer = setTimeout(async () => {
+    const api = window.electronAPI;
+    if (!api) return;
+    try {
+      await api.config.set('lastActiveProjectId', activeProjectId);
+      await api.config.set('lastScreen', state.currentScreen);
+      await api.config.set('lastImagesPerPrompt', state.imagesPerPrompt);
+    } catch (e) { console.warn('[persist] saveSession error:', e); }
+  }, 300);
+}
+
+let _saveProjectTimer = null;
+function saveProjectState() {
+  if (_saveProjectTimer) clearTimeout(_saveProjectTimer);
+  _saveProjectTimer = setTimeout(async () => {
+    const api = window.electronAPI;
+    if (!api || !activeProjectId) return;
+    try {
+      await api.projects.update(activeProjectId, {
+        selections: state.selections,
+        selectionCurrentPrompt: state.selectionCurrentPrompt,
+        selectedModel: state.selectedModel,
+        selectedQuality: state.selectedQuality,
+        selectedRatio: state.selectedRatio,
+        imagesPerPrompt: state.imagesPerPrompt,
+        lastScreen: state.currentScreen,
+      });
+    } catch (e) { console.warn('[persist] saveProjectState error:', e); }
+  }, 500);
+}
 
 // ── Navigation ──
 function navigateTo(screenId) {
@@ -196,6 +236,9 @@ function navigateTo(screenId) {
 
   updateStepIndicator();
   updateNavStatuses();
+
+  // ── Persist session on every navigation ──
+  saveSession();
 }
 
 function updateStepIndicator() {
@@ -633,6 +676,23 @@ function openProject(id) {
   activeProjectId = id;
   const project = projectsList.find(p => p.id === id);
   if (!project) return;
+
+  // ── Restore persisted project state ──
+  if (project.selections && Object.keys(project.selections).length > 0) {
+    state.selections = { ...project.selections };
+  }
+  if (typeof project.selectionCurrentPrompt === 'number') {
+    state.selectionCurrentPrompt = project.selectionCurrentPrompt;
+  }
+  if (project.imagesPerPrompt) {
+    state.imagesPerPrompt = project.imagesPerPrompt;
+  }
+  if (project.selectedRatio) {
+    state.selectedRatio = project.selectedRatio;
+  }
+  if (project.selectedQuality) {
+    state.selectedQuality = project.selectedQuality;
+  }
   
   console.log(`[app] Opening project: ${project.name} (${id})`);
 
@@ -876,6 +936,7 @@ function selectModel(modelId) {
   }
   renderQualityOptions();
   updateSettingsSummary();
+  saveProjectState();
 }
 
 function selectQuality(el, quality) {
@@ -883,6 +944,7 @@ function selectQuality(el, quality) {
   el.classList.add('active');
   state.selectedQuality = quality;
   updateSettingsSummary();
+  saveProjectState();
 }
 
 function selectImagesCount(optionEl, count) {
@@ -905,6 +967,7 @@ function selectImagesCount(optionEl, count) {
   if (bannerCount) bannerCount.textContent = count;
 
   updateSettingsSummary();
+  saveProjectState();
 }
 
 function selectRatio(el, ratio) {
@@ -915,6 +978,7 @@ function selectRatio(el, ratio) {
   }
   el.classList.add('active');
   state.selectedRatio = ratio;
+  saveProjectState();
 }
 
 function renderQualityOptions() {
@@ -1191,6 +1255,7 @@ async function startGeneration(promptOverride) {
 
   state.isGenerating = true;
   setMascotState('working');
+  state.generationStartTime = Date.now();
   state.isPaused = false;
   state.generationProgress = 0;
   state.currentPromptIndex = 0;
@@ -1253,7 +1318,7 @@ async function startGeneration(promptOverride) {
   }));
 
   // FIX: Restore progress controls HTML (they may have been replaced by completion banner)
-  const controls = document.querySelector('.progress-controls');
+  const controls = document.querySelector('.progress-controls-row');
   if (controls) {
     controls.innerHTML = PROGRESS_CONTROLS_HTML;
   }
@@ -1261,12 +1326,14 @@ async function startGeneration(promptOverride) {
   // FIX: Reset progress UI to 0% immediately
   document.getElementById('progress-percent').textContent = '0%';
   document.getElementById('progress-bar-fill').style.width = '0%';
-  document.getElementById('stat-done').textContent = '0';
-  document.getElementById('stat-total').textContent = state.promptStatuses.length;
-  document.getElementById('stat-images').textContent = '0';
-  document.getElementById('stat-errors').textContent = '0';
-  document.getElementById('current-prompt-text').textContent = state.promptStatuses[0].text;
-  document.getElementById('current-image-sub').textContent = `Изображение 1 из ${state.imagesPerPrompt || 4}`;
+  const cntEl = document.getElementById('progress-counter');
+  if (cntEl) cntEl.textContent = `0/${state.promptStatuses.length}`;
+  const dChip = document.getElementById('stat-done-chip');
+  if (dChip) dChip.textContent = '✓ 0';
+  const numEl = document.getElementById('progress-current-num');
+  if (numEl) numEl.textContent = '#1';
+  const ptEl = document.getElementById('current-prompt-text');
+  if (ptEl) ptEl.textContent = state.promptStatuses[0]?.text || 'Ожидание…';
 
   navigateTo('progress');
   renderPromptStatusList();
@@ -1334,10 +1401,7 @@ function handleGenerationProgress(data) {
       cp.imagesGenerated = (cp.imagesGenerated || 0) + 1;
       console.log(`[app] 💾 SAVED: promptIdx=${state.currentPromptIndex} imagesGenerated: ${before}→${cp.imagesGenerated}`);
       // FIX RC-1: Субтитр обновляется только из реального события, не спекулятивно
-      const imageSubEl = document.getElementById('current-image-sub');
-      if (imageSubEl && data.savedSlot) {
-        imageSubEl.textContent = `Изображение ${data.savedSlot} из ${state.imagesPerPrompt || 4} — сохранено ✅`;
-      }
+      // Compact header does not have sub-line, skip
     } else {
       console.log(`[app] ⚠️ SAVED event but no currentPrompt at idx=${state.currentPromptIndex}!`);
     }
@@ -1368,12 +1432,10 @@ function handleGenerationProgress(data) {
 
     // Обновляем текст текущего промпта
     const promptTextEl = document.getElementById('current-prompt-text');
-    const imageSubEl = document.getElementById('current-image-sub');
     if (promptTextEl && data.prompt) promptTextEl.textContent = data.prompt;
-    // current-image-sub обновляется только из step:saved — здесь не трогаем
-    if (imageSubEl && data.message && data.step !== 'saved') {
-      imageSubEl.textContent = data.message;
-    }
+    // Update current number
+    const numEl2 = document.getElementById('progress-current-num');
+    if (numEl2) numEl2.textContent = `#${idx + 1}`;
 
     updateProgressUI();
     renderPromptStatusList();
@@ -1424,39 +1486,75 @@ function startGenerationSimulation() {
 function updateProgressUI() {
   const pctEl = document.getElementById('progress-percent');
   const fillEl = document.getElementById('progress-bar-fill');
-  const doneEl = document.getElementById('stat-done');
-  const imagesEl = document.getElementById('stat-images');
+  const counterEl = document.getElementById('progress-counter');
+  const doneChip = document.getElementById('stat-done-chip');
+  const errChip = document.getElementById('stat-errors-chip');
 
-  if (!pctEl || !fillEl || !doneEl || !imagesEl) return; // FIX: Guard against missing elements
+  if (!pctEl || !fillEl) return;
 
   const donePr = state.promptStatuses.filter(p => p.status === 'done').length;
-  const doneImg = state.promptStatuses.reduce((sum, p) => sum + p.imagesGenerated, 0);
+  const errPr = state.promptStatuses.filter(p => p.status === 'error' || p.status === 'partial').length;
+  const totalPr = state.promptStatuses.length;
 
   pctEl.textContent = `${state.generationProgress}%`;
   fillEl.style.width = `${state.generationProgress}%`;
-  doneEl.textContent = donePr;
-  imagesEl.textContent = doneImg;
+  if (counterEl) counterEl.textContent = `${donePr}/${totalPr}`;
 
-  // Current prompt text
+  // Stat chips
+  if (doneChip) doneChip.textContent = `✓ ${donePr}`;
+  if (errChip) {
+    errChip.textContent = `✗ ${errPr}`;
+    errChip.style.display = errPr > 0 ? 'inline' : 'none';
+  }
+
+  // Current prompt in compact header
   if (state.currentPromptIndex < state.promptStatuses.length) {
     const cp = state.promptStatuses[state.currentPromptIndex];
     const promptTextEl = document.getElementById('current-prompt-text');
-    const imageSubEl = document.getElementById('current-image-sub');
+    const numEl = document.getElementById('progress-current-num');
     if (promptTextEl) promptTextEl.textContent = cp.text;
-    if (imageSubEl) imageSubEl.textContent = `Генерация ${cp.imagesGenerated + 1} из ${state.imagesPerPrompt || 4} · Unlimited 🆓`;
+    if (numEl) numEl.textContent = `#${state.currentPromptIndex + 1}`;
   }
 
-  // ETA
-  const remaining = state.promptStatuses.length - state.promptStatuses.filter(p => p.status === 'done').length;
+  // Smart ETA (based on average time per already completed prompts)
   const etaEl = document.getElementById('eta-text');
-  if (etaEl) etaEl.textContent = `≈ ${remaining * 2} мин. осталось`;
+  if (etaEl) {
+    const remaining = totalPr - donePr;
+    if (donePr > 0 && state.generationStartTime) {
+      const elapsed = (Date.now() - state.generationStartTime) / 1000;
+      const avgPerPrompt = elapsed / donePr;
+      const etaSec = Math.round(remaining * avgPerPrompt);
+      const etaMin = Math.ceil(etaSec / 60);
+      etaEl.textContent = `≈ ${etaMin} мин (${Math.round(avgPerPrompt)}с/промпт)`;
+    } else {
+      etaEl.textContent = `≈ ${remaining * 2} мин.`;
+    }
+  }
+
+  // Update filter counts
+  const inProg = state.promptStatuses.filter(p => p.status === 'in-progress').length;
+  const el = id => document.getElementById(id);
+  if (el('filter-all')) el('filter-all').textContent = totalPr;
+  if (el('filter-progress')) el('filter-progress').textContent = inProg;
+  if (el('filter-done')) el('filter-done').textContent = donePr;
+  if (el('filter-errors')) el('filter-errors').textContent = errPr;
 }
+
+let _currentFilter = 'all';
 
 function renderPromptStatusList() {
   const list = document.getElementById('prompt-status-list');
-  if (!list) return; // FIX: Guard
+  if (!list) return;
 
-  list.innerHTML = state.promptStatuses.map((p, i) => {
+  const filtered = _currentFilter === 'all'
+    ? state.promptStatuses
+    : state.promptStatuses.filter(p => {
+        if (_currentFilter === 'error') return p.status === 'error' || p.status === 'partial';
+        return p.status === _currentFilter;
+      });
+
+  list.innerHTML = filtered.map((p) => {
+    const origIdx = state.promptStatuses.indexOf(p);
     const icons = {
       'pending': '<div class="status-icon pending">○</div>',
       'in-progress': '<div class="status-icon in-progress">◉</div>',
@@ -1468,23 +1566,46 @@ function renderPromptStatusList() {
     const target = state.imagesPerPrompt || 4;
     const statusTexts = {
       'pending': 'Ожидание',
-      'in-progress': `Генерация… ${p.imagesGenerated}/${target} · Unlimited 🆓`,
-      'done': `Готово ✓ (${target}/${target})`,
-      'partial': `Частично: ${p.imagesGenerated}/${target}`,
+      'in-progress': `${p.imagesGenerated}/${target}`,
+      'done': `✓ ${target}/${target}`,
+      'partial': `${p.imagesGenerated}/${target}`,
       'error': 'Ошибка',
-      'stopped': 'Остановлен',
+      'stopped': 'Стоп',
     };
 
     return `
-      <li class="status-item ${p.status === 'in-progress' ? 'current' : ''}">
+      <li class="status-item ${p.status === 'in-progress' ? 'current' : ''}" title="${p.text}">
+        <span class="status-item-num">#${origIdx + 1}</span>
         ${icons[p.status] || icons['pending']}
         <div class="status-text">
           <div class="status-text-title">${p.text}</div>
-          <div class="status-text-sub">Промпт ${i + 1} · ${statusTexts[p.status] || 'Остановлен'}</div>
+          <div class="status-text-sub">${statusTexts[p.status] || 'Остановлен'}</div>
         </div>
       </li>
     `;
   }).join('');
+
+  // Auto-scroll to current item
+  const currentItem = list.querySelector('.status-item.current');
+  if (currentItem) {
+    const scroll = document.getElementById('status-list-scroll');
+    if (scroll) {
+      const itemTop = currentItem.offsetTop - scroll.offsetTop;
+      const scrollTop = scroll.scrollTop;
+      const scrollH = scroll.clientHeight;
+      if (itemTop < scrollTop || itemTop > scrollTop + scrollH - 60) {
+        scroll.scrollTo({ top: itemTop - 60, behavior: 'smooth' });
+      }
+    }
+  }
+}
+
+function filterPrompts(status, btnEl) {
+  _currentFilter = status;
+  const tabs = document.querySelectorAll('#progress-filter-tabs .filter-tab');
+  tabs.forEach(t => t.classList.remove('active'));
+  if (btnEl) btnEl.classList.add('active');
+  renderPromptStatusList();
 }
 
 function togglePause() {
@@ -1578,17 +1699,19 @@ function finishGeneration(backendResults) {
   const pctEl = document.getElementById('progress-percent');
   const fillEl = document.getElementById('progress-bar-fill');
   const etaEl = document.getElementById('eta-text');
-  const doneEl = document.getElementById('stat-done');
-  const errEl = document.getElementById('stat-errors');
+  const doneEl = document.getElementById('stat-done-chip');
+  const errEl = document.getElementById('stat-errors-chip');
 
   if (pctEl) pctEl.textContent = `${state.generationProgress}%`;
   if (fillEl) fillEl.style.width = `${state.generationProgress}%`;
   if (etaEl) etaEl.textContent = 'Генерация завершена!';
-  if (doneEl) doneEl.textContent = savedSlots;
-  if (errEl) errEl.textContent = failedSlots;
+  if (doneEl) doneEl.textContent = `✓ ${savedSlots}`;
+  if (errEl) { errEl.textContent = `✗ ${failedSlots}`; errEl.style.display = failedSlots > 0 ? 'inline' : 'none'; }
+  const cntEl2 = document.getElementById('progress-counter');
+  if (cntEl2) cntEl2.textContent = `${state.promptStatuses.length}/${state.promptStatuses.length}`;
 
   // ── Honest banner based on real slot counts ──
-  const controls = document.querySelector('.progress-controls');
+  const controls = document.querySelector('.progress-controls-row');
   if (controls) {
     const allPerfect = doneCount === totalCount && totalCount > 0;
     const hasProblems = errorCount > 0 || partialCount > 0;
@@ -1662,8 +1785,17 @@ function goToSelection() {
 }
 
 function initSelection() {
-  state.selectionCurrentPrompt = 0;
-  state.selections = {};
+  // ── Restore persisted selections if available ──
+  const project = activeProjectId ? projectsList.find(p => p.id === activeProjectId) : null;
+  if (project && project.selections && Object.keys(project.selections).length > 0) {
+    state.selections = { ...project.selections };
+    state.selectionCurrentPrompt = typeof project.selectionCurrentPrompt === 'number'
+      ? project.selectionCurrentPrompt : 0;
+    console.log(`[persist] Restored ${Object.keys(state.selections).length} selections, currentPrompt=${state.selectionCurrentPrompt}`);
+  } else {
+    state.selectionCurrentPrompt = 0;
+    state.selections = {};
+  }
   state.selectionInitialized = true;
   renderSelectionMinimap();
   renderSelectionContent();
@@ -1761,6 +1893,7 @@ function selectImage(promptIdx, imageIdx) {
   renderSelectionContent();
   renderSelectionMinimap();
   updateSelectionCounter();
+  saveProjectState(); // ── Persist selection immediately ──
 
   const totalPrompts = state.importedPrompts.length > 0
     ? state.importedPrompts.length
@@ -1795,6 +1928,7 @@ function prevPrompt() {
     state.selectionCurrentPrompt--;
     renderSelectionContent();
     renderSelectionMinimap();
+    saveProjectState();
   }
 }
 
@@ -1806,6 +1940,7 @@ function nextPrompt() {
     state.selectionCurrentPrompt++;
     renderSelectionContent();
     renderSelectionMinimap();
+    saveProjectState();
   }
 }
 
@@ -1817,6 +1952,7 @@ function jumpToPrompt(index) {
     state.selectionCurrentPrompt = index;
     renderSelectionContent();
     renderSelectionMinimap();
+    saveProjectState();
   }
 }
 
@@ -1912,12 +2048,12 @@ async function wizardInitFolder() {
   if (api) {
     try {
       const dir = await api.config.get('outputDir');
-      wizardOutputDir = dir || '~/Documents/Higgsfield Studio';
+      wizardOutputDir = dir || '~/Documents/Mews';
     } catch {
-      wizardOutputDir = '~/Documents/Higgsfield Studio';
+      wizardOutputDir = '~/Documents/Mews';
     }
   } else {
-    wizardOutputDir = '~/Documents/Higgsfield Studio';
+    wizardOutputDir = '~/Documents/Mews';
   }
   const pathEl = document.getElementById('wizard-folder-path');
   if (pathEl) pathEl.textContent = shortenPath(wizardOutputDir);
@@ -2111,6 +2247,38 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Load real projects from disk
   await loadProjectsList();
 
+  // ── Restore last session ─────────────────────────────────
+  if (api) {
+    try {
+      const lastProjectId = await api.config.get('lastActiveProjectId');
+      const lastImagesPerPrompt = await api.config.get('lastImagesPerPrompt');
+
+      if (lastImagesPerPrompt && lastImagesPerPrompt !== 4) {
+        state.imagesPerPrompt = lastImagesPerPrompt;
+      }
+
+      if (lastProjectId) {
+        const project = projectsList.find(p => p.id === lastProjectId);
+        if (project) {
+          console.log(`[persist] Restoring session: project="${project.name}", id=${lastProjectId}`);
+          activeProjectId = lastProjectId;
+
+          // Restore project-level state
+          if (project.selections) state.selections = { ...project.selections };
+          if (typeof project.selectionCurrentPrompt === 'number') {
+            state.selectionCurrentPrompt = project.selectionCurrentPrompt;
+          }
+          if (project.selectedModel) state.selectedModel = project.selectedModel;
+          if (project.selectedQuality) state.selectedQuality = project.selectedQuality;
+          if (project.selectedRatio) state.selectedRatio = project.selectedRatio;
+          if (project.imagesPerPrompt) state.imagesPerPrompt = project.imagesPerPrompt;
+        }
+      }
+    } catch (e) {
+      console.warn('[persist] Session restore error:', e);
+    }
+  }
+
   // Init step indicator
   updateStepIndicator();
   updateNavStatuses();
@@ -2118,12 +2286,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   // FIX: Reset hardcoded progress values to clean state
   const pctEl = document.getElementById('progress-percent');
   const fillEl = document.getElementById('progress-bar-fill');
-  const doneEl = document.getElementById('stat-done');
-  const imagesEl = document.getElementById('stat-images');
+  const doneEl2 = document.getElementById('stat-done-chip');
   if (pctEl) pctEl.textContent = '0%';
   if (fillEl) fillEl.style.width = '0%';
-  if (doneEl) doneEl.textContent = '0';
-  if (imagesEl) imagesEl.textContent = '0';
+  if (doneEl2) doneEl2.textContent = '✓ 0';
 
   // ── Electron: Check existing connection on startup ──
   // (api is already declared above in first-launch check)

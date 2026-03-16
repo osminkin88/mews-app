@@ -76,7 +76,7 @@
           <span class="wizard-folder-icon">📂</span>
           <div class="wizard-folder-info">
             <div class="wizard-folder-label">Папка для сохранения</div>
-            <div class="wizard-folder-path" id="wizard-folder-path">~/Documents/Higgsfield Studio</div>
+            <div class="wizard-folder-path" id="wizard-folder-path">~/Documents/Mews</div>
           </div>
           <button class="btn btn-secondary" onclick="wizardSelectFolder()">Выбрать другую</button>
         </div>
@@ -145,7 +145,7 @@
       <div class="wizard-summary card">
         <div class="wizard-summary-row">
           <span class="wizard-summary-label">Папка</span>
-          <span class="wizard-summary-value" id="wizard-summary-folder">~/Documents/Higgsfield Studio</span>
+          <span class="wizard-summary-value" id="wizard-summary-folder">~/Documents/Mews</span>
         </div>
         <div class="wizard-summary-row">
           <span class="wizard-summary-label">Chrome</span>
@@ -214,7 +214,7 @@
       <!-- Output dir info -->
       <div class="modal-hint">
         <span>📍</span>
-        <span>Папка будет создана в: <strong id="project-output-dir">~/Documents/Higgsfield Studio/</strong></span>
+        <span>Папка будет создана в: <strong id="project-output-dir">~/Documents/Mews/</strong></span>
       </div>
     </div>
 
@@ -249,7 +249,7 @@
       <div class="sidebar-logo">
         <div class="sidebar-logo-icon">✦</div>
         <div>
-          <div class="sidebar-logo-text">Higgsfield</div>
+          <div class="sidebar-logo-text">Mews</div>
           <div class="sidebar-logo-sub">Studio</div>
         </div>
       </div>
@@ -312,7 +312,7 @@
     <!-- Footer -->
     <div class="sidebar-footer">
       <div class="mascot sleeping" id="mascot">
-        <div class="mascot-cat" id="mascot-cat">😴</div>
+        <img class="mascot-cat" id="mascot-cat" src="cat-sleeping.png" alt="Mews Cat" draggable="false">
         <div class="mascot-status" id="mascot-status">Дремлет...</div>
       </div>
       <div class="sidebar-footer-text">Mews v1.0</div>
@@ -695,63 +695,46 @@
         <p>Генерируем изображения для ваших промптов</p>
       </div>
 
-      <!-- Overall progress -->
-      <div class="card mb-lg">
-        <div class="progress-bar-header">
-          <span class="text-heading">Общий прогресс</span>
-          <span class="text-heading text-accent" id="progress-percent">0%</span>
+      <!-- Unified compact progress header -->
+      <div class="card progress-header-card">
+        <!-- Row 1: Progress bar + counter -->
+        <div class="progress-header-top">
+          <div class="progress-bar progress-bar-large" style="flex: 1;">
+            <div class="progress-fill" id="progress-bar-fill" style="width: 0%;"></div>
+          </div>
+          <span class="progress-counter" id="progress-counter">0/0</span>
+          <span class="text-accent progress-pct" id="progress-percent">0%</span>
         </div>
-        <div class="progress-bar progress-bar-large">
-          <div class="progress-fill" id="progress-bar-fill" style="width: 0%;"></div>
+
+        <!-- Row 2: Current prompt -->
+        <div class="progress-current" id="progress-current-row">
+          <span class="progress-current-arrow">→</span>
+          <span class="progress-current-num" id="progress-current-num">#1</span>
+          <span class="progress-current-text" id="current-prompt-text">Ожидание запуска…</span>
         </div>
-        <div class="progress-stats">
-          <div class="progress-stat">
-            <div class="progress-stat-value" id="stat-done">0</div>
-            <div class="progress-stat-label">Готово</div>
+
+        <!-- Row 3: Controls + stats -->
+        <div class="progress-controls-row">
+          <button class="btn btn-secondary btn-sm" id="btn-pause" onclick="togglePause()">⏸ Пауза</button>
+          <button class="btn btn-danger btn-sm" onclick="stopGeneration()">⏹ Стоп</button>
+          <div class="progress-stats-mini">
+            <span class="stat-chip done" id="stat-done-chip">✓ 0</span>
+            <span class="stat-chip error" id="stat-errors-chip" style="display: none;">✗ 0</span>
           </div>
-          <div class="progress-stat">
-            <div class="progress-stat-value" id="stat-total">0</div>
-            <div class="progress-stat-label">Всего</div>
-          </div>
-          <div class="progress-stat">
-            <div class="progress-stat-value" id="stat-images">0</div>
-            <div class="progress-stat-label">Изображений</div>
-          </div>
-          <div class="progress-stat">
-            <div class="progress-stat-value" id="stat-errors">0</div>
-            <div class="progress-stat-label">Ошибок</div>
-          </div>
+          <div style="flex: 1;"></div>
+          <span class="text-secondary" id="eta-text">—</span>
         </div>
       </div>
 
-      <!-- Current generation -->
-      <div class="card current-gen-card">
-        <div class="current-gen-pulse"></div>
-        <div class="current-gen-info">
-          <div class="current-gen-label">Сейчас генерируется</div>
-          <div class="current-gen-prompt" id="current-prompt-text">Ожидание запуска…</div>
-          <div class="current-gen-sub" id="current-image-sub">—</div>
+      <!-- Filter tabs + prompt list -->
+      <div class="section mt-lg">
+        <div class="progress-filter-tabs" id="progress-filter-tabs">
+          <button class="filter-tab active" onclick="filterPrompts('all', this)">Все <span class="filter-count" id="filter-all">0</span></button>
+          <button class="filter-tab" onclick="filterPrompts('in-progress', this)">Генерируется <span class="filter-count" id="filter-progress">0</span></button>
+          <button class="filter-tab" onclick="filterPrompts('done', this)">Готово <span class="filter-count" id="filter-done">0</span></button>
+          <button class="filter-tab" onclick="filterPrompts('error', this)">Ошибки <span class="filter-count" id="filter-errors">0</span></button>
         </div>
-      </div>
-
-      <!-- Controls -->
-      <div class="progress-controls">
-        <button class="btn btn-secondary" id="btn-pause" onclick="togglePause()">
-          ⏸ Пауза
-        </button>
-        <button class="btn btn-danger" onclick="stopGeneration()">
-          ⏹ Остановить
-        </button>
-        <div style="flex: 1;"></div>
-        <span class="text-secondary" id="eta-text">—</span>
-      </div>
-
-      <!-- Prompt status list -->
-      <div class="section mt-xl">
-        <div class="section-header">
-          <span class="section-title">Статус промптов</span>
-        </div>
-        <div class="card status-list-card">
+        <div class="status-list-scroll" id="status-list-scroll">
           <ul class="status-list" id="prompt-status-list">
             <!-- Generated by JS -->
           </ul>

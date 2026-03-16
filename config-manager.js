@@ -30,7 +30,7 @@ function getAppData() {
 
 function getDefaultOutput() {
   if (!_defaultOutput) {
-    _defaultOutput = path.join(app.getPath('documents'), 'Higgsfield Studio');
+    _defaultOutput = path.join(app.getPath('documents'), 'Mews');
   }
   return _defaultOutput;
 }
@@ -48,6 +48,10 @@ function getDefaults() {
     selectedQuality: '2K',
     selectedRatio: '1:1',
     windowBounds: null,
+    // Session persistence (restored on restart)
+    lastActiveProjectId: null,
+    lastScreen: 'projects',
+    lastImagesPerPrompt: 4,
   };
 }
 

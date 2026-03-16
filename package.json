@@ -5,7 +5,11 @@
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "dev": "electron . --dev"
+    "dev": "electron . --dev",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:smoke": "node tests/smoke-persistence.js",
+    "test:all": "npm run test && npm run test:smoke"
   },
   "keywords": [
     "higgsfield",
@@ -16,7 +20,8 @@
   "license": "MIT",
   "type": "commonjs",
   "devDependencies": {
-    "electron": "^41.0.2"
+    "electron": "^41.0.2",
+    "vitest": "^4.1.0"
   },
   "dependencies": {
     "puppeteer-core": "^24.39.1",

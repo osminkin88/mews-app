@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <title>Mews v4 — Connection</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="design-system.css">
+  <style>
+    .main { display: flex; align-items: center; justify-content: center; }
+
+    .conn-card {
+      width: 420px;
+      background: var(--bg-elevated);
+      border: 1px solid var(--border);
+      border-radius: var(--r-xl);
+      overflow: hidden;
+    }
+    .conn-header { padding: 28px 28px 20px; text-align: center; }
+    .conn-icon {
+      width: 56px; height: 56px; margin: 0 auto 16px;
+      border-radius: 14px; background: var(--accent-soft);
+      display: flex; align-items: center; justify-content: center;
+    }
+    .conn-icon svg { width: 28px; height: 28px; stroke: var(--accent); fill: none; stroke-width: 1.6; }
+    .conn-title { font-size: 18px; font-weight: 800; letter-spacing: -0.3px; }
+    .conn-subtitle { font-size: 13px; color: var(--text-tertiary); margin-top: 4px; }
+
+    .conn-body { padding: 0 28px 24px; }
+
+    .conn-status {
+      display: flex; align-items: center; gap: 10px;
+      padding: 12px 14px; border-radius: var(--r-md);
+      margin-bottom: 20px;
+    }
+    .conn-status.online { background: var(--green-soft); }
+    .conn-status.offline { background: var(--red-soft); }
+    .cs-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+    .online .cs-dot { background: var(--green); }
+    .offline .cs-dot { background: var(--red); }
+    .cs-text { font-size: 13px; font-weight: 600; }
+    .online .cs-text { color: var(--green); }
+    .offline .cs-text { color: var(--red); }
+    .cs-spacer { flex: 1; }
+    .cs-ping { font-size: 11px; color: var(--text-tertiary); }
+
+    .conn-field-row { display: flex; gap: 8px; }
+    .conn-field-row .text-input:last-child { max-width: 100px; }
+
+    .conn-info {
+      display: grid; grid-template-columns: 1fr 1fr;
+      gap: 8px; margin-top: 16px;
+    }
+    .ci-item { padding: 10px 12px; background: var(--bg); border-radius: var(--r-sm); }
+    .ci-label { font-size: 9px; font-weight: 600; color: var(--text-tertiary); text-transform: uppercase; letter-spacing: 0.3px; }
+    .ci-value { font-size: 13px; font-weight: 700; margin-top: 2px; }
+    .ci-value.ok { color: var(--green); }
+
+    .conn-footer { display: flex; gap: 8px; padding: 14px 28px 24px; }
+    .conn-footer .btn { flex: 1; }
+  </style>
+</head>
+<body>
+
+<div class="badge-v4">V4 · CONNECTION</div>
+
+<div class="app">
+  <div class="topbar">
+    <div class="topbar-traffic"><div class="dot dot-r"></div><div class="dot dot-y"></div><div class="dot dot-g"></div></div>
+    <div class="topbar-brand">Mews</div>
+    <div class="topbar-spacer"></div>
+  </div>
+
+  <div class="main">
+    <div class="conn-card">
+      <div class="conn-header">
+        <div class="conn-icon">
+          <svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+        </div>
+        <div class="conn-title">Подключение к Higgsfield</div>
+        <div class="conn-subtitle">Сервер генерации изображений</div>
+      </div>
+
+      <div class="conn-body">
+        <div class="conn-status online">
+          <div class="cs-dot"></div>
+          <span class="cs-text">Подключено</span>
+          <div class="cs-spacer"></div>
+          <span class="cs-ping">45ms</span>
+        </div>
+
+        <div class="field">
+          <div class="field-label">Адрес сервера</div>
+          <div class="conn-field-row">
+            <input class="text-input" type="text" value="192.168.1.100">
+            <input class="text-input" type="text" value="8080">
+          </div>
+        </div>
+
+        <div class="field">
+          <div class="field-label">API ключ</div>
+          <input class="text-input" type="password" value="sk-xxxxxxxxxxxxxxxxxxxx">
+        </div>
+
+        <div class="conn-info">
+          <div class="ci-item"><div class="ci-label">Статус</div><div class="ci-value ok">Online</div></div>
+          <div class="ci-item"><div class="ci-label">Модели</div><div class="ci-value">4 доступно</div></div>
+          <div class="ci-item"><div class="ci-label">GPU</div><div class="ci-value">RTX 4090</div></div>
+          <div class="ci-item"><div class="ci-label">Лимит</div><div class="ci-value ok">∞ Unlimited</div></div>
+        </div>
+      </div>
+
+      <div class="conn-footer">
+        <button class="btn btn-secondary">
+          <svg viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+          Переподключить
+        </button>
+        <button class="btn btn-primary">
+          <svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
+          Сохранить
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <div class="statusbar">
+    <div class="sb-item"><span class="sb-dot"></span> Higgsfield · Подключено</div>
+    <div class="sb-spacer"></div>
+    <div class="sb-item">v1.4.2</div>
+  </div>
+</div>
+
+<!-- Nav strip -->
+<div class="nav-strip">
+  <a href="connection.html" class="nav-item active">Connection</a>
+  <a href="projects.html" class="nav-item">Projects</a>
+  <a href="settings.html" class="nav-item">Settings</a>
+  <a href="progress.html" class="nav-item">Progress</a>
+  <a href="selection.html" class="nav-item">Selection</a>
+  <a href="results.html" class="nav-item">Results</a>
+</div>
+
+</body>
+</html>

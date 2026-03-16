@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <title>Mews v4 — Selection</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="design-system.css">
+  <style>
+    /* ── WORKSPACE ── */
+    .workspace { display: grid; grid-template-columns: 1fr 280px; overflow: hidden; }
+
+    /* ── HERO ZONE ── */
+    .hero-zone { display: flex; flex-direction: column; overflow: hidden; padding: 16px; gap: 12px; }
+    .hero-image {
+      flex: 1; border-radius: var(--r-lg); overflow: hidden;
+      position: relative; cursor: zoom-in;
+      display: flex; align-items: center; justify-content: center;
+      background: linear-gradient(135deg, #1a2a4a 0%, #2a4a3a 40%, #3a2a4a 100%);
+      min-height: 0;
+    }
+    .hero-image::after { content: 'Variant 2 · Full Resolution Preview'; font-size: 14px; font-weight: 500; color: rgba(255,255,255,0.3); letter-spacing: 0.5px; }
+    .hero-label { position: absolute; top: 12px; left: 12px; background: rgba(0,0,0,0.5); backdrop-filter: blur(12px); padding: 4px 12px; border-radius: 6px; font-size: 12px; font-weight: 600; }
+    .hero-zoom { position: absolute; bottom: 12px; right: 12px; display: flex; gap: 4px; }
+    .zoom-btn {
+      width: 32px; height: 32px; border-radius: var(--r-sm);
+      background: rgba(0,0,0,0.5); backdrop-filter: blur(12px);
+      border: none; color: var(--text-secondary); font-size: 16px;
+      cursor: pointer; display: flex; align-items: center; justify-content: center;
+    }
+    .zoom-btn:hover { color: white; background: rgba(0,0,0,0.7); }
+
+    /* Filmstrip */
+    .filmstrip { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; flex-shrink: 0; }
+    .film-thumb {
+      aspect-ratio: 1; border-radius: var(--r-sm); cursor: pointer;
+      position: relative; border: 2px solid transparent;
+      transition: all 0.15s; overflow: hidden;
+    }
+    .film-thumb:nth-child(1) { background: linear-gradient(135deg, #2a3a5a, #3a4a3a); }
+    .film-thumb:nth-child(2) { background: linear-gradient(135deg, #1a2a4a, #2a4a3a); }
+    .film-thumb:nth-child(3) { background: linear-gradient(135deg, #3a2a3a, #2a3a4a); }
+    .film-thumb:nth-child(4) { background: linear-gradient(135deg, #2a4a4a, #3a3a2a); }
+    .film-thumb:hover { border-color: rgba(255,255,255,0.2); }
+    .film-thumb.viewing { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(10,132,255,0.2); }
+    .film-thumb.selected { border-color: var(--green); box-shadow: 0 0 0 3px rgba(48,209,88,0.25); }
+    .film-num { position: absolute; top: 6px; left: 6px; font-size: 10px; font-weight: 700; background: rgba(0,0,0,0.5); padding: 1px 6px; border-radius: 3px; }
+    .film-check {
+      position: absolute; top: 6px; right: 6px; width: 20px; height: 20px; border-radius: 50%;
+      background: var(--green); display: flex; align-items: center; justify-content: center;
+      opacity: 0; transition: opacity 0.1s;
+    }
+    .film-thumb.selected .film-check { opacity: 1; }
+    .film-check svg { width: 12px; height: 12px; stroke: white; fill: none; stroke-width: 2.5; }
+
+    /* ── DECISION PANEL ── */
+    .decision-panel { background: var(--bg-elevated); border-left: 1px solid var(--border); display: flex; flex-direction: column; overflow: hidden; }
+
+    .dp-progress { padding: 16px 16px 12px; border-bottom: 1px solid var(--border); }
+    .dp-progress-title { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+    .dp-progress-title span { font-size: 20px; font-weight: 800; letter-spacing: -0.5px; }
+    .dp-progress-title small { font-size: 14px; font-weight: 400; color: var(--text-tertiary); }
+    .dp-bar-track { height: 4px; background: var(--bg-float); border-radius: 2px; overflow: hidden; }
+    .dp-bar-fill { height: 100%; border-radius: 2px; background: linear-gradient(90deg, var(--green), var(--accent)); width: 29%; }
+    .dp-bar-label { display: flex; justify-content: space-between; margin-top: 4px; font-size: 11px; color: var(--text-tertiary); }
+
+    .dp-prompt { padding: 14px 16px; border-bottom: 1px solid var(--border); }
+    .dp-prompt-label { font-size: 10px; font-weight: 700; color: var(--text-tertiary); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
+    .dp-prompt-text { font-size: 13px; line-height: 1.6; color: var(--text-secondary); }
+
+    .dp-queue { padding: 14px 16px; border-bottom: 1px solid var(--border); flex: 1; overflow-y: auto; }
+    .dp-queue-label { font-size: 10px; font-weight: 700; color: var(--text-tertiary); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
+    .queue-list { display: flex; flex-direction: column; gap: 2px; }
+    .queue-item { display: flex; align-items: center; gap: 8px; padding: 5px 8px; border-radius: 6px; cursor: pointer; transition: background 0.1s; font-size: 12px; }
+    .queue-item:hover { background: var(--bg-float); }
+    .queue-item.current { background: rgba(10,132,255,0.12); }
+    .qi-num { width: 20px; text-align: center; font-weight: 700; font-size: 11px; color: var(--text-tertiary); }
+    .queue-item.done .qi-num { color: var(--green); }
+    .queue-item.current .qi-num { color: var(--accent); }
+    .qi-status { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+    .qi-status.s-done { background: var(--green); }
+    .qi-status.s-current { background: var(--accent); }
+    .qi-status.s-pending { background: var(--bg-float); border: 1px solid var(--text-tertiary); }
+    .qi-text { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text-tertiary); font-size: 11px; }
+    .queue-item.done .qi-text { color: var(--text-secondary); }
+    .queue-item.current .qi-text { color: var(--text-primary); }
+
+    .dp-actions { padding: 12px 16px; display: flex; flex-direction: column; gap: 8px; border-top: 1px solid var(--border); }
+    .dp-selected-info { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary); }
+    .dp-selected-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); }
+    .btn-next {
+      display: flex; align-items: center; justify-content: center; gap: 6px;
+      padding: 10px; border-radius: var(--r-sm);
+      font-family: var(--font); font-size: 13px; font-weight: 600;
+      border: none; cursor: pointer; background: var(--accent); color: white; transition: all 0.12s;
+    }
+    .btn-next:hover { filter: brightness(1.1); }
+    .btn-next svg { width: 14px; height: 14px; stroke: currentColor; fill: none; stroke-width: 2; }
+    .btn-finish {
+      display: flex; align-items: center; justify-content: center; gap: 6px;
+      padding: 8px; border-radius: var(--r-sm);
+      font-family: var(--font); font-size: 12px; font-weight: 500;
+      border: 1px solid var(--border); background: transparent; color: var(--text-secondary); cursor: pointer;
+    }
+    .btn-finish:hover { border-color: var(--green); color: var(--green); }
+  </style>
+</head>
+<body>
+
+<div class="badge-v4" style="background:linear-gradient(135deg,#BF5AF2,#0A84FF)">V4 · SELECTION</div>
+
+<div class="app">
+  <div class="topbar">
+    <div class="topbar-traffic"><div class="dot dot-r"></div><div class="dot dot-y"></div><div class="dot dot-g"></div></div>
+    <div class="topbar-project"><strong>Весенняя коллекция</strong><span class="topbar-sep">·</span>Отбор кадров</div>
+    <span class="topbar-step topbar-step-blue">Шаг 4 из 5</span>
+    <div class="topbar-spacer"></div>
+    <div class="topbar-keys">
+      <span class="key-hint"><kbd>←</kbd> <kbd>→</kbd> промпты</span>
+      <span class="key-hint"><kbd>1</kbd>–<kbd>4</kbd> выбрать</span>
+      <span class="key-hint"><kbd>Space</kbd> zoom</span>
+    </div>
+  </div>
+
+  <div class="workspace">
+    <div class="hero-zone">
+      <div class="hero-image">
+        <span class="hero-label">Вариант 2 из 4</span>
+        <div class="hero-zoom">
+          <button class="zoom-btn">−</button>
+          <button class="zoom-btn">+</button>
+          <button class="zoom-btn">⤢</button>
+        </div>
+      </div>
+      <div class="filmstrip">
+        <div class="film-thumb"><span class="film-num">1</span><div class="film-check"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></div></div>
+        <div class="film-thumb viewing selected"><span class="film-num">2</span><div class="film-check"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></div></div>
+        <div class="film-thumb"><span class="film-num">3</span><div class="film-check"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></div></div>
+        <div class="film-thumb"><span class="film-num">4</span><div class="film-check"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></div></div>
+      </div>
+    </div>
+
+    <div class="decision-panel">
+      <div class="dp-progress">
+        <div class="dp-progress-title"><span>8</span><small>/ 24</small></div>
+        <div class="dp-bar-track"><div class="dp-bar-fill"></div></div>
+        <div class="dp-bar-label"><span>7 отобрано</span><span>17 осталось</span></div>
+      </div>
+      <div class="dp-prompt">
+        <div class="dp-prompt-label">Промпт #8</div>
+        <div class="dp-prompt-text">Futuristic cityscape at sunset with flying vehicles and neon accents, cinematic lighting, detailed architecture, 8K quality</div>
+      </div>
+      <div class="dp-queue">
+        <div class="dp-queue-label">Очередь промптов</div>
+        <div class="queue-list">
+          <div class="queue-item done"><span class="qi-num">1</span><span class="qi-status s-done"></span><span class="qi-text">Dreamy watercolor landscape with cherry…</span></div>
+          <div class="queue-item done"><span class="qi-num">2</span><span class="qi-status s-done"></span><span class="qi-text">Minimalist abstract art with pastel…</span></div>
+          <div class="queue-item done"><span class="qi-num">3</span><span class="qi-status s-done"></span><span class="qi-text">Vintage botanical illustration of wildflowers…</span></div>
+          <div class="queue-item done"><span class="qi-num">4</span><span class="qi-status s-done"></span><span class="qi-text">Cozy coffee shop interior with warm…</span></div>
+          <div class="queue-item done"><span class="qi-num">5</span><span class="qi-status s-done"></span><span class="qi-text">Japanese zen garden with raked sand…</span></div>
+          <div class="queue-item done"><span class="qi-num">6</span><span class="qi-status s-done"></span><span class="qi-text">Ethereal abstract composition in azure…</span></div>
+          <div class="queue-item done"><span class="qi-num">7</span><span class="qi-status s-done"></span><span class="qi-text">Scandinavian living room with plants…</span></div>
+          <div class="queue-item current"><span class="qi-num">8</span><span class="qi-status s-current"></span><span class="qi-text">Futuristic cityscape at sunset with…</span></div>
+          <div class="queue-item"><span class="qi-num">9</span><span class="qi-status s-pending"></span><span class="qi-text">Underwater coral reef with bioluminescent…</span></div>
+          <div class="queue-item"><span class="qi-num">10</span><span class="qi-status s-pending"></span><span class="qi-text">Mountain village in autumn fog…</span></div>
+          <div class="queue-item"><span class="qi-num">11</span><span class="qi-status s-pending"></span><span class="qi-text">Cyberpunk street market at midnight…</span></div>
+          <div class="queue-item"><span class="qi-num">12</span><span class="qi-status s-pending"></span><span class="qi-text">Enchanted forest with glowing mushrooms…</span></div>
+        </div>
+      </div>
+      <div class="dp-actions">
+        <div class="dp-selected-info"><span class="dp-selected-dot"></span>Выбран: Вариант 2</div>
+        <button class="btn-next">Следующий промпт <svg viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg></button>
+        <button class="btn-finish">Завершить отбор · 7/24</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="statusbar">
+    <div class="sb-item"><span class="sb-dot"></span> Higgsfield</div>
+    <div class="sb-item">Nano Banana Pro · 2K</div>
+    <div class="sb-spacer"></div>
+    <div class="sb-item">96 изображений · 4 на промпт</div>
+  </div>
+</div>
+
+<div class="nav-strip">
+  <a href="connection.html" class="nav-item">Connection</a>
+  <a href="projects.html" class="nav-item">Projects</a>
+  <a href="settings.html" class="nav-item">Settings</a>
+  <a href="progress.html" class="nav-item">Progress</a>
+  <a href="selection.html" class="nav-item active">Selection</a>
+  <a href="results.html" class="nav-item">Results</a>
+</div>
+
+</body>
+</html>

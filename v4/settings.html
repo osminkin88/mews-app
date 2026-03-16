@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <title>Mews v4 — Settings</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="design-system.css">
+  <style>
+    .main { display: flex; align-items: center; justify-content: center; }
+
+    .settings-card {
+      width: 480px;
+      background: var(--bg-elevated);
+      border: 1px solid var(--border);
+      border-radius: var(--r-xl);
+      overflow: hidden;
+    }
+    .sc-header { padding: 24px 28px 16px; border-bottom: 1px solid var(--border); }
+    .sc-title { font-size: 18px; font-weight: 800; letter-spacing: -0.3px; }
+    .sc-subtitle { font-size: 12px; color: var(--text-tertiary); margin-top: 3px; }
+    .sc-body { padding: 20px 28px; }
+
+    .source-row {
+      display: flex; align-items: center; gap: 12px;
+      padding: 12px 14px; background: var(--bg);
+      border-radius: var(--r-md); margin-bottom: 20px;
+    }
+    .source-icon {
+      width: 36px; height: 36px; border-radius: 9px;
+      background: var(--green-soft);
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+    }
+    .source-icon svg { width: 18px; height: 18px; stroke: var(--green); fill: none; stroke-width: 1.6; }
+    .source-info { flex: 1; min-width: 0; }
+    .source-name { font-size: 13px; font-weight: 600; }
+    .source-meta { font-size: 11px; color: var(--text-tertiary); margin-top: 1px; }
+    .source-btn {
+      font-size: 11px; font-weight: 500; color: var(--text-tertiary);
+      background: none; border: none; cursor: pointer; font-family: var(--font);
+    }
+    .source-btn:hover { color: var(--accent); }
+
+    .sc-launch {
+      padding: 16px 28px 24px;
+      border-top: 1px solid var(--border);
+      background: var(--bg);
+    }
+    .launch-stats { display: flex; gap: 16px; margin-bottom: 14px; }
+    .launch-stat { flex: 1; text-align: center; }
+    .launch-stat-value { font-size: 20px; font-weight: 800; }
+    .launch-stat-value.highlight { color: var(--accent); }
+    .launch-stat-label {
+      font-size: 9px; color: var(--text-tertiary);
+      text-transform: uppercase; letter-spacing: 0.3px; margin-top: 2px;
+    }
+  </style>
+</head>
+<body>
+
+<div class="badge-v4">V4 · SETTINGS</div>
+
+<div class="app">
+  <div class="topbar">
+    <div class="topbar-traffic"><div class="dot dot-r"></div><div class="dot dot-y"></div><div class="dot dot-g"></div></div>
+    <div class="topbar-project"><strong>Весенняя коллекция</strong><span class="topbar-sep">·</span>Настройка генерации</div>
+    <span class="topbar-step topbar-step-blue">Шаг 2 из 5</span>
+    <div class="topbar-spacer"></div>
+  </div>
+
+  <div class="main">
+    <div class="settings-card">
+      <div class="sc-header">
+        <div class="sc-title">Подготовка к запуску</div>
+        <div class="sc-subtitle">Настрой параметры и запусти генерацию</div>
+      </div>
+
+      <div class="sc-body">
+        <div class="source-row">
+          <div class="source-icon">
+            <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+          </div>
+          <div class="source-info">
+            <div class="source-name">spring_collection_prompts.csv</div>
+            <div class="source-meta">24 промпта · 3 категории</div>
+          </div>
+          <button class="source-btn">Заменить</button>
+        </div>
+
+        <div class="field-row">
+          <div class="field-col">
+            <div class="field">
+              <div class="field-label">Модель</div>
+              <select class="select-input">
+                <option>Nano Banana Pro</option>
+                <option>Nano Banana</option>
+                <option>Higgsfield Soul</option>
+              </select>
+              <div class="field-tag">∞ Unlimited</div>
+            </div>
+          </div>
+          <div class="field-col">
+            <div class="field">
+              <div class="field-label">Качество</div>
+              <div class="seg">
+                <button class="seg-btn">1K</button>
+                <button class="seg-btn on">2K</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="field">
+          <div class="field-label">Формат</div>
+          <div class="ratio-grid">
+            <div class="ratio-item on"><div class="ratio-box" style="width:18px;height:18px"></div><div class="ratio-name">1:1</div></div>
+            <div class="ratio-item"><div class="ratio-box" style="width:15px;height:20px"></div><div class="ratio-name">3:4</div></div>
+            <div class="ratio-item"><div class="ratio-box" style="width:20px;height:15px"></div><div class="ratio-name">4:3</div></div>
+            <div class="ratio-item"><div class="ratio-box" style="width:12px;height:20px"></div><div class="ratio-name">9:16</div></div>
+            <div class="ratio-item"><div class="ratio-box" style="width:20px;height:12px"></div><div class="ratio-name">16:9</div></div>
+          </div>
+        </div>
+
+        <div class="field">
+          <div class="field-label">Вариантов на промпт</div>
+          <div class="seg">
+            <button class="seg-btn">1</button>
+            <button class="seg-btn">2</button>
+            <button class="seg-btn on">4</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="sc-launch">
+        <div class="launch-stats">
+          <div class="launch-stat"><div class="launch-stat-value">24</div><div class="launch-stat-label">промптов</div></div>
+          <div class="launch-stat"><div class="launch-stat-value">×4</div><div class="launch-stat-label">вариантов</div></div>
+          <div class="launch-stat"><div class="launch-stat-value highlight">96</div><div class="launch-stat-label">всего</div></div>
+        </div>
+        <button class="btn-launch">
+          <svg viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+          Запустить генерацию
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <div class="statusbar">
+    <div class="sb-item"><span class="sb-dot"></span> Higgsfield · Подключено</div>
+    <div class="sb-spacer"></div>
+    <div class="sb-item">Nano Banana Pro</div>
+  </div>
+</div>
+
+<div class="nav-strip">
+  <a href="connection.html" class="nav-item">Connection</a>
+  <a href="projects.html" class="nav-item">Projects</a>
+  <a href="settings.html" class="nav-item active">Settings</a>
+  <a href="progress.html" class="nav-item">Progress</a>
+  <a href="selection.html" class="nav-item">Selection</a>
+  <a href="results.html" class="nav-item">Results</a>
+</div>
+
+</body>
+</html>

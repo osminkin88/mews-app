@@ -43,6 +43,8 @@ let appRoot = null;
 const state = {
   currentProject: null,
   connectionStatus: 'unknown',
+  selections: {},
+  selectionCurrentPrompt: 0,
 };
 
 // ── Event Bus ──
@@ -70,6 +72,14 @@ async function navigate(screenId) {
   }
 
   currentScreen = screenId;
+
+  // Persist session for restore flow
+  try {
+    api.config.set('lastScreen', screenId);
+    if (state.currentProject?.id) {
+      api.config.set('lastActiveProjectId', state.currentProject.id);
+    }
+  } catch {}
 
   // Update sidebar active state
   document.querySelectorAll('.sidebar-item').forEach(el => {
@@ -100,8 +110,8 @@ function buildSidebar() {
   const sidebar = document.getElementById('sidebar');
   if (!sidebar) return;
 
-  // Two groups: hub screens (connection, projects) and pipeline screens
-  const hubScreens = ['connection', 'projects'];
+  // Hub: only Projects. Connection accessed via statusbar.
+  const hubScreens = ['projects'];
   const pipelineScreens = ['settings', 'progress', 'selection', 'results'];
 
   let html = '';
@@ -118,12 +128,11 @@ function buildSidebar() {
   // Divider
   html += `<div class="sidebar-divider"></div>`;
 
-  // Pipeline group — icons with step number badge
-  pipelineScreens.forEach((id, i) => {
+  // Pipeline group
+  pipelineScreens.forEach(id => {
     const meta = SCREEN_META[id];
     html += `<a class="sidebar-item" data-screen="${id}" title="${meta.label}">
       <span class="sidebar-icon">${meta.icon}</span>
-      <span class="sidebar-badge">${i + 2}</span>
       <span class="sidebar-label">${meta.label}</span>
     </a>`;
   });
@@ -198,6 +207,13 @@ function updateStatusbar() {
   }
 }
 
+function bindStatusbar() {
+  const sbBtn = document.getElementById('sb-conn-btn');
+  if (sbBtn) {
+    sbBtn.addEventListener('click', () => navigate('connection'));
+  }
+}
+
 // ── Screen loading ──
 async function loadScreens() {
   for (const id of SCREENS) {
@@ -221,8 +237,9 @@ async function init() {
 
   console.log(`[v4] Init — Electron: ${isElectron}`);
 
-  // Build sidebar
+  // Build sidebar + statusbar
   buildSidebar();
+  bindStatusbar();
 
   // Load screen modules
   await loadScreens();
@@ -230,8 +247,35 @@ async function init() {
   // Listen for hash changes
   window.addEventListener('hashchange', () => navigate(getScreenFromHash()));
 
+  // ── Restore flow: last project, last screen, saved selections ──
+  let initialScreen = getScreenFromHash();
+  try {
+    const cfg = await api.config.getAll() || {};
+    const lastProjectId = cfg.lastActiveProjectId;
+    if (lastProjectId && initialScreen === DEFAULT_SCREEN) {
+      // Try to restore last active project
+      const projectsList = await api.projects.list();
+      const lastProject = projectsList.find(p => p.id === lastProjectId);
+      if (lastProject) {
+        state.currentProject = lastProject;
+        // Restore selections from project.json
+        if (lastProject.selections) {
+          state.selections = lastProject.selections;
+          state.selectionCurrentPrompt = lastProject.selectionCurrentPrompt || 0;
+        }
+        // Navigate to last screen if it makes sense
+        const lastScreen = cfg.lastScreen;
+        if (lastScreen && SCREENS.includes(lastScreen) && lastScreen !== 'connection' && lastScreen !== 'progress') {
+          initialScreen = lastScreen;
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('[v4] Restore flow error:', e);
+  }
+
   // Initial navigation
-  navigate(getScreenFromHash());
+  navigate(initialScreen);
 
   // Check connection status
   try {
@@ -250,5 +294,26 @@ if (document.readyState === 'loading') {
   init();
 }
 
+// ── Toast notifications ──
+function showToast(message, duration = 3000) {
+  let toastContainer = document.getElementById('toast-container');
+  if (!toastContainer) {
+    toastContainer = document.createElement('div');
+    toastContainer.id = 'toast-container';
+    toastContainer.className = 'toast-container';
+    document.body.appendChild(toastContainer);
+  }
+  const toast = document.createElement('div');
+  toast.className = 'toast';
+  toast.textContent = message;
+  toastContainer.appendChild(toast);
+  // Trigger animation
+  requestAnimationFrame(() => toast.classList.add('show'));
+  setTimeout(() => {
+    toast.classList.remove('show');
+    setTimeout(() => toast.remove(), 300);
+  }, duration);
+}
+
 // ── Public exports for screens ──
-export { api, state, navigate, updateStatusbar };
+export { api, state, navigate, updateStatusbar, showToast };

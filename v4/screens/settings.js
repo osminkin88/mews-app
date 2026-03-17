@@ -1,5 +1,5 @@
 /* ── Settings Screen ── */
-import { api, navigate, state } from '../app.js';
+import { api, navigate, state, showToast } from '../app.js';
 
 let container = null;
 
@@ -8,17 +8,27 @@ async function render() {
   const cfg = await api.config.getAll() || {};
   const prompts = project ? (await api.projects.loadPrompts(project.id))?.prompts || [] : [];
   const promptCount = prompts.length || project?.promptCount || 0;
-  const selectedModel = cfg.selectedModel || 'nano_banana_pro';
-  const quality = cfg.quality || '2K';
-  const aspect = cfg.aspect || '1:1';
-  const imagesCount = cfg.imagesCount || 4;
-  const totalImages = promptCount * imagesCount;
 
-  const modelNames = {
-    nano_banana_pro: 'Nano Banana Pro',
-    nano_banana: 'Nano Banana',
-    higgsfield_soul: 'Higgsfield Soul',
-  };
+  // ── Fetch model capabilities from single source of truth ──
+  const models = await api.models.getUnlimitedList() || [];
+  const selectedModel = cfg.selectedModel || models[0]?.id || 'nano_banana_pro';
+  const caps = models.find(m => m.id === selectedModel) || models[0] || {};
+
+  // Soft migration: read canonical keys first, fallback to old v4 keys
+  let quality = cfg.selectedQuality || cfg.quality || caps.defaultQuality;
+  let aspect = cfg.selectedRatio || cfg.aspect || caps.defaultAspect || '1:1';
+  const imagesCount = cfg.lastImagesPerPrompt || cfg.imagesCount || 4;
+
+  // ── Resolve against model constraints ──
+  const hasQuality = caps.qualities && caps.qualities.length > 0;
+  if (hasQuality && quality && !caps.qualities.includes(quality)) {
+    quality = caps.defaultQuality;
+  }
+  if (caps.aspects && !caps.aspects.includes(aspect)) {
+    aspect = caps.defaultAspect || caps.aspects[0] || '1:1';
+  }
+
+  const totalImages = promptCount * imagesCount;
 
   container.innerHTML = `
     <div style="overflow-y:auto;padding:16px 24px 40px;flex:1">
@@ -57,19 +67,26 @@ async function render() {
               <div class="field">
                 <div class="field-label">Модель</div>
                 <select id="sel-model" class="select-input">
-                  ${Object.entries(modelNames).map(([k, v]) => `<option value="${k}" ${k === selectedModel ? 'selected' : ''}>${v}</option>`).join('')}
+                  ${models.map(m => `<option value="${m.id}" ${m.id === selectedModel ? 'selected' : ''}>${m.name}</option>`).join('')}
                 </select>
                 <div class="field-tag">∞ Unlimited</div>
               </div>
             </div>
             <div class="field-col">
-              <div class="field">
+              <div class="field" id="quality-field" ${!hasQuality ? 'style="display:none"' : ''}>
                 <div class="field-label">Качество</div>
                 <div class="seg" id="seg-quality">
-                  <button class="seg-btn ${quality === '1K' ? 'on' : ''}" data-val="1K">1K</button>
-                  <button class="seg-btn ${quality === '2K' ? 'on' : ''}" data-val="2K">2K</button>
+                  ${hasQuality ? caps.qualities.map(q =>
+                    `<button class="seg-btn ${q === quality ? 'on' : ''}" data-val="${q}">${q}</button>`
+                  ).join('') : ''}
                 </div>
               </div>
+              ${!hasQuality ? `
+                <div class="field">
+                  <div class="field-label">Качество</div>
+                  <div style="font-size:12px;color:var(--text-tertiary);padding:8px 0">Авто для ${caps.name || selectedModel}</div>
+                </div>
+              ` : ''}
             </div>
           </div>
 
@@ -77,7 +94,7 @@ async function render() {
           <div class="field">
             <div class="field-label">Формат</div>
             <div class="ratio-grid" id="ratio-grid">
-              ${['1:1','3:4','4:3','9:16','16:9'].map(r => {
+              ${(caps.aspects || ['1:1']).filter(r => r !== 'Auto').map(r => {
                 const [w, h] = r.split(':').map(Number);
                 const bw = Math.round(18 * (w / Math.max(w, h)));
                 const bh = Math.round(18 * (h / Math.max(w, h)));
@@ -115,28 +132,47 @@ async function render() {
   const dropZone = container.querySelector('#drop-zone');
   const replaceBtn = container.querySelector('#btn-replace-file');
   const importFile = async () => {
+    if (!project) {
+      showToast('Сначала создайте проект');
+      return;
+    }
     const filePath = await api.file.select();
     if (!filePath) return;
     const result = await api.file.import(filePath);
-    if (result.success && result.prompts && project) {
-      await api.projects.savePrompts(project.id, result.prompts, filePath);
-      state.currentProject = { ...project, promptCount: result.prompts.length, sourceMeta: { originalFileName: filePath.split('/').pop() } };
+    // file-importer.js returns { success, rows, count } — use .rows
+    const importedPrompts = result.rows || result.prompts;
+    if (result.success && importedPrompts && project) {
+      await api.projects.savePrompts(project.id, importedPrompts, filePath);
+      state.currentProject = { ...project, promptCount: importedPrompts.length, sourceMeta: { originalFileName: filePath.split('/').pop() } };
       render();
     }
   };
   dropZone?.addEventListener('click', importFile);
   replaceBtn?.addEventListener('click', importFile);
 
-  container.querySelector('#sel-model')?.addEventListener('change', (e) => {
-    api.config.set('selectedModel', e.target.value);
+  // Model change → re-render to update quality/aspect options
+  container.querySelector('#sel-model')?.addEventListener('change', async (e) => {
+    await api.config.set('selectedModel', e.target.value);
+    // Clear stale quality/aspect that may not be valid for new model
+    const newCaps = models.find(m => m.id === e.target.value);
+    if (newCaps) {
+      if (newCaps.qualities.length > 0) {
+        await api.config.set('selectedQuality', newCaps.defaultQuality);
+      }
+      if (newCaps.aspects && newCaps.aspects.length > 0) {
+        await api.config.set('selectedRatio', newCaps.defaultAspect);
+      }
+    }
+    render();
   });
 
+  // Write only canonical config keys
   container.querySelector('#seg-quality')?.addEventListener('click', (e) => {
     const btn = e.target.closest('.seg-btn');
     if (!btn) return;
     container.querySelectorAll('#seg-quality .seg-btn').forEach(b => b.classList.remove('on'));
     btn.classList.add('on');
-    api.config.set('quality', btn.dataset.val);
+    api.config.set('selectedQuality', btn.dataset.val);
   });
 
   container.querySelector('#ratio-grid')?.addEventListener('click', (e) => {
@@ -144,7 +180,7 @@ async function render() {
     if (!item) return;
     container.querySelectorAll('.ratio-item').forEach(i => i.classList.remove('on'));
     item.classList.add('on');
-    api.config.set('aspect', item.dataset.ratio);
+    api.config.set('selectedRatio', item.dataset.ratio);
   });
 
   container.querySelector('#seg-count')?.addEventListener('click', (e) => {
@@ -152,12 +188,44 @@ async function render() {
     if (!btn) return;
     container.querySelectorAll('#seg-count .seg-btn').forEach(b => b.classList.remove('on'));
     btn.classList.add('on');
-    api.config.set('imagesCount', parseInt(btn.dataset.val));
+    api.config.set('lastImagesPerPrompt', parseInt(btn.dataset.val));
     render();
   });
 
-  container.querySelector('#btn-launch')?.addEventListener('click', () => {
-    if (promptCount > 0) navigate('progress');
+  container.querySelector('#btn-launch')?.addEventListener('click', async () => {
+    if (promptCount === 0) return;
+
+    // Pre-launch validation: resolve settings against model capabilities
+    const launchSettings = {
+      model: selectedModel,
+      quality: quality || null,
+      aspect: aspect,
+      imagesPerPrompt: imagesCount,
+    };
+    const resolved = await api.models.resolveSettings(launchSettings);
+
+    if (resolved.blocked) {
+      showToast(resolved.blockReason || 'Эта модель недоступна для Unlimited');
+      return;
+    }
+
+    // Show warnings but proceed — settings have been auto-corrected
+    if (resolved.warnings && resolved.warnings.length > 0) {
+      for (const w of resolved.warnings) {
+        showToast(w.message, 4000);
+      }
+      // Save corrected values
+      if (resolved.effective) {
+        if (resolved.effective.quality !== quality) {
+          await api.config.set('selectedQuality', resolved.effective.quality);
+        }
+        if (resolved.effective.aspect !== aspect) {
+          await api.config.set('selectedRatio', resolved.effective.aspect);
+        }
+      }
+    }
+
+    navigate('progress');
   });
 }
 

@@ -155,22 +155,6 @@ button:focus-visible, a:focus-visible, select:focus-visible, input:focus-visible
   color: var(--bg);
   border-color: var(--accent);
 }
-.sidebar-badge {
-  position: absolute;
-  top: 2px; right: 4px;
-  width: 14px; height: 14px;
-  font-size: 9px; font-weight: 700;
-  display: flex; align-items: center; justify-content: center;
-  border-radius: 50%;
-  background: var(--bg-float);
-  color: var(--text-tertiary);
-  border: 1px solid var(--border);
-}
-.sidebar-item.active .sidebar-badge {
-  background: var(--accent);
-  color: #fff;
-  border-color: var(--accent);
-}
 .sidebar-label {
   font-size: 9px; font-weight: 500;
   letter-spacing: 0em;
@@ -188,29 +172,36 @@ button:focus-visible, a:focus-visible, select:focus-visible, input:focus-visible
 .topbar {
   display: flex;
   align-items: center;
+  height: 44px;
   padding: 0 16px;
   background: var(--bg-elevated);
   border-bottom: 1px solid var(--border);
   -webkit-app-region: drag;
-  gap: 12px;
+  gap: 10px;
+  flex-shrink: 0;
 }
 .topbar-traffic { display: flex; gap: 8px; -webkit-app-region: no-drag; }
+/* Spacer for native macOS traffic lights (hiddenInset) */
+.topbar-traffic-spacer { width: 70px; -webkit-app-region: no-drag; flex-shrink: 0; }
 .dot { width: 12px; height: 12px; border-radius: 50%; }
 .dot-r { background: #FF5F57; }
 .dot-y { background: #FEBC2E; }
 .dot-g { background: #28C840; }
 
 .topbar-brand {
-  font-size: 14px; font-weight: 800;
-  letter-spacing: -0.3px; margin-left: 12px;
+  font-size: 13px; font-weight: 800;
+  letter-spacing: -0.4px; margin-left: 8px;
   background: linear-gradient(135deg, #0A84FF, #5E5CE6);
   -webkit-background-clip: text;
   background-clip: text;
   -webkit-text-fill-color: transparent;
+  white-space: nowrap;
 }
 .topbar-project {
-  font-size: 13px; font-weight: 600;
-  color: var(--text-secondary); margin-left: 12px;
+  font-size: 12px; font-weight: 600;
+  color: var(--text-secondary); margin-left: 6px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  max-width: 200px;
 }
 .topbar-project strong { color: var(--text-primary); }
 .topbar-sep { color: var(--text-tertiary); margin: 0 4px; }
@@ -269,6 +260,12 @@ button:focus-visible, a:focus-visible, select:focus-visible, input:focus-visible
 .sb-item { display: flex; align-items: center; gap: 4px; }
 .sb-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); }
 .sb-spacer { flex: 1; }
+.sb-clickable {
+  background: none; border: none; cursor: pointer;
+  color: inherit; font: inherit; padding: 4px 8px;
+  border-radius: 4px; transition: background 0.12s;
+}
+.sb-clickable:hover { background: var(--bg-float); }
 
 /* ── SHARED COMPONENTS ── */
 
@@ -545,6 +542,122 @@ button:focus-visible, a:focus-visible, select:focus-visible, input:focus-visible
 .badge-done { background: var(--green-soft); color: var(--green); }
 .badge-draft { background: var(--bg-float); color: var(--text-tertiary); }
 
+/* ── PROJECT CARD EXTRAS ── */
+.project-card { position: relative; }
+.project-card:hover { padding-right: 42px; }
+.pc-info { flex: 1; min-width: 0; }
+.pc-more {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 28px; height: 28px;
+  display: flex; align-items: center; justify-content: center;
+  background: none; border: none; border-radius: 6px;
+  cursor: pointer; opacity: 0;
+  transition: opacity 0.2s ease, background 0.15s ease;
+  color: var(--text-tertiary);
+}
+.pc-more svg { width: 15px; height: 15px; stroke: currentColor; fill: currentColor; stroke-width: 0; }
+.project-card:hover .pc-more { opacity: 1; }
+.pc-more:hover { background: var(--bg-float); color: var(--text-primary); }
+
+/* ── CONTEXT MENU ── */
+.ctx-menu {
+  position: fixed; z-index: 999;
+  min-width: 160px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-2);
+  border-radius: 8px;
+  box-shadow: 0 8px 30px rgba(0,0,0,0.35), 0 0 0 0.5px rgba(255,255,255,0.06);
+  padding: 4px;
+  backdrop-filter: blur(20px);
+}
+.ctx-item {
+  display: flex; align-items: center; gap: 8px;
+  width: 100%; padding: 7px 10px;
+  background: none; border: none; border-radius: 5px;
+  font-size: 12px; font-weight: 500;
+  color: var(--text-primary); cursor: pointer;
+  transition: background 0.08s;
+}
+.ctx-item:hover { background: var(--accent); color: #fff; }
+.ctx-item:hover svg { stroke: #fff; }
+.ctx-item svg {
+  width: 14px; height: 14px;
+  stroke: var(--text-secondary); fill: none;
+  stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round;
+}
+.ctx-danger { color: var(--red); }
+.ctx-danger svg { stroke: var(--red); }
+.ctx-danger:hover { background: var(--red); color: #fff; }
+.ctx-danger:hover svg { stroke: #fff; }
+.ctx-divider { height: 1px; background: var(--border); margin: 3px 6px; }
+
+/* ── MODAL ── */
+.modal-overlay {
+  position: fixed; inset: 0; z-index: 1000;
+  background: rgba(0,0,0,0.55);
+  backdrop-filter: blur(6px);
+  display: flex; align-items: center; justify-content: center;
+  animation: fadeIn 0.15s ease;
+}
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+.modal-card {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-2);
+  border-radius: 14px;
+  box-shadow: 0 16px 48px rgba(0,0,0,0.4), 0 0 0 0.5px rgba(255,255,255,0.06);
+  overflow: hidden;
+  animation: modalIn 0.2s ease;
+}
+@keyframes modalIn { from { transform: scale(0.95) translateY(8px); opacity: 0; } to { transform: scale(1) translateY(0); opacity: 1; } }
+.modal-header {
+  padding: 16px 20px 0;
+  font-size: 15px; font-weight: 700; letter-spacing: -0.2px;
+}
+.modal-body { padding: 12px 20px 16px; }
+.modal-label {
+  display: block; font-size: 11px; font-weight: 600;
+  color: var(--text-secondary); margin-bottom: 6px;
+  letter-spacing: 0.03em;
+}
+.modal-input {
+  width: 100%; padding: 8px 12px;
+  font-size: 14px; font-weight: 500;
+  background: var(--bg); color: var(--text-primary);
+  border: 1px solid var(--border); border-radius: 8px;
+  outline: none; transition: border-color 0.15s;
+}
+.modal-input:focus { border-color: var(--accent); }
+.modal-input::placeholder { color: var(--text-tertiary); }
+.modal-footer {
+  display: flex; gap: 8px; justify-content: flex-end;
+  padding: 0 20px 16px;
+}
+
+/* Icon picker */
+.icon-grid {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px;
+}
+.icon-pick {
+  width: 44px; height: 44px;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--bg); border: 1.5px solid var(--border);
+  border-radius: 10px; cursor: pointer;
+  transition: all 0.12s; color: var(--text-secondary);
+}
+.icon-pick svg {
+  width: 20px; height: 20px;
+  stroke: currentColor; fill: none;
+  stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round;
+}
+.icon-pick:hover { border-color: var(--text-tertiary); background: var(--bg-float); }
+.icon-pick.on {
+  border-color: var(--accent); background: var(--accent-soft);
+  color: var(--accent);
+}
+
 /* ── SETTINGS CARD ── */
 .settings-card {
   width: 100%;
@@ -689,6 +802,10 @@ button:focus-visible, a:focus-visible, select:focus-visible, input:focus-visible
   gap: 6px; align-content: start;
   padding-bottom: 48px;
 }
+@keyframes liveTileFadeIn {
+  from { opacity: 0; transform: scale(0.9); }
+  to   { opacity: 1; transform: scale(1); }
+}
 
 /* ── SELECTION ── */
 .hero-image {
@@ -699,7 +816,7 @@ button:focus-visible, a:focus-visible, select:focus-visible, input:focus-visible
   background-size: contain;
   background-position: center;
   background-repeat: no-repeat;
-  min-height: 0;
+  min-height: 120px;
 }
 .hero-label {
   position: absolute; top: 12px; left: 12px;
@@ -711,6 +828,7 @@ button:focus-visible, a:focus-visible, select:focus-visible, input:focus-visible
 }
 .filmstrip {
   display: grid; gap: 8px; flex-shrink: 0;
+  max-height: 100px;
 }
 .film-thumb {
   aspect-ratio: 1;
@@ -723,6 +841,8 @@ button:focus-visible, a:focus-visible, select:focus-visible, input:focus-visible
   background-position: center;
   border: 2px solid transparent;
   transition: all 0.15s;
+  max-width: 100px;
+  max-height: 100px;
 }
 .film-thumb:hover { border-color: rgba(255,255,255,0.15); }
 .film-thumb.viewing { border-color: var(--accent); }
@@ -883,4 +1003,31 @@ button:focus-visible, a:focus-visible, select:focus-visible, input:focus-visible
   color: var(--text-tertiary);
   text-transform: uppercase;
   letter-spacing: 0.5px;
+}
+
+/* ── TOAST NOTIFICATIONS ── */
+.toast-container {
+  position: fixed; bottom: 24px; left: 50%;
+  transform: translateX(-50%);
+  display: flex; flex-direction: column; gap: 6px;
+  align-items: center; z-index: 9999;
+  pointer-events: none;
+}
+.toast {
+  background: rgba(30, 30, 30, 0.85);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 10px;
+  padding: 8px 18px;
+  font-size: 12px; font-weight: 600;
+  color: var(--text-primary);
+  opacity: 0;
+  transform: translateY(12px);
+  transition: opacity 0.3s ease, transform 0.3s ease;
+  pointer-events: auto;
+}
+.toast.show {
+  opacity: 1;
+  transform: translateY(0);
 }

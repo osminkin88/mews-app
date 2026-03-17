@@ -1,5 +1,5 @@
 /* ── Results Screen ── */
-import { api, state } from '../app.js';
+import { api, navigate, state, showToast } from '../app.js';
 
 let container = null;
 
@@ -12,64 +12,93 @@ async function render() {
 
   const result = await api.projects.loadPrompts(project.id);
   const prompts = result?.prompts || [];
-  const promptCount = prompts.length;
-
-  // Collect selected images
-  const allImages = [];
-  for (let i = 0; i < promptCount; i++) {
-    const r = await api.projects.getImages(project.id, i);
-    if (r?.images?.length > 0) {
-      allImages.push({ index: i + 1, prompt: prompts[i]?.prompt || prompts[i]?.text || '', images: r.images });
+  // Try selected/ directory first, fall back to generated/ first files
+  let resultImages = [];
+  let hasSelectedImages = false;
+  const selectedResult = await api.projects.getSelectedImages(project.id);
+  if (selectedResult?.success && selectedResult.images?.length > 0) {
+    resultImages = selectedResult.images;
+    hasSelectedImages = true;
+  } else {
+    // Fallback: gather first image from each generated prompt folder
+    for (let i = 0; i < prompts.length; i++) {
+      const imgs = await api.projects.getImages(project.id, i);
+      if (imgs?.images?.length > 0) {
+        resultImages.push({
+          name: prompts[i]?.prompt?.substring(0, 40) || `Промпт ${i + 1}`,
+          dataUrl: imgs.images[0]?.dataUrl || imgs.images[0],
+        });
+      }
     }
   }
 
   container.innerHTML = `
-    <div style="display:flex;flex-direction:column;overflow:hidden;flex:1">
-      <!-- Summary -->
-      <div class="results-header">
+    <div class="results-header">
+      <div style="flex:1">
         <div class="results-title">Результаты</div>
-        <span style="font-size:11px;font-weight:700;padding:3px 10px;border-radius:5px;background:var(--green-soft);color:var(--green)">${project.name}</span>
-        <div style="flex:1"></div>
-        <div style="text-align:center;padding:0 12px">
-          <div style="font-size:18px;font-weight:800">${allImages.length}</div>
-          <div class="summary-label">промптов</div>
-        </div>
-        <button id="btn-open-folder" class="btn btn-secondary" style="padding:6px 14px;font-size:12px">
-          <svg viewBox="0 0 24 24" style="width:13px;height:13px"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+        <div style="font-size:12px;color:var(--text-tertiary);margin-top:2px">${project.name} · ${resultImages.length} изображений</div>
+      </div>
+      <div style="display:flex;gap:8px">
+        <button id="btn-open-folder" class="btn btn-secondary">
+          <svg viewBox="0 0 24 24"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2v11Z"/></svg>
           Открыть папку
         </button>
-      </div>
-
-      <!-- Grid -->
-      <div class="results-grid">
-        ${allImages.length > 0 ? allImages.map(item => {
-          const thumb = item.images[0];
-          const bg = thumb?.dataUrl ? `url(${thumb.dataUrl})` : 'linear-gradient(135deg,#3a4a5a,#4a5a3a)';
-          return `
-            <div class="result-card">
-              <div class="result-thumb" style="background-image:${bg}"></div>
-              <span class="result-num">${item.index}</span>
-              <span class="result-check"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></span>
-            </div>
-          `;
-        }).join('') : '<div class="empty-state" style="grid-column:1/-1">Нет сгенерированных изображений</div>'}
-
-        <!-- Animation hint -->
-        <div class="anim-hint">
-          <div class="anim-icon">
-            <svg viewBox="0 0 24 24"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>
-          </div>
-          <div style="flex:1">
-            <div class="anim-title">Готово к анимации</div>
-            <div class="anim-desc">Отобранные кадры в папке selected/ · Следующий шаг — оживление в Kling/Clink</div>
-          </div>
-        </div>
+        <button id="btn-back-projects" class="btn btn-primary">
+          К проектам
+        </button>
       </div>
     </div>
+
+    ${resultImages.length > 0 ? `
+      <div class="results-grid">
+        ${resultImages.map((img, i) => {
+          const src = typeof img === 'string' ? img : (img.dataUrl || '');
+          const name = img.name || `Изображение ${i + 1}`;
+          return `
+            <div class="result-card" title="${name}">
+              <div class="result-thumb" style="background-image:url(${src})"></div>
+              <span class="result-num">${i + 1}</span>
+              <span class="result-check">
+                <svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
+              </span>
+            </div>
+          `;
+        }).join('')}
+      </div>
+    ` : `
+      <div style="padding:60px 24px;text-align:center;color:var(--text-tertiary)">
+        <div style="font-size:48px;margin-bottom:12px">📭</div>
+        <div style="font-size:14px;font-weight:600">Нет результатов</div>
+        <div style="font-size:12px;margin-top:4px">Сначала выполните генерацию и отбор</div>
+      </div>
+    `}
   `;
 
-  container.querySelector('#btn-open-folder')?.addEventListener('click', () => {
-    api.fs.openFolder(null);
+  // ── Events ──
+  container.querySelector('#btn-open-folder')?.addEventListener('click', async () => {
+    const pathResult = await api.projects.getProjectPath(project.id);
+    if (pathResult?.success && pathResult.path) {
+      // Open the subfolder where results live
+      const targetDir = hasSelectedImages
+        ? pathResult.path + '/selected'
+        : pathResult.path;
+      const opened = await api.fs.openFolder(targetDir);
+      if (!opened && hasSelectedImages) {
+        // Fallback: try opening project root if selected/ doesn't exist yet
+        const fallback = await api.fs.openFolder(pathResult.path);
+        if (!fallback) {
+          showToast('Папка проекта не найдена');
+        } else {
+          showToast('Папка selected/ ещё не создана — открыта корневая');
+        }
+      } else if (!opened) {
+        showToast('Папка проекта не найдена');
+      }
+    }
+  });
+
+  container.querySelector('#btn-back-projects')?.addEventListener('click', () => {
+    navigate('projects');
   });
 }
 

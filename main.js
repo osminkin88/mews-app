@@ -276,6 +276,23 @@ ipcMain.handle('generate:start', async (event, { prompts, settings, projectId })
     }
   }
 
+  // ── Auth preflight: verify actual Higgsfield sign-in ──
+  try {
+    const auth = await chrome.checkAuth();
+    if (!auth.authenticated) {
+      const hint = auth.url && (auth.url.includes('sign-in') || auth.url.includes('login'))
+        ? 'Откройте Chrome и войдите в аккаунт Higgsfield.'
+        : 'Перейдите на higgsfield.ai в Chrome и войдите в аккаунт.';
+      return {
+        success: false,
+        error: `Вы не вошли в Higgsfield. ${hint}`,
+      };
+    }
+  } catch (authErr) {
+    console.warn('[main] Auth preflight failed:', authErr.message);
+    // Non-blocking: proceed if auth check itself crashes (CDP weirdness)
+  }
+
   // Check model supports Unlimited
   if (!engine.UNLIMITED_MODELS[model]) {
     const blockedName = engine.PAID_ONLY_MODELS[model] || model;

@@ -42,8 +42,8 @@ let appRoot = null;
 // ── State ──
 const state = {
   currentProject: null,
-  connectionStatus: 'unknown',  // 'connected' | 'chrome_running' | 'disconnected' | 'unknown'
-  connectionDetail: null,        // Full chrome:status object {chromeRunning, cdpConnected, hasSession, sessionAge, cookieCount}
+  connectionStatus: 'unknown',  // 'connected' | 'no_auth' | 'chrome_running' | 'disconnected' | 'unknown'
+  connectionDetail: null,        // Full chrome:status object {chromeRunning, cdpConnected, hasSession, sessionAge, cookieCount, authenticated}
   selections: {},
   selectionCurrentPrompt: 0,
   generationRequested: false, // Set by settings launch, consumed by progress mount
@@ -237,7 +237,11 @@ function updateTopbar(screenId) {
 // Derives a richer status string from chrome:status detail.
 function deriveConnectionStatus(detail) {
   if (!detail) return 'unknown';
-  if (detail.cdpConnected) return 'connected';
+  if (detail.cdpConnected) {
+    // CDP connected — but is user actually signed in?
+    if (detail.authenticated === false) return 'no_auth';
+    return 'connected';
+  }
   if (detail.chromeRunning) return 'chrome_running';
   return 'disconnected';
 }
@@ -257,7 +261,8 @@ function setConnectionStatus(newStatus, detail = null) {
 function updateStatusbar() {
   const status = state.connectionStatus;
   const isOnline = status === 'connected';
-  const isWarning = status === 'chrome_running';
+  const isNoAuth = status === 'no_auth';
+  const isWarning = status === 'chrome_running' || isNoAuth;
 
   // Bottom statusbar — show project context, NOT connection status (avoid duplication)
   const textEl = document.getElementById('sb-status-text');
@@ -283,9 +288,9 @@ function updateStatusbar() {
     actionsEl.prepend(pill);
   }
   if (pill) {
-    const dotColor = isOnline ? 'var(--green)' : isWarning ? 'var(--orange)' : 'var(--red)';
-    const label = isOnline ? 'Подключено' : isWarning ? 'Chrome запущен' : 'Не подключено';
-    const title = isOnline ? 'Higgsfield — подключено' : isWarning ? 'Chrome запущен, но нет связи' : 'Нет соединения с Higgsfield';
+    const dotColor = isOnline ? 'var(--green)' : isNoAuth ? 'var(--orange)' : isWarning ? 'var(--orange)' : 'var(--red)';
+    const label = isOnline ? 'Подключено' : isNoAuth ? 'Нет авторизации' : isWarning ? 'Chrome запущен' : 'Не подключено';
+    const title = isOnline ? 'Higgsfield — подключено' : isNoAuth ? 'Chrome подключён, но вы не вошли в Higgsfield' : isWarning ? 'Chrome запущен, но нет связи' : 'Нет соединения с Higgsfield';
     pill.innerHTML = `<span class="topbar-pill-dot" style="background:${dotColor}"></span>${label}`;
     pill.title = title;
   }
@@ -312,10 +317,24 @@ let _connPollTimer = null;
 async function pollConnectionNow() {
   try {
     const detail = await api.chrome.status();
+
+    // If CDP is connected, also check real Higgsfield auth
+    if (detail.cdpConnected) {
+      try {
+        const auth = await api.chrome.checkAuth();
+        detail.authenticated = auth.authenticated;
+      } catch {
+        // Auth check failed — assume not authenticated to be safe
+        detail.authenticated = false;
+      }
+    } else {
+      detail.authenticated = false;
+    }
+
     const newStatus = deriveConnectionStatus(detail);
     setConnectionStatus(newStatus, detail);
   } catch {
-    setConnectionStatus('disconnected', { chromeRunning: false, cdpConnected: false, hasSession: false, sessionAge: null, cookieCount: 0 });
+    setConnectionStatus('disconnected', { chromeRunning: false, cdpConnected: false, hasSession: false, sessionAge: null, cookieCount: 0, authenticated: false });
   }
 }
 

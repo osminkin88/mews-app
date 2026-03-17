@@ -30,6 +30,10 @@ function renderFromState() {
     } else {
       statusHint = 'Сессия не сохранена — рекомендуем сохранить';
     }
+  } else if (status === 'no_auth') {
+    statusClass = 'warning';
+    statusText = 'Нет авторизации в Higgsfield';
+    statusHint = 'Chrome подключён, но вы не вошли в аккаунт. Откройте Chrome и войдите на higgsfield.ai.';
   } else if (status === 'chrome_running') {
     statusClass = 'warning';
     statusText = 'Chrome запущен, но нет связи';
@@ -49,6 +53,7 @@ function renderFromState() {
   // ── Buttons by state ──
   let actionsHTML = '';
   let stepsHTML = '';
+  const isNoAuth = status === 'no_auth';
 
   if (!chromeRunning) {
     actionsHTML = `
@@ -60,7 +65,7 @@ function renderFromState() {
     stepsHTML = `
       <div class="conn-steps">
         <div class="conn-step active"><span class="conn-step-num">1</span><span>Запустите Chrome</span></div>
-        <div class="conn-step"><span class="conn-step-num">2</span><span>Подключитесь к браузеру</span></div>
+        <div class="conn-step"><span class="conn-step-num">2</span><span>Войдите в аккаунт</span></div>
         <div class="conn-step"><span class="conn-step-num">3</span><span>Перейдите к проектам</span></div>
       </div>
     `;
@@ -78,6 +83,24 @@ function renderFromState() {
         <div class="conn-step"><span class="conn-step-num">3</span><span>Перейдите к проектам</span></div>
       </div>
     `;
+  } else if (isNoAuth) {
+    // CDP connected, but NOT signed in to Higgsfield
+    actionsHTML = `
+      <button id="btn-save-session" class="btn btn-secondary" style="flex:1">
+        <svg viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+        ${hasSession ? 'Обновить сессию' : 'Сохранить сессию'}
+      </button>
+      <button id="btn-go-projects" class="btn btn-primary" style="flex:1">
+        К проектам →
+      </button>
+    `;
+    stepsHTML = `
+      <div class="conn-steps">
+        <div class="conn-step done"><span class="conn-step-num">✓</span><span>Chrome подключён</span></div>
+        <div class="conn-step active"><span class="conn-step-num">2</span><span>Войдите в аккаунт Higgsfield</span></div>
+        <div class="conn-step"><span class="conn-step-num">3</span><span>Перейдите к проектам</span></div>
+      </div>
+    `;
   } else {
     actionsHTML = `
       <button id="btn-save-session" class="btn btn-secondary" style="flex:1">
@@ -91,7 +114,7 @@ function renderFromState() {
     stepsHTML = `
       <div class="conn-steps">
         <div class="conn-step done"><span class="conn-step-num">✓</span><span>Chrome запущен</span></div>
-        <div class="conn-step done"><span class="conn-step-num">✓</span><span>Подключено</span></div>
+        <div class="conn-step done"><span class="conn-step-num">✓</span><span>Авторизован</span></div>
         <div class="conn-step active"><span class="conn-step-num">3</span><span>Перейдите к проектам</span></div>
       </div>
     `;

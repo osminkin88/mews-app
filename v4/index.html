@@ -13,9 +13,9 @@
 <div id="app" class="app">
   <!-- Topbar -->
   <div class="topbar">
-    <!-- Native macOS traffic lights rendered by Electron (hiddenInset) -->
     <div class="topbar-traffic-spacer"></div>
     <div class="topbar-brand">Mews</div>
+    <span class="topbar-brand-sep">·</span>
     <div id="topbar-nav" class="topbar-nav"></div>
     <div class="topbar-spacer"></div>
     <span id="topbar-step" class="topbar-step topbar-step-blue" style="display:none"></span>
@@ -33,9 +33,9 @@
 
   <!-- Statusbar -->
   <div class="statusbar">
-    <button id="sb-conn-btn" class="sb-item sb-clickable" title="Настройки подключения">
+    <button id="sb-conn-btn" class="sb-item sb-clickable" title="Текущий проект">
       <span id="sb-status-dot" class="sb-dot"></span>
-      <span id="sb-status-text">Проверка…</span>
+      <span id="sb-status-text">Нет проекта</span>
     </button>
     <div class="sb-spacer"></div>
     <div class="sb-item">v4</div>

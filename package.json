@@ -23,6 +23,7 @@
   "type": "commonjs",
   "devDependencies": {
     "electron": "^41.0.2",
+    "exceljs": "^4.4.0",
     "vitest": "^4.1.0"
   },
   "dependencies": {

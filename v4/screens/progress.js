@@ -157,14 +157,78 @@ function showError(message) {
   }
 }
 
+// ── Tile reconciliation ──
+// After a prompt is 'done', ensure all expected slots have tiles.
+// This catches any missed/late/reordered 'saved' events.
+function reconcileTiles(promptIdx, slotCount) {
+  for (let s = 1; s <= slotCount; s++) {
+    const key = `p${promptIdx}-s${s}`;
+    const exists = lastState.liveTiles.find(t => t.key === key);
+    // Also check for failed tiles
+    const failKey = `p${promptIdx}-s${s}-fail`;
+    const failExists = lastState.liveTiles.find(t => t.key === failKey);
+    if (!exists && !failExists) {
+      // Backfill placeholder tile
+      const slotLabel = `${promptIdx}.${s}`;
+      const tileHtml = `
+        <div style="width:100%;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px">
+          <span style="font-size:20px;color:var(--green)">✓</span>
+          <span style="font-size:10px;color:var(--text-secondary);font-weight:600">Сохранено</span>
+        </div>
+        <span style="position:absolute;bottom:6px;left:6px;font-size:10px;font-weight:700;background:rgba(0,0,0,0.6);color:#fff;padding:2px 6px;border-radius:4px;">${slotLabel}</span>
+        <span style="position:absolute;top:6px;right:6px;width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 6px var(--green);"></span>
+      `;
+      lastState.liveTiles.push({ key, html: tileHtml });
+
+      // Also add to DOM if mounted
+      if (container) {
+        const grid = document.getElementById('live-grid');
+        if (grid && !grid.querySelector(`[data-key="${key}"]`)) {
+          const tile = document.createElement('div');
+          tile.className = 'live-tile';
+          tile.dataset.key = key;
+          tile.dataset.saved = 'true';
+          tile.style.cssText = 'position:relative;border-radius:10px;overflow:hidden;aspect-ratio:1;background:var(--bg-float);animation: liveTileFadeIn 0.35s ease;';
+          tile.innerHTML = tileHtml;
+          grid.appendChild(tile);
+        }
+      }
+    }
+  }
+}
+
 function updateProgress(data) {
   // Always reset isRunning on terminal states, even if container is unmounted
   if (data.status === 'complete' || data.status === 'fatal_error' || data.status === 'auth_error') {
     isRunning = false;
   }
 
-  // ── Terminal states: these need container for DOM ──
+  // ── Terminal states ──
   if (data.status === 'complete' || data.status === 'fatal_error' || data.status === 'auth_error') {
+    // ── FIX: Force completion state into persistent model BEFORE DOM check ──
+    if (data.status === 'complete' && !isStopping) {
+      lastPct = 100;
+      lastState.pct = 100;
+      lastState.primary = 'Генерация завершена';
+      lastState.detail = 'Переход к отбору…';
+      lastState.detailColor = 'var(--green)';
+
+      // ── RECONCILE: final sweep across all prompts ──
+      // Ensures every expected slot has a tile, even if 'saved' events were missed.
+      // Results are in order: result[0] → runIndex 1, result[1] → runIndex 2, etc.
+      if (data.results && Array.isArray(data.results)) {
+        data.results.forEach((r, i) => {
+          const runIdx = i + 1;
+          const total = r.totalSlots || 4;
+          reconcileTiles(runIdx, total);
+        });
+      }
+    } else if (data.status === 'complete' && isStopping) {
+      lastState.primary = 'Остановлено';
+      lastState.detail = 'Генерация остановлена. Сохранённые изображения доступны для отбора.';
+      lastState.detailColor = 'var(--orange)';
+    }
+
     if (!container) return;
 
     if (data.status === 'complete') {
@@ -173,17 +237,17 @@ function updateProgress(data) {
       const detail = document.getElementById('ph-detail');
       const bar = document.getElementById('ph-bar');
       if (isStopping) {
-        if (primary) primary.textContent = 'Остановлено';
+        if (primary) primary.textContent = lastState.primary;
         if (detail) {
-          detail.textContent = 'Генерация остановлена. Сохранённые изображения доступны для отбора.';
-          detail.style.color = 'var(--orange)';
+          detail.textContent = lastState.detail;
+          detail.style.color = lastState.detailColor;
         }
       } else {
         if (pctEl) pctEl.textContent = '100%';
-        if (primary) primary.textContent = 'Генерация завершена';
+        if (primary) primary.textContent = lastState.primary;
         if (detail) {
-          detail.textContent = 'Переход к отбору…';
-          detail.style.color = 'var(--green)';
+          detail.textContent = lastState.detail;
+          detail.style.color = lastState.detailColor;
         }
         if (bar) bar.style.width = '100%';
       }
@@ -247,6 +311,8 @@ function updateProgress(data) {
     combinedPct = basePromptPct + (failedSlot / ipp) * perPromptPct;
   } else if (data.step === 'done') {
     combinedPct = (promptCur / promptTotal) * 100;
+    // ── RECONCILE: backfill any missing tiles for this prompt ──
+    reconcileTiles(promptCur, ipp);
   } else if (data.step === 'generate' || data.step === 'downloading' || data.step === 'waiting') {
     const slotIdx = slotCur || 1;
     combinedPct = basePromptPct + ((slotIdx - 1) / ipp) * perPromptPct;
@@ -362,7 +428,7 @@ function updateProgress(data) {
       entry.className = 'log-entry';
       entry.innerHTML = `
         <span class="log-dot" style="${isFailed ? 'background:var(--red)' : isRetry ? 'background:var(--orange)' : ''}"></span>
-        <span style="color:${isFailed ? 'var(--red)' : isRetry ? 'var(--orange)' : 'var(--text-secondary)'};flex:1">${data.message}</span>
+        <span style="color:${isFailed ? 'var(--red)' : isRetry ? 'var(--orange)' : 'var(--text-secondary)'};flex:1">${formatTime(data.message)}</span>
       `;
       logList.prepend(entry);
     }

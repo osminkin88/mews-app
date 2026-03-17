@@ -1,5 +1,5 @@
 /* ── Projects Screen ── */
-import { api, navigate, state, showToast } from '../app.js';
+import { api, navigate, state, showToast, updateStatusbar } from '../app.js';
 
 let container = null;
 let projects = [];
@@ -189,6 +189,7 @@ function showCreateModal() {
     const project = await api.projects.create(name, selectedIcon);
     if (project && project.id) {
       state.currentProject = project;
+      updateStatusbar();
       navigate('settings');
     }
   };
@@ -225,6 +226,7 @@ function bindEvents() {
       const project = projects.find(p => p.id === id);
       if (project) {
         state.currentProject = project;
+        updateStatusbar();
         if (project.status === 'completed') navigate('results');
         else navigate('settings');
       }
@@ -365,6 +367,7 @@ async function handleAction(action, projectId) {
         await api.projects.delete(project.id);
         if (state.currentProject?.id === project.id) {
           state.currentProject = null;
+          updateStatusbar();
         }
         render();
       }

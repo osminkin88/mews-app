@@ -42,7 +42,8 @@ let appRoot = null;
 // ── State ──
 const state = {
   currentProject: null,
-  connectionStatus: 'unknown',
+  connectionStatus: 'unknown',  // 'connected' | 'chrome_running' | 'disconnected' | 'unknown'
+  connectionDetail: null,        // Full chrome:status object {chromeRunning, cdpConnected, hasSession, sessionAge, cookieCount}
   selections: {},
   selectionCurrentPrompt: 0,
   generationRequested: false, // Set by settings launch, consumed by progress mount
@@ -51,7 +52,12 @@ const state = {
 // ── Event Bus ──
 const bus = new EventTarget();
 export function emit(name, detail) { bus.dispatchEvent(new CustomEvent(name, { detail })); }
-export function on(name, fn) { bus.addEventListener(name, (e) => fn(e.detail)); }
+export function on(name, fn) {
+  const handler = (e) => fn(e.detail);
+  bus.addEventListener(name, handler);
+  // Return cleanup function for proper unsubscription
+  return () => bus.removeEventListener(name, handler);
+}
 
 // ── Router ──
 function getScreenFromHash() {
@@ -111,7 +117,6 @@ function buildSidebar() {
   const sidebar = document.getElementById('sidebar');
   if (!sidebar) return;
 
-  // Hub: only Projects. Connection accessed via statusbar.
   const hubScreens = ['projects'];
   const pipelineScreens = ['settings', 'progress', 'selection', 'results'];
 
@@ -138,15 +143,49 @@ function buildSidebar() {
     </a>`;
   });
 
+  // Spacer to push utility items to bottom
+  html += `<div style="flex:1"></div>`;
+
+  // ── Bottom utility zone ──
+  // Connection entry — always visible, shows live status dot
+  html += `<a class="sidebar-item sidebar-util" data-screen="connection" title="Подключение">
+    <span class="sidebar-icon">
+      ${SCREEN_META.connection.icon}
+      <span id="sidebar-conn-dot" class="sidebar-conn-dot"></span>
+    </span>
+    <span class="sidebar-label">Связь</span>
+  </a>`;
+
+  // Quit button
+  html += `<a class="sidebar-item sidebar-util" id="sidebar-quit" title="Завершить Mews">
+    <span class="sidebar-icon">
+      <svg viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+    </span>
+    <span class="sidebar-label">Выход</span>
+  </a>`;
+
   sidebar.innerHTML = html;
 
-  // Bind clicks
-  sidebar.querySelectorAll('.sidebar-item').forEach(el => {
+  // Bind navigation clicks
+  sidebar.querySelectorAll('.sidebar-item[data-screen]').forEach(el => {
     el.addEventListener('click', (e) => {
       e.preventDefault();
       navigate(el.dataset.screen);
     });
   });
+
+  // Bind quit
+  document.getElementById('sidebar-quit')?.addEventListener('click', () => {
+    api.app.quit();
+  });
+}
+
+// Update sidebar connection dot color
+function updateSidebarConnDot() {
+  const dot = document.getElementById('sidebar-conn-dot');
+  if (!dot) return;
+  const s = state.connectionStatus;
+  dot.style.background = s === 'connected' ? 'var(--green)' : s === 'chrome_running' ? 'var(--orange)' : 'var(--red)';
 }
 
 // ── Topbar ──
@@ -163,7 +202,7 @@ function updateTopbar(screenId) {
   const info = STEP_MAP[screenId] || {};
   const projectName = state.currentProject?.name || '';
 
-  // Breadcrumb nav in topbar (contextual, not primary)
+  // Breadcrumb nav in topbar (macOS Finder-like path)
   const navEl = document.getElementById('topbar-nav');
   if (navEl) {
     const crumbs = [];
@@ -171,7 +210,7 @@ function updateTopbar(screenId) {
 
     if (projectName && SCREENS.indexOf(screenId) > 1) {
       crumbs.push(`<span class="topbar-crumb-current">${projectName}</span>`);
-      crumbs.push(`<span class="topbar-crumb-sep">·</span>`);
+      crumbs.push(`<span class="topbar-crumb-sep">/</span>`);
       crumbs.push(`<span class="topbar-crumb-active">${label}</span>`);
     } else {
       crumbs.push(`<span class="topbar-crumb-active">${label}</span>`);
@@ -193,40 +232,102 @@ function updateTopbar(screenId) {
   }
 }
 
+// ── Canonical Connection State ──
+// Single function to update connection status everywhere.
+// Derives a richer status string from chrome:status detail.
+function deriveConnectionStatus(detail) {
+  if (!detail) return 'unknown';
+  if (detail.cdpConnected) return 'connected';
+  if (detail.chromeRunning) return 'chrome_running';
+  return 'disconnected';
+}
+
+function setConnectionStatus(newStatus, detail = null) {
+  const changed = state.connectionStatus !== newStatus;
+  state.connectionStatus = newStatus;
+  if (detail) state.connectionDetail = detail;
+  if (changed || detail) {
+    updateStatusbar();
+    updateSidebarConnDot();
+    emit('connection-changed', { status: newStatus, detail: state.connectionDetail });
+  }
+}
+
 // ── Statusbar + Topbar connection pill ──
 function updateStatusbar() {
-  const dotEl = document.getElementById('sb-status-dot');
-  const textEl = document.getElementById('sb-status-text');
-  const isOnline = state.connectionStatus === 'online';
+  const status = state.connectionStatus;
+  const isOnline = status === 'connected';
+  const isWarning = status === 'chrome_running';
 
-  // Bottom statusbar
-  if (dotEl && textEl) {
-    dotEl.style.background = isOnline ? 'var(--green)' : 'var(--text-tertiary)';
-    textEl.textContent = isOnline ? 'Higgsfield · Подключено' : 'Не подключено';
+  // Bottom statusbar — show project context, NOT connection status (avoid duplication)
+  const textEl = document.getElementById('sb-status-text');
+  const dotEl = document.getElementById('sb-status-dot');
+  if (textEl && dotEl) {
+    if (state.currentProject) {
+      dotEl.style.background = 'var(--accent)';
+      textEl.textContent = state.currentProject.name;
+    } else {
+      dotEl.style.background = 'var(--text-tertiary)';
+      textEl.textContent = 'Нет проекта';
+    }
   }
 
-  // Topbar connection pill
+  // Topbar connection pill — single canonical connection indicator
   let pill = document.getElementById('topbar-conn-pill');
   const actionsEl = document.getElementById('topbar-actions');
   if (actionsEl && !pill) {
     pill = document.createElement('button');
     pill.id = 'topbar-conn-pill';
-    pill.style.cssText = `display:flex;align-items:center;gap:5px;background:var(--bg-float);border:1px solid var(--border);border-radius:6px;padding:3px 10px 3px 8px;cursor:pointer;font-size:11px;font-family:var(--font);color:var(--text-secondary);transition:all 0.15s;`;
+    pill.className = 'topbar-conn-pill';
     pill.addEventListener('click', () => navigate('connection'));
-    pill.addEventListener('mouseenter', () => pill.style.borderColor = 'var(--text-tertiary)');
-    pill.addEventListener('mouseleave', () => pill.style.borderColor = 'var(--border)');
     actionsEl.prepend(pill);
   }
   if (pill) {
-    pill.innerHTML = `<span style="width:6px;height:6px;border-radius:50%;background:${isOnline ? 'var(--green)' : 'var(--red)'};flex-shrink:0;"></span>${isOnline ? 'Подключено' : 'Не подключено'}`;
+    const dotColor = isOnline ? 'var(--green)' : isWarning ? 'var(--orange)' : 'var(--red)';
+    const label = isOnline ? 'Подключено' : isWarning ? 'Chrome запущен' : 'Не подключено';
+    const title = isOnline ? 'Higgsfield — подключено' : isWarning ? 'Chrome запущен, но нет связи' : 'Нет соединения с Higgsfield';
+    pill.innerHTML = `<span class="topbar-pill-dot" style="background:${dotColor}"></span>${label}`;
+    pill.title = title;
   }
 }
 
 function bindStatusbar() {
   const sbBtn = document.getElementById('sb-conn-btn');
   if (sbBtn) {
-    sbBtn.addEventListener('click', () => navigate('connection'));
+    // Bottom-left click navigates to projects/settings
+    sbBtn.addEventListener('click', () => {
+      if (state.currentProject) {
+        navigate('settings');
+      } else {
+        navigate('projects');
+      }
+    });
   }
+}
+
+// ── Background connection poller ──
+// Single source of truth for connection state.
+// Stores FULL detail object + derived status string.
+let _connPollTimer = null;
+async function pollConnectionNow() {
+  try {
+    const detail = await api.chrome.status();
+    const newStatus = deriveConnectionStatus(detail);
+    setConnectionStatus(newStatus, detail);
+  } catch {
+    setConnectionStatus('disconnected', { chromeRunning: false, cdpConnected: false, hasSession: false, sessionAge: null, cookieCount: 0 });
+  }
+}
+
+function startConnectionPoller() {
+  if (_connPollTimer) clearInterval(_connPollTimer);
+  pollConnectionNow(); // immediate first check
+  _connPollTimer = setInterval(pollConnectionNow, 15000);
+}
+
+// Exposed for screens that need to force an immediate re-check (e.g. after connect/launch)
+async function refreshConnectionNow() {
+  await pollConnectionNow();
 }
 
 // ── Screen loading ──
@@ -295,14 +396,8 @@ async function init() {
   // Initial navigation
   navigate(initialScreen);
 
-  // Check connection status
-  try {
-    const status = await api.chrome.status();
-    state.connectionStatus = status.cdpConnected ? 'online' : 'offline';
-  } catch {
-    state.connectionStatus = 'offline';
-  }
-  updateStatusbar();
+  // Check connection status via canonical poller
+  startConnectionPoller();
 }
 
 // ── Boot ──
@@ -334,4 +429,4 @@ function showToast(message, duration = 3000) {
 }
 
 // ── Public exports for screens ──
-export { api, state, navigate, updateStatusbar, showToast };
+export { api, state, navigate, updateStatusbar, setConnectionStatus, refreshConnectionNow, showToast };

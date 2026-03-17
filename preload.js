@@ -85,6 +85,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // ── App Info ──
   app: {
     info: () => ipcRenderer.invoke('app:info'),
+    quit: () => ipcRenderer.invoke('app:quit'),
   },
 
   // ── Model Capabilities ──

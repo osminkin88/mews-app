@@ -2,7 +2,7 @@
    HIGGSFIELD STUDIO — Electron Main Process
    ============================================================ */
 
-const { app, BrowserWindow, ipcMain, shell, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, dialog, Menu } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
@@ -100,6 +100,52 @@ app.whenReady().then(() => {
   if (process.platform === 'darwin' && app.dock) {
     app.dock.setIcon(path.join(__dirname, 'icon.png'));
   }
+
+  // ── macOS Application Menu ──
+  // Standard macOS menu: App (About, Quit ⌘Q), Edit (copy/paste), Window, Help
+  if (process.platform === 'darwin') {
+    const template = [
+      {
+        label: APP_NAME,
+        submenu: [
+          { role: 'about', label: `О ${APP_NAME}` },
+          { type: 'separator' },
+          { role: 'services', label: 'Службы' },
+          { type: 'separator' },
+          { role: 'hide', label: `Скрыть ${APP_NAME}` },
+          { role: 'hideOthers', label: 'Скрыть остальные' },
+          { role: 'unhide', label: 'Показать все' },
+          { type: 'separator' },
+          { role: 'quit', label: `Завершить ${APP_NAME}` },
+        ],
+      },
+      {
+        label: 'Правка',
+        submenu: [
+          { role: 'undo', label: 'Отменить' },
+          { role: 'redo', label: 'Повторить' },
+          { type: 'separator' },
+          { role: 'cut', label: 'Вырезать' },
+          { role: 'copy', label: 'Копировать' },
+          { role: 'paste', label: 'Вставить' },
+          { role: 'selectAll', label: 'Выбрать все' },
+        ],
+      },
+      {
+        label: 'Окно',
+        submenu: [
+          { role: 'minimize', label: 'Свернуть' },
+          { role: 'zoom', label: 'Увеличить' },
+          { type: 'separator' },
+          { role: 'close', label: 'Закрыть окно' },
+          { type: 'separator' },
+          { role: 'front', label: 'На передний план' },
+        ],
+      },
+    ];
+    Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+  }
+
   createWindow();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
@@ -553,6 +599,15 @@ ipcMain.handle('generate:start', async (event, { prompts, settings, projectId })
         slots,
       });
 
+      // ── Send per-prompt 'done' event so progress.js can advance bar deterministically ──
+      sendToRenderer('generate:progress', {
+        step: 'done',
+        promptCurrent: runIndex,
+        promptTotal: prompts.length,
+        imagesPerPrompt: targetCount,
+        message: `✅ Промпт ${runIndex}/${prompts.length} завершён — ${files.length}/${targetCount} сохранено`,
+      });
+
       console.log(`[main] ┌── RESULT PROMPT ${runIndex} ─────────────────────────`);
       console.log(`[main] │ status: ${promptStatus.toUpperCase()} → saved ${files.length}/${targetCount}`);
       console.log(`[main] │ failed: ${result.failedCount || 0} slots`);
@@ -606,6 +661,11 @@ ipcMain.handle('generate:start', async (event, { prompts, settings, projectId })
     // Direct module-level reset
     engine._resetIsGenerating && engine._resetIsGenerating();
   }
+
+  // ── FIX: Small delay before 'complete' so last 'saved'/'done' events propagate via IPC ──
+  // Without this, the renderer can receive 'complete' before processing the final
+  // progress events, leaving the bar stuck at <100%.
+  await new Promise(r => setTimeout(r, 500));
 
   sendToRenderer('generate:progress', {
     status: 'complete',
@@ -1277,6 +1337,10 @@ ipcMain.handle('app:info', () => ({
   chromePath: chrome.findChromePath(),
   appData: config.APP_DATA,
 }));
+
+ipcMain.handle('app:quit', () => {
+  app.quit();
+});
 
 // ── Model Capabilities ──────────────────────────────────────
 ipcMain.handle('models:get-unlimited-list', () => getUnlimitedModelList());

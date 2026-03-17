@@ -168,34 +168,63 @@ button:focus-visible, a:focus-visible, select:focus-visible, input:focus-visible
   margin: 6px 0;
 }
 
+/* Sidebar utility items (bottom: connection, quit) */
+.sidebar-util {
+  opacity: 0.7;
+}
+.sidebar-util:hover { opacity: 1; }
+.sidebar-util.active { opacity: 1; }
+#sidebar-quit:hover .sidebar-icon svg { stroke: var(--red); }
+.sidebar-conn-dot {
+  position: absolute;
+  bottom: 0; right: 0;
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--red);
+  border: 1.5px solid var(--bg-elevated);
+}
+.sidebar-icon { position: relative; }
+
 /* ── TOPBAR ── */
 .topbar {
   display: flex;
   align-items: center;
   height: 44px;
-  padding: 0 16px;
+  padding: 0 16px 0 0;
   background: var(--bg-elevated);
   border-bottom: 1px solid var(--border);
   -webkit-app-region: drag;
-  gap: 10px;
   flex-shrink: 0;
 }
-.topbar-traffic { display: flex; gap: 8px; -webkit-app-region: no-drag; }
-/* Spacer for native macOS traffic lights (hiddenInset) */
-.topbar-traffic-spacer { width: 70px; -webkit-app-region: no-drag; flex-shrink: 0; }
-.dot { width: 12px; height: 12px; border-radius: 50%; }
-.dot-r { background: #FF5F57; }
-.dot-y { background: #FEBC2E; }
-.dot-g { background: #28C840; }
 
+/* Traffic-light safe zone — standard macOS hiddenInset clearance */
+.topbar-traffic-spacer {
+  width: 78px;
+  flex-shrink: 0;
+  -webkit-app-region: no-drag;
+}
+
+/* Brand */
 .topbar-brand {
-  font-size: 13px; font-weight: 800;
-  letter-spacing: -0.4px; margin-left: 8px;
-  background: linear-gradient(135deg, #0A84FF, #5E5CE6);
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: -0.6px;
+  background: linear-gradient(135deg, #0A84FF 0%, #6366F1 100%);
   -webkit-background-clip: text;
   background-clip: text;
   -webkit-text-fill-color: transparent;
   white-space: nowrap;
+  user-select: none;
+  flex-shrink: 0;
+}
+
+/* Dot separator between brand and breadcrumbs */
+.topbar-brand-sep {
+  color: var(--border-2);
+  font-size: 14px;
+  margin: 0 8px;
+  user-select: none;
+  opacity: 0.5;
 }
 .topbar-project {
   font-size: 12px; font-weight: 600;
@@ -417,15 +446,17 @@ button:focus-visible, a:focus-visible, select:focus-visible, input:focus-visible
 
 /* ── TOPBAR BREADCRUMB NAV ── */
 .topbar-nav {
-  display: flex; align-items: center; gap: 0;
-  margin-left: 8px;
+  display: flex; align-items: baseline; gap: 0;
+  margin-left: 0;
   -webkit-app-region: no-drag;
+  font-size: 12px;
+  line-height: 1;
 }
 .topbar-crumb {
-  font-size: 12px; font-weight: 500;
+  font-weight: 500;
   color: var(--text-tertiary);
   cursor: pointer;
-  padding: 3px 6px; border-radius: 4px;
+  padding: 3px 5px; border-radius: 4px;
   text-decoration: none;
   transition: all 0.1s;
 }
@@ -434,18 +465,20 @@ button:focus-visible, a:focus-visible, select:focus-visible, input:focus-visible
   background: var(--bg-float);
 }
 .topbar-crumb-sep {
-  font-size: 11px; color: var(--text-tertiary);
-  margin: 0 2px; opacity: 0.5;
+  color: var(--text-tertiary);
+  margin: 0 1px; opacity: 0.35;
+  font-weight: 400;
+  user-select: none;
 }
 .topbar-crumb-current {
-  font-size: 12px; font-weight: 600;
-  color: var(--text-secondary);
-  padding: 3px 6px;
+  font-weight: 500;
+  color: var(--text-tertiary);
+  padding: 3px 5px;
 }
 .topbar-crumb-active {
-  font-size: 12px; font-weight: 600;
-  color: var(--accent);
-  padding: 3px 6px;
+  font-weight: 600;
+  color: var(--text-primary);
+  padding: 3px 5px;
 }
 .topbar-back {
   display: flex; align-items: center; justify-content: center;
@@ -490,16 +523,65 @@ button:focus-visible, a:focus-visible, select:focus-visible, input:focus-visible
 }
 .conn-status.online { background: var(--green-soft); }
 .conn-status.offline { background: var(--red-soft); }
+.conn-status.warning { background: rgba(255,159,10,0.1); }
 .cs-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
 .online .cs-dot { background: var(--green); }
 .offline .cs-dot { background: var(--red); }
+.warning .cs-dot { background: var(--orange); }
 .cs-text { font-size: 13px; font-weight: 600; }
 .online .cs-text { color: var(--green); }
 .offline .cs-text { color: var(--red); }
+.warning .cs-text { color: var(--orange); }
+.conn-hint {
+  font-size: 11px; color: var(--text-tertiary);
+  margin-top: 10px; margin-bottom: 12px;
+  text-align: left; line-height: 1.5;
+  padding: 0 14px;
+}
 .conn-actions {
-  display: flex; gap: 8px; margin-top: 16px;
+  display: flex; gap: 8px; margin-top: 12px;
 }
 .conn-actions .btn { flex: 1; }
+
+/* Connection steps (3-step flow) */
+.conn-steps {
+  display: flex; flex-direction: column; gap: 0;
+  margin: 8px 0 4px;
+  padding: 10px 12px;
+  background: var(--bg);
+  border-radius: var(--r-md);
+}
+.conn-step {
+  display: flex; align-items: center; gap: 10px;
+  padding: 6px 4px;
+  font-size: 12px; color: var(--text-tertiary);
+  transition: color 0.15s;
+}
+.conn-step.active { color: var(--accent); font-weight: 600; }
+.conn-step.done { color: var(--green); }
+.conn-step-num {
+  width: 22px; height: 22px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 50%; font-size: 11px; font-weight: 700;
+  background: var(--bg-float); color: var(--text-tertiary);
+  flex-shrink: 0;
+}
+.conn-step.active .conn-step-num { background: var(--accent-soft); color: var(--accent); }
+.conn-step.done .conn-step-num { background: var(--green-soft); color: var(--green); }
+
+/* ── TOPBAR CONNECTION PILL ── */
+.topbar-conn-pill {
+  display: flex; align-items: center; gap: 5px;
+  background: var(--bg-float); border: 1px solid var(--border);
+  border-radius: 6px; padding: 3px 10px 3px 8px;
+  cursor: pointer; font-size: 11px; font-family: var(--font);
+  color: var(--text-secondary); transition: all 0.15s;
+  -webkit-app-region: no-drag;
+}
+.topbar-conn-pill:hover { border-color: var(--text-tertiary); }
+.topbar-pill-dot {
+  width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0;
+}
 
 /* ── PROJECT CARD ── */
 .project-card {
@@ -741,6 +823,32 @@ button:focus-visible, a:focus-visible, select:focus-visible, input:focus-visible
   width: 28px; height: 28px;
   stroke: var(--text-tertiary); fill: none; stroke-width: 1.5;
   margin-bottom: 8px;
+}
+
+/* Template download hint (below drop zone) */
+.template-hint {
+  text-align: center;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  margin-top: -12px;
+  margin-bottom: 20px;
+}
+.template-link {
+  color: var(--accent);
+  cursor: pointer;
+  margin-left: 4px;
+  text-decoration: none;
+  transition: opacity 0.12s;
+}
+.template-link:hover {
+  opacity: 0.7;
+  text-decoration: underline;
+}
+/* Subtle variant: when prompts are already loaded */
+.template-hint-subtle {
+  text-align: left;
+  margin-top: 6px;
+  margin-bottom: 12px;
 }
 
 /* ── PROGRESS ── */

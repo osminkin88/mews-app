@@ -73,11 +73,18 @@ async function render() {
                 <button id="btn-replace-file" class="source-replace">Добавить новый</button>
               </div>
               ${setChipsHTML}
+              <div class="template-hint template-hint-subtle">
+                <a id="btn-download-template" class="template-link">↓ Скачать шаблон</a>
+              </div>
             ` : `
               <div id="drop-zone" class="drop-zone">
                 <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
                 <div style="font-size:13px;font-weight:600">Загрузить промпты</div>
                 <div style="font-size:11px;color:var(--text-tertiary);margin-top:2px">CSV или XLSX</div>
+              </div>
+              <div class="template-hint">
+                <span>Нет файла?</span>
+                <a id="btn-download-template" class="template-link">Скачайте шаблон</a>
               </div>
             `}
           </div>
@@ -172,6 +179,19 @@ async function render() {
   };
   dropZone?.addEventListener('click', importFile);
   replaceBtn?.addEventListener('click', importFile);
+
+  // Download template
+  const downloadTemplate = async () => {
+    const result = await api.file.downloadTemplate();
+    if (result.success) {
+      showToast('Шаблон сохранён');
+    } else if (result.canceled) {
+      // User cancelled save dialog — do nothing
+    } else {
+      showToast(result.error || 'Не удалось сохранить шаблон');
+    }
+  };
+  container.querySelector('#btn-download-template')?.addEventListener('click', downloadTemplate);
 
   // Set-switcher chip clicks (switch set)
   container.querySelectorAll('.set-chip').forEach(chip => {

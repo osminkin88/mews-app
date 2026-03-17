@@ -508,8 +508,9 @@ export default {
   async mount(c) {
     container = c;
     const project = state.currentProject;
+    let result = null;
     if (project) {
-      const result = await api.projects.loadPrompts(project.id);
+      result = await api.projects.loadPrompts(project.id);
       prompts = result?.prompts || [];
     }
 

@@ -17,7 +17,8 @@ const {
 
 // ── Config ────────────────────────────────────────────────────
 const IMAGES_PER_PROMPT = 4;
-const GENERATION_TIMEOUT = 4 * 60 * 1000; // 4 minutes per image
+const SOFT_TIMEOUT = 4 * 60 * 1000;  // 4 minutes — warn, but keep waiting if in-flight
+const HARD_TIMEOUT = 10 * 60 * 1000; // 10 minutes — absolute max, stop unconditionally
 const POLL_INTERVAL = 3000;         // 3s polling
 const DEFAULT_MODEL = 'nano_banana_pro';
 
@@ -190,26 +191,37 @@ async function generatePrompt(prompt, options = {}) {
 
           await dismissOverlays(page);
 
-          // ═══ STRICT GUARD: Wait for queued==0 before clicking ═══
-          const queuedBeforeClick = await countQueuedItems(page);
-          if (queuedBeforeClick > 0) {
-            console.log(`[engine] ⏳ GUARD: queued=${queuedBeforeClick} before slot ${img.index} — waiting for queue to clear...`);
-            const guardTimeout = 300000; // 5 minutes max (Higgsfield gen can take 4+ min)
+          // ═══ STRICT GUARD: Wait for inFlight==0 (Queued + Generating) before clicking ═══
+          const inFlightBefore = await countInFlightItems(page);
+          if (inFlightBefore.total > 0) {
+            console.log(`[engine] ⏳ GUARD: inFlight=${inFlightBefore.total} (Q=${inFlightBefore.queued} G=${inFlightBefore.generating}) before slot ${img.index} — waiting...`);
+            const guardTimeout = 300000; // 5 minutes max
             const guardStart = Date.now();
             let guardCleared = false;
             while (Date.now() - guardStart < guardTimeout) {
               await chrome.sleep(3000);
-              const q = await countQueuedItems(page);
+              const inf = await countInFlightItems(page);
               const elapsed = Math.round((Date.now() - guardStart) / 1000);
-              console.log(`[engine] ⏳ GUARD: queued=${q} (${elapsed}s)`);
-              if (q === 0) {
-                console.log(`[engine] ✅ GUARD: queue cleared after ${elapsed}s`);
+              console.log(`[engine] ⏳ GUARD: inFlight=${inf.total} (Q=${inf.queued} G=${inf.generating}) (${elapsed}s)`);
+              if (inf.total === 0) {
+                console.log(`[engine] ✅ GUARD: all in-flight cleared after ${elapsed}s`);
                 guardCleared = true;
                 break;
               }
+              // Check page health every 30s during guard wait
+              if (elapsed % 30 === 0 && elapsed > 0) {
+                const health = await verifyPageHealth(page);
+                if (!health.alive) {
+                  const err = new Error(`Page lost during guard wait: ${health.reason}`);
+                  err.errorClass = 'fatal';
+                  err.errorReason = health.reason;
+                  throw err;
+                }
+              }
             }
             if (!guardCleared) {
-              const err = new Error(`GUARD: очередь не очистилась за 5 минут (queued=${await countQueuedItems(page)}). Слот ${img.index} пропущен.`);
+              const inf = await countInFlightItems(page);
+              const err = new Error(`GUARD: in-flight не очистились за 5 минут (Q=${inf.queued} G=${inf.generating}). Слот ${img.index} пропущен.`);
               err.errorClass = 'recoverable';
               err.errorReason = 'guard_timeout';
               throw err;
@@ -222,6 +234,10 @@ async function generatePrompt(prompt, options = {}) {
           console.log(`[engine] 📊 Slot ${img.index} pre-click: feedCount=${feedCountBefore}, fingerprints=${fingerprintsBefore.length}, exclude=${excludeFingerprints.length}`);
 
           // ═══ CLICK GENERATE ═══
+          const inFlightPreClick = await countInFlightItems(page);
+          if (inFlightPreClick.total > 0) {
+            console.log(`[engine] ⚠️ PRE-CLICK: in-flight=${inFlightPreClick.total} (Q=${inFlightPreClick.queued} G=${inFlightPreClick.generating}) — site still processing!`);
+          }
           const clicked = await clickGenerate(page);
           if (!clicked) {
             console.log(`[engine] ⚠️ Generate click failed for slot ${img.index}, trying once more...`);
@@ -242,10 +258,11 @@ async function generatePrompt(prompt, options = {}) {
 
           // ── FORENSIC: POST-CLICK STATE ──
           const queuedPost = await countQueuedItems(page);
+          const inFlightPost = await countInFlightItems(page);
           const feedPost = await countFeedImages(page);
           const topUrlPost = await getFirstFeedImgUrl(page);
           const topUUIDPost = extractUUID(topUrlPost);
-          console.log(`[engine] 📡 POST-CLICK (2s): queued=${queuedPost}, feed=${feedPost} (was ${feedCountBefore}), topUUID=${topUUIDPost || 'none'}, isForbidden=${topUUIDPost ? (excludeFingerprints.includes(topUUIDPost) || fingerprintsBefore.includes(topUUIDPost)) : 'N/A'}`);
+          console.log(`[engine] 📡 POST-CLICK (2s): inFlight=${inFlightPost.total} (Q=${inFlightPost.queued} G=${inFlightPost.generating}), feed=${feedPost} (was ${feedCountBefore}), topUUID=${topUUIDPost || 'none'}, isForbidden=${topUUIDPost ? (excludeFingerprints.includes(topUUIDPost) || fingerprintsBefore.includes(topUUIDPost)) : 'N/A'}`);
 
           // ═══ WAIT FOR NEW IMAGE (fingerprint primary detection) ═══
           onProgress({ step: 'waiting', message: `Слот ${img.index}/${imagesCount}: жду результат...`, state: 'generating' });
@@ -304,7 +321,10 @@ async function generatePrompt(prompt, options = {}) {
           let validation = validateDownload(destPath, dlResult);
 
           if (!validation.ok) {
-            console.log(`[engine] ⚠️ Slot ${img.index} validation failed: ${validation.reason}. Retrying download...`);
+            // Forensic: log exact reason before retry
+            const diskSize = fs.existsSync(destPath) ? fs.statSync(destPath).size : 0;
+            console.log(`[engine] ⚠️ Slot ${img.index} validation failed: reason=${validation.reason}, diskSize=${Math.round(diskSize/1024)}KB, method=${dlResult.method || 'unknown'}`);
+            console.log(`[engine] 🔄 Retrying download for slot ${img.index}...`);
             dlResult = await downloadImage(imageUrl, destPath, (p) => {
               onProgress({ step: 'downloading', message: `(retry dl) ${p.message}`, state: 'downloading' });
             });
@@ -340,12 +360,86 @@ async function generatePrompt(prompt, options = {}) {
           console.log(`[engine] ❌ SLOT ${img.index} attempt ${attempt} FAILED [${errClass}|${errReason}]: ${slotErr.message}`);
 
           if (errClass === 'fatal') {
+            // For page context loss errors: attempt recovery before giving up
+            const recoveryReasons = ['page_closed', 'page_invalid', 'prompt_missing'];
+            if (recoveryReasons.includes(errReason) && attempt === 1) {
+              console.log(`[engine] 🔄 SLOT ${img.index}: attempting page recovery before fatal stop (reason: ${errReason})...`);
+              onProgress({
+                step: 'recovering',
+                message: `🔄 Слот ${img.index}/${imagesCount}: восстанавливаю страницу...`,
+                current: img.index,
+                total: imagesCount,
+              });
+              
+              const modelInfo = UNLIMITED_MODELS[model] || {};
+              const recoveredPage = await attemptPageRecovery(chrome, modelInfo, prompt);
+              if (recoveredPage) {
+                // Recovery succeeded — update page reference and retry slot
+                page = recoveredPage;
+                console.log(`[engine] ✅ SLOT ${img.index}: page recovered — retrying slot`);
+                onProgress({
+                  step: 'recovered',
+                  message: `✅ Слот ${img.index}/${imagesCount}: страница восстановлена, повторяю...`,
+                  current: img.index,
+                  total: imagesCount,
+                });
+                continue; // Retry this attempt
+              }
+              // Recovery failed — fall through to fatal stop
+              console.log(`[engine] ❌ SLOT ${img.index}: page recovery failed — stopping batch`);
+            }
+
             // Fatal: stop the entire batch immediately
             fatalError = { message: slotErr.message, reason: errReason };
             img.state = 'failed';
             img.error = slotErr.message;
             img.errorReason = errReason;
+
+            onProgress({
+              step: 'slot_failed',
+              message: `❌ Слот ${img.index}/${imagesCount}: ${errReason === 'page_closed' ? 'вкладка закрыта' : errReason === 'prompt_missing' ? 'промпт пропал' : errReason === 'page_invalid' ? 'страница потеряна' : errReason}`,
+              current: img.index,
+              total: imagesCount,
+              failedSlot: img.index,
+              failedReason: errReason,
+              failedError: slotErr.message,
+            });
             break; // Exit per-slot retry loop
+          }
+
+          if (errClass === 'slot_ambiguity') {
+            // Ambiguity: multiple candidates exist — do NOT retry, quarantine
+            img.state = 'failed';
+            img.error = slotErr.message;
+            img.errorReason = 'slot_ambiguity';
+            console.log(`[engine] ⚠️ SLOT ${img.index} — AMBIGUITY: ${(slotErr.candidates || []).length} candidates, NOT retrying`);
+
+            // Write ambiguity event to quarantine folder
+            if (outputDir) {
+              const quarantineDir = path.join(outputDir, '..', '..', '_desync_recovery');
+              if (!fs.existsSync(quarantineDir)) fs.mkdirSync(quarantineDir, { recursive: true });
+              const eventFile = path.join(quarantineDir, `ambiguity_slot_${img.index}_${Date.now()}.json`);
+              fs.writeFileSync(eventFile, JSON.stringify({
+                timestamp: new Date().toISOString(),
+                slot: img.index,
+                candidateCount: (slotErr.candidates || []).length,
+                candidates: (slotErr.candidates || []).map(c => ({ pos: c.pos, uuid: c.uuid })),
+                message: slotErr.message,
+              }, null, 2));
+              console.log(`[engine] 📦 Ambiguity event saved: ${path.basename(eventFile)}`);
+            }
+
+            // Notify renderer
+            onProgress({
+              step: 'slot_failed',
+              message: `⚠️ Слот ${img.index}/${imagesCount}: неоднозначность (${(slotErr.candidates || []).length} кандидатов)`,
+              current: img.index,
+              total: imagesCount,
+              failedSlot: img.index,
+              failedReason: 'slot_ambiguity',
+              failedError: slotErr.message,
+            });
+            break; // Exit per-slot retry loop — do NOT retry ambiguity
           }
 
           if (attempt === 2) {
@@ -354,6 +448,16 @@ async function generatePrompt(prompt, options = {}) {
             img.error = slotErr.message;
             img.errorReason = errReason;
             console.log(`[engine] ⚠️ SLOT ${img.index} — all retries exhausted, marking FAILED [${errReason}]`);
+            // Notify renderer about slot failure
+            onProgress({
+              step: 'slot_failed',
+              message: `❌ Слот ${img.index}/${imagesCount} не удался (${errReason})`,
+              current: img.index,
+              total: imagesCount,
+              failedSlot: img.index,
+              failedReason: errReason,
+              failedError: slotErr.message,
+            });
             await dismissOverlays(page);
           }
           // else: attempt < 2 → loop continues to retry this slot
@@ -1618,6 +1722,133 @@ async function clickGenerate(page) {
  *   'site_failed'       — recoverable, retry slot
  *   null                — no specific error detected (generic timeout)
  */
+/**
+ * Verify that the controlled page is alive, on Higgsfield, and has valid generation context.
+ * Returns { alive: true } or { alive: false, reason: string }.
+ */
+async function verifyPageHealth(page) {
+  // 1. Check if page object is still usable
+  try {
+    const url = page.url();
+    
+    // 2. Page navigated away from Higgsfield
+    if (!url.includes('higgsfield') && !url.includes('higgs') && !url.includes('localhost')) {
+      console.log(`[engine] ❌ PAGE HEALTH: navigated away from Higgsfield → ${url.substring(0, 80)}`);
+      return { alive: false, reason: 'page_invalid' };
+    }
+
+    // 3. Page is on sign-in / login
+    if (url.includes('sign-in') || url.includes('login') || url.includes('auth')) {
+      console.log(`[engine] ❌ PAGE HEALTH: redirected to auth page`);
+      return { alive: false, reason: 'auth_error' };
+    }
+
+    // 4. Check that page DOM is responsive
+    const domCheck = await page.evaluate(() => {
+      const feed = document.querySelector('#soul-feed-scroll');
+      const promptField = document.querySelector('textarea, input[type="text"]');
+      
+      // Check for "Prompt is required" error message
+      const allText = document.body?.innerText || '';
+      const hasPromptError = allText.includes('Prompt is required') || 
+                             allText.includes('prompt is required');
+      
+      // Check if prompt field exists but is empty (suspicious during generation)
+      const promptEmpty = promptField ? (promptField.value || '').trim() === '' : true;
+      
+      return {
+        hasFeed: !!feed,
+        hasPromptField: !!promptField,
+        promptEmpty,
+        hasPromptError,
+      };
+    });
+
+    // 5. "Prompt is required" error on page
+    if (domCheck.hasPromptError) {
+      console.log(`[engine] ❌ PAGE HEALTH: site shows "Prompt is required"`);
+      return { alive: false, reason: 'prompt_missing' };
+    }
+
+    // 6. No feed scroll area — page structure broken
+    if (!domCheck.hasFeed) {
+      console.log(`[engine] ⚠️ PAGE HEALTH: no #soul-feed-scroll found — page may have reloaded`);
+      return { alive: false, reason: 'page_invalid' };
+    }
+
+    return { alive: true };
+  } catch (err) {
+    // page.evaluate() / page.url() failed — page is closed/crashed
+    const msg = (err.message || '').toLowerCase();
+    if (msg.includes('target closed') || msg.includes('session closed') || 
+        msg.includes('detached') || msg.includes('destroyed') ||
+        msg.includes('not found') || msg.includes('connection closed') ||
+        msg.includes('protocol error')) {
+      console.log(`[engine] ❌ PAGE HEALTH: page closed/crashed — ${err.message.substring(0, 80)}`);
+      return { alive: false, reason: 'page_closed' };
+    }
+    // Unknown error — treat as page invalid
+    console.log(`[engine] ❌ PAGE HEALTH: unknown error — ${err.message.substring(0, 80)}`);
+    return { alive: false, reason: 'page_closed' };
+  }
+}
+
+/**
+ * Attempt to recover a lost/invalid page.
+ * Returns the recovered page or null if recovery failed.
+ */
+async function attemptPageRecovery(chrome, modelInfo, prompt) {
+  console.log(`[engine] 🔄 RECOVERY: attempting to reacquire valid Higgsfield page...`);
+
+  try {
+    // 1. Try to get a fresh page reference
+    let page = chrome.getActivePage();
+    if (!page) {
+      console.log(`[engine] ❌ RECOVERY: no active page in chrome-manager — cannot recover`);
+      return null;
+    }
+
+    // 2. Check if page is at least alive
+    try {
+      const url = page.url();
+      console.log(`[engine] 🔄 RECOVERY: page alive, current URL: ${url.substring(0, 80)}`);
+    } catch {
+      console.log(`[engine] ❌ RECOVERY: page object is dead — cannot recover without reconnect`);
+      return null;
+    }
+
+    // 3. Navigate back to model page
+    console.log(`[engine] 🔄 RECOVERY: navigating to ${modelInfo.name} page...`);
+    await chrome.navigateToModel(modelInfo.slug);
+    await chrome.sleep(3000);
+
+    // 4. Re-verify model
+    const verified = await verifyActiveModel(page, modelInfo);
+    if (!verified) {
+      console.log(`[engine] ❌ RECOVERY: model verification failed after navigation`);
+      return null;
+    }
+
+    // 5. Re-enter prompt
+    console.log(`[engine] 🔄 RECOVERY: re-entering prompt...`);
+    await enterPrompt(page, prompt);
+    await chrome.sleep(1000);
+
+    // 6. Final health check
+    const health = await verifyPageHealth(page);
+    if (!health.alive) {
+      console.log(`[engine] ❌ RECOVERY: page health check failed after recovery: ${health.reason}`);
+      return null;
+    }
+
+    console.log(`[engine] ✅ RECOVERY: page recovered successfully, model and prompt re-applied`);
+    return page;
+  } catch (err) {
+    console.log(`[engine] ❌ RECOVERY: failed — ${err.message}`);
+    return null;
+  }
+}
+
 async function detectSiteError(page) {
   try {
     // Check for login redirect (auth_error)
@@ -1628,32 +1859,26 @@ async function detectSiteError(page) {
     }
 
     return await page.evaluate(() => {
-      const bodyText = document.body ? document.body.innerText.toLowerCase() : '';
-
-      // Credits exhausted (fatal)
-      if (
-        bodyText.includes('all credits used') ||
-        bodyText.includes('no credits remaining') ||
-        bodyText.includes('upgrade your plan')
-      ) {
-        return 'credits_exhausted';
-      }
-
-      // Find any toast/notification/banner elements
+      // Only check toast/notification/banner elements — NOT the entire body text.
+      // bodyText scanning caused false positives: "upgrade your plan" exists in
+      // Higgsfield navigation on EVERY page, triggering credits_exhausted on every timeout.
       const toastSelectors = [
         '[class*="toast"]', '[class*="notification"]', '[class*="alert"]',
         '[class*="error"]', '[role="alert"]', '[class*="banner"]',
-        '[class*="message"]', '[class*="snack"]',
+        '[class*="snack"]',
       ];
 
       for (const sel of toastSelectors) {
         const els = document.querySelectorAll(sel);
         for (const el of els) {
+          // Skip invisible or tiny elements (like nav items)
+          if (el.offsetParent === null && !el.closest('[role="alert"]')) continue;
           const text = (el.textContent || '').toLowerCase();
+          if (text.length > 200) continue; // Skip large containers — not a toast
           if (
             text.includes('all credits used') ||
-            text.includes('no credits') ||
-            text.includes('upgrade')
+            text.includes('no credits remaining') ||
+            text.includes('credits exhausted')
           ) {
             return 'credits_exhausted';
           }
@@ -1672,6 +1897,12 @@ async function detectSiteError(page) {
           ) {
             return 'auth_error';
           }
+          if (
+            text.includes('prompt is required') ||
+            text.includes('enter a prompt')
+          ) {
+            return 'prompt_missing';
+          }
         }
       }
 
@@ -1679,19 +1910,97 @@ async function detectSiteError(page) {
     });
   } catch (err) {
     console.log(`[engine] detectSiteError failed: ${err.message}`);
+    // If page.evaluate failed, check if page is closed
+    const msg = (err.message || '').toLowerCase();
+    if (msg.includes('target closed') || msg.includes('session closed') || 
+        msg.includes('detached') || msg.includes('destroyed')) {
+      return 'page_closed';
+    }
     return null;
   }
 }
 
-async function countFeedImages(page) {
-
-  return await page.evaluate(() => {
+/**
+ * Core feed scanner: extracts generation-only image URLs from the Higgsfield feed.
+ * Filters out:
+ * - Non-UUID images (promo banners, placeholders)
+ * - Images inside promo/ad/CTA card containers (marketing tiles)
+ * @param {Object} page - Puppeteer page
+ * @param {number} count - Max number of generation images to return
+ * @returns {string[]} - Array of resolved cloudfront URLs
+ */
+async function scanGenerationImages(page, count = 20) {
+  return await page.evaluate((maxCount) => {
     const feed = document.querySelector('#soul-feed-scroll');
-    if (!feed) return 0;
-    // Count image containers (direct children with images)
+    if (!feed) return [];
+
+    const uuidRe = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+
+    // Promo/ad blocklist — if any of these appear in the card's text, skip image
+    const promoSignals = [
+      'записатися', 'запишись', 'записаться',
+      'clinic', 'promo', 'advertisement', 'sponsored',
+      'sign up', 'download app', 'download the app',
+      'get started', 'learn more', 'try now', 'try free',
+      'upgrade', 'subscribe', 'join now',
+      'скачать', 'скачай', 'установи',
+      'реклама', 'промо', 'акция', 'скидка',
+      'install', 'available on',
+    ];
+
+    function isPromoCard(img) {
+      // Walk up from img to find the card container (up to 5 levels)
+      let el = img.parentElement;
+      for (let i = 0; i < 5 && el && el !== feed; i++) {
+        // Check if this is a substantial card container
+        if (el.offsetHeight > 80) {
+          const text = (el.innerText || '').toLowerCase();
+          // Check for promo signals
+          for (const signal of promoSignals) {
+            if (text.includes(signal)) return true;
+          }
+          // Check for external links (promo cards often have hrefs outside higgs)
+          const links = el.querySelectorAll('a[href]');
+          for (const link of links) {
+            const href = (link.getAttribute('href') || '').toLowerCase();
+            if (href.startsWith('http') && !href.includes('higgs')) return true;
+          }
+          break; // Only check the first substantial container
+        }
+        el = el.parentElement;
+      }
+      return false;
+    }
+
+    const result = [];
     const imgs = feed.querySelectorAll('img');
-    return imgs.length;
-  });
+    for (const img of imgs) {
+      if (result.length >= maxCount) break;
+      if (!img.src || !img.src.startsWith('http') || img.src.includes('avatar')) continue;
+
+      // Resolve proxy wrapper URL
+      let resolvedUrl = img.src;
+      try {
+        const u = new URL(img.src);
+        const inner = u.searchParams.get('url');
+        if (inner) resolvedUrl = inner;
+      } catch {}
+
+      // Filter 1: Must have UUID (= generation image URL)
+      if (!uuidRe.test(resolvedUrl)) continue;
+
+      // Filter 2: Must NOT be inside a promo/ad card
+      if (isPromoCard(img)) continue;
+
+      result.push(resolvedUrl);
+    }
+    return result;
+  }, count);
+}
+
+async function countFeedImages(page) {
+  const urls = await scanGenerationImages(page, 999);
+  return urls.length;
 }
 
 /**
@@ -1705,97 +2014,58 @@ function extractUUID(url) {
 }
 
 /**
- * Snapshot the UUIDs of the top-N images in the feed.
+ * Snapshot the UUIDs of the top-N generation images in the feed.
  * Used to detect whether a "new" image is actually old.
  */
 async function snapshotFeedFingerprints(page, n = 10) {
-  const urls = await page.evaluate((count) => {
-    const feed = document.querySelector('#soul-feed-scroll');
-    if (!feed) return [];
-    const result = [];
-    const imgs = feed.querySelectorAll('img');
-    for (let i = 0; i < Math.min(imgs.length, count); i++) {
-      const img = imgs[i];
-      if (img.src && img.src.startsWith('http') && !img.src.includes('avatar')) {
-        // Extract inner URL from proxy wrapper
-        try {
-          const u = new URL(img.src);
-          const inner = u.searchParams.get('url');
-          result.push(inner || img.src);
-        } catch {
-          result.push(img.src);
-        }
-      }
-    }
-    return result;
-  }, n);
-
-  // Extract UUIDs
+  const urls = await scanGenerationImages(page, n);
   const uuids = urls.map(u => extractUUID(u)).filter(Boolean);
-  console.log(`[engine] 📸 Feed fingerprint snapshot: ${uuids.length} UUIDs captured`);
+  console.log(`[engine] 📸 Feed fingerprint snapshot: ${uuids.length} UUIDs captured (gen-only, requested ${n})`);
   return uuids;
 }
 
 /**
- * Get URLs of images currently in the feed
+ * Get URLs of generation images currently in the feed
  */
 async function getFeedImageUrls(page) {
-  return await page.evaluate(() => {
-    const feed = document.querySelector('#soul-feed-scroll');
-    if (!feed) return [];
-
-    const urls = [];
-    const imgs = feed.querySelectorAll('img');
-    for (const img of imgs) {
-      if (img.src && img.src.startsWith('http') && !img.src.includes('avatar')) {
-        urls.push(img.src);
-      }
-    }
-    return urls;
-  });
+  return await scanGenerationImages(page, 999);
 }
 
 /**
- * Get the URL of the FIRST image in the feed (newest generation).
- * Extracts the INNER cloudfront URL from the Higgsfield proxy wrapper,
- * because the proxy URL pattern is identical for all images and
- * comparing proxy URLs fails to detect new images.
+ * Get the URL of the FIRST generation image in the feed (newest generation).
  */
 async function getFirstFeedImgUrl(page) {
-  return await page.evaluate(() => {
-    const feed = document.querySelector('#soul-feed-scroll');
-    if (!feed) return null;
-    const imgs = feed.querySelectorAll('img');
-    for (const img of imgs) {
-      if (img.src && img.src.startsWith('http') && !img.src.includes('avatar')) {
-        // Extract inner URL from proxy wrapper: images.higgs.ai/?...url=ENCODED
-        try {
-          const u = new URL(img.src);
-          const innerUrl = u.searchParams.get('url');
-          if (innerUrl) return innerUrl; // Return decoded cloudfront URL
-        } catch {}
-        return img.src; // Fallback to raw URL
-      }
-    }
-    return null;
-  });
+  const urls = await scanGenerationImages(page, 1);
+  return urls[0] || null;
 }
 
 /**
  * Count how many items are "Queued" (generating but not yet ready)
  */
 async function countQueuedItems(page) {
+  return (await countInFlightItems(page)).queued;
+}
+
+/**
+ * Count ALL in-flight generation indicators on the Higgsfield feed.
+ * Returns { queued, generating, total } where total = queued + generating.
+ * The old countQueuedItems only detected 'Queued' text, missing 'Generating' tiles
+ * which caused cross-prompt boundary corruption.
+ */
+async function countInFlightItems(page) {
   return await page.evaluate(() => {
     const feed = document.querySelector('#soul-feed-scroll');
-    if (!feed) return 0;
+    if (!feed) return { queued: 0, generating: 0, total: 0 };
     const elements = feed.querySelectorAll('*');
-    let count = 0;
+    let queued = 0, generating = 0;
     for (const el of elements) {
-      if (el.children.length === 0 && el.textContent.trim() === 'Queued') {
-        count++;
+      if (el.children.length === 0) {
+        const t = el.textContent.trim();
+        if (t === 'Queued') queued++;
+        else if (t === 'Generating' || t === 'Generating...') generating++;
       }
     }
-    return count;
+    return { queued, generating, total: queued + generating };
   });
 }
 
@@ -1822,42 +2092,57 @@ async function countQueuedItems(page) {
  * @returns {string|null} - New image URL or null if timeout
  */
 /**
- * Ждёт стабилизации ленты: нет Queued-элементов и количество изображений
- * не меняется два цикла подряд. Вызывается на границе между промптами.
- * @param {Object} page - Puppeteer страница
+ * Ждёт стабилизации ленты: нет in-flight элементов (Queued + Generating)
+ * И количество изображений + UUID fingerprints не меняются 3 цикла подряд.
+ * Вызывается на границе между промптами.
+ * @param {Object} page - Puppeteer страница  
  * @param {number} maxWaitMs - максимум ожидания (по умолчанию 60с)
+ * @returns {{ stable: boolean, finalUUIDs: string[] }}
  */
 async function waitForFeedStable(page, maxWaitMs = 60_000) {
+  const REQUIRED_STABLE = 3; // require 3 consecutive stable polls
   const deadline = Date.now() + maxWaitMs;
   let prevCount = -1;
+  let prevUUIDs = [];
   let stableCount = 0;
 
-  console.log('[engine] ⏳ waitForFeedStable: ждём стабилизации ленты...');
+  console.log('[engine] ⏳ waitForFeedStable: ждём стабилизации ленты (in-flight + UUID check)...');
 
   while (Date.now() < deadline) {
     await chrome.sleep(POLL_INTERVAL);
 
-    const queued = await countQueuedItems(page);
+    const inFlight = await countInFlightItems(page);
     const feedCount = await countFeedImages(page);
+    const currentUUIDs = await snapshotFeedFingerprints(page, 10);
 
-    if (queued === 0 && feedCount === prevCount) {
+    // Check: no in-flight items AND feedCount stable AND UUIDs stable
+    const uuidsMatch = prevUUIDs.length > 0 && 
+      currentUUIDs.length === prevUUIDs.length && 
+      currentUUIDs.every((u, i) => u === prevUUIDs[i]);
+
+    if (inFlight.total === 0 && feedCount === prevCount && uuidsMatch) {
       stableCount++;
-      if (stableCount >= 2) {
-        console.log(`[engine] ✅ waitForFeedStable: лента стабильна (feedCount=${feedCount})`);
-        return;
+      if (stableCount >= REQUIRED_STABLE) {
+        console.log(`[engine] ✅ waitForFeedStable: лента стабильна (${REQUIRED_STABLE} polls, feedCount=${feedCount}, inFlight=0)`);
+        return { stable: true, finalUUIDs: currentUUIDs };
       }
     } else {
-      stableCount = 0; // сброс при изменении
+      if (stableCount > 0) {
+        console.log(`[engine] ⚠️ waitForFeedStable: сброс стабильности (inFlight=${inFlight.total} [Q=${inFlight.queued}/G=${inFlight.generating}], feed=${feedCount}→${prevCount}, uuidsMatch=${uuidsMatch})`);
+      }
+      stableCount = 0;
     }
 
     prevCount = feedCount;
+    prevUUIDs = currentUUIDs;
 
-    if (queued > 0) {
-      console.log(`[engine] ⏳ waitForFeedStable: всё ещё Queued=${queued}, feedCount=${feedCount}`);
+    if (inFlight.total > 0) {
+      console.log(`[engine] ⏳ waitForFeedStable: in-flight=${inFlight.total} (Q=${inFlight.queued} G=${inFlight.generating}), feedCount=${feedCount}`);
     }
   }
 
   console.log('[engine] ⚠️ waitForFeedStable: таймаут, продолжаем несмотря на нестабильность');
+  return { stable: false, finalUUIDs: await snapshotFeedFingerprints(page, 10) };
 }
 
 /**
@@ -1885,16 +2170,31 @@ async function waitForFeedStable(page, maxWaitMs = 60_000) {
  */
 async function waitForSingleImage(page, feedCountBefore, fingerprintsBefore, index, total, onProgress, excludeFingerprints = []) {
   const startTime = Date.now();
-  const deadline = startTime + GENERATION_TIMEOUT;
+  const softDeadline = startTime + SOFT_TIMEOUT;
+  const hardDeadline = startTime + HARD_TIMEOUT;
   let generationDetected = false;
   let queuedGone = false;
+  let softTimeoutLogged = false;
 
   // Набор всех запрещённых UUID: до клика + от прошлого промпта
   const forbiddenUUIDs = new Set([...fingerprintsBefore, ...excludeFingerprints]);
 
-  while (Date.now() < deadline && !shouldStop) {
+  while (Date.now() < hardDeadline && !shouldStop) {
     await chrome.sleep(POLL_INTERVAL);
     const elapsed = Math.round((Date.now() - startTime) / 1000);
+    const pastSoft = Date.now() > softDeadline;
+
+    // ── Soft timeout: warn but keep waiting if in-flight ──
+    if (pastSoft && !softTimeoutLogged) {
+      const inFlight = await countInFlightItems(page);
+      if (inFlight.total > 0) {
+        console.log(`[engine] ⏳ SOFT TIMEOUT (${Math.round(SOFT_TIMEOUT/1000)}s): slot ${index} — still in-flight (Q=${inFlight.queued} G=${inFlight.generating}), continuing to hard timeout...`);
+        softTimeoutLogged = true;
+      } else {
+        console.log(`[engine] ⏳ SOFT TIMEOUT (${Math.round(SOFT_TIMEOUT/1000)}s): slot ${index} — no in-flight, proceeding to reconciliation`);
+        break; // Exit loop → reconciliation
+      }
+    }
 
     // Check for queued items
     const queued = await countQueuedItems(page);
@@ -1940,29 +2240,11 @@ async function waitForSingleImage(page, feedCountBefore, fingerprintsBefore, ind
 
       // Top UUID is known — scan deeper positions
       if ((queuedGone || elapsed > 15) && elapsed > 5) {
-        const allCurrentFingerprints = await snapshotFeedFingerprints(page, 5);
+        const allCurrentFingerprints = await snapshotFeedFingerprints(page, 10);
         const newFingerprints = allCurrentFingerprints.filter(fp => !forbiddenUUIDs.has(fp));
         if (newFingerprints.length > 0) {
           // Берём URL первого подходящего нового UUID
-          const urls = await page.evaluate((count) => {
-            const feed = document.querySelector('#soul-feed-scroll');
-            if (!feed) return [];
-            const result = [];
-            const imgs = feed.querySelectorAll('img');
-            for (let i = 0; i < Math.min(imgs.length, count); i++) {
-              const img = imgs[i];
-              if (img.src && img.src.startsWith('http') && !img.src.includes('avatar')) {
-                try {
-                  const u = new URL(img.src);
-                  const inner = u.searchParams.get('url');
-                  result.push(inner || img.src);
-                } catch {
-                  result.push(img.src);
-                }
-              }
-            }
-            return result;
-          }, 5);
+          const urls = await scanGenerationImages(page, 10);
 
           // Находим первый URL с новым UUID
           let foundUrl = null;
@@ -1995,19 +2277,94 @@ async function waitForSingleImage(page, feedCountBefore, fingerprintsBefore, ind
       console.log(`[engine] DEBUG: queued=${queued}, queuedGone=${queuedGone}, feedCount=${feedCountNow}/${feedCountBefore}, topUUID=${topUUID || 'none'}, isForbidden=${isKnown}, elapsed=${elapsed}s`);
     }
 
+    // Past soft timeout: log extended wait status every 30s and break when in-flight clears
+    if (pastSoft && softTimeoutLogged && elapsed % 30 === 0) {
+      const inFlight = await countInFlightItems(page);
+      if (inFlight.total === 0) {
+        console.log(`[engine] ✅ In-flight cleared at ${elapsed}s (past soft timeout) — proceeding to reconciliation`);
+        break;
+      }
+      console.log(`[engine] ⏳ EXTENDED WAIT: slot ${index}, ${elapsed}s, still in-flight (Q=${inFlight.queued} G=${inFlight.generating}), hard limit=${Math.round(HARD_TIMEOUT/1000)}s`);
+    }
+
     // Dismiss overlays periodically
     if (elapsed % 10 === 0 && elapsed > 0) {
       await dismissOverlays(page);
     }
 
-    // Check for auth issues
-    const pageUrl = page.url();
-    if (pageUrl.includes('sign-in') || pageUrl.includes('login')) {
-      throw new Error('Сессия истекла. Перезайдите через Chrome.');
+    // Page health check every 30 seconds
+    if (elapsed % 30 === 0 && elapsed > 0) {
+      const health = await verifyPageHealth(page);
+      if (!health.alive) {
+        const err = new Error(`Page lost during generation: ${health.reason}`);
+        err.errorClass = 'fatal';
+        err.errorReason = health.reason;
+        throw err;
+      }
     }
   }
 
-  console.log(`[engine] ⚠️ Timeout waiting for image ${index}`);
+  // ═══ FINAL RECONCILIATION: forensic dump + rescue before declaring timeout ═══
+  const elapsedTotal = Math.round((Date.now() - startTime) / 1000);
+  const inFlightAtRecon = await countInFlightItems(page);
+
+  if (inFlightAtRecon.total > 0) {
+    console.warn(`[engine] ⚠️ RECONCILIATION at HARD TIMEOUT: slot ${index}, ${elapsedTotal}s elapsed, STILL IN-FLIGHT (Q=${inFlightAtRecon.queued} G=${inFlightAtRecon.generating})`);
+  } else {
+    console.log(`[engine] 🔍 RECONCILIATION: forensic scan (slot ${index}, ${elapsedTotal}s elapsed, in-flight clear)...`);
+  }
+
+  // Collect top 20 generation candidates with full metadata
+  // Collect top 20 generation candidates (promo-filtered) with positional metadata
+  const reconUrls = await scanGenerationImages(page, 20);
+  const reconCandidates = reconUrls.map((url, idx) => ({ pos: idx, url }));
+
+  // Forensic dump: log every candidate
+  const reconDetails = reconCandidates.map(c => {
+    const uuid = extractUUID(c.url);
+    const isForbidden = uuid ? forbiddenUUIDs.has(uuid) : true;
+    return { pos: c.pos, uuid, forbidden: isForbidden, url: c.url.substring(0, 70) };
+  });
+
+  const newCandidates = reconDetails.filter(c => !c.forbidden && c.uuid);
+  const inFlightRecon = await countInFlightItems(page);
+
+  console.log(`[engine] ┌── RECONCILIATION DUMP (slot ${index}) ──────────────────`);
+  console.log(`[engine] │ total gen images: ${reconDetails.length}`);
+  console.log(`[engine] │ new candidates:   ${newCandidates.length}`);
+  console.log(`[engine] │ in-flight:        Q=${inFlightRecon.queued} G=${inFlightRecon.generating}`);
+  console.log(`[engine] │ forbidden set:    ${forbiddenUUIDs.size} UUIDs`);
+  for (const c of reconDetails.slice(0, 10)) {
+    const marker = c.forbidden ? '🔒' : '✨';
+    console.log(`[engine] │ ${marker} pos=${c.pos} uuid=${c.uuid || 'none'} ${c.url}...`);
+  }
+  if (reconDetails.length > 10) {
+    console.log(`[engine] │ ... and ${reconDetails.length - 10} more`);
+  }
+  console.log(`[engine] └──────────────────────────────────────────────────`);
+
+  if (newCandidates.length === 1) {
+    // Exactly one new candidate — safe to rescue
+    const best = newCandidates[0];
+    const bestUrl = reconCandidates.find(c => extractUUID(c.url) === best.uuid)?.url;
+    if (bestUrl) {
+      console.log(`[engine] 🆘 RESCUE: Image ${index} found via reconciliation (${elapsedTotal}s, uuid=${best.uuid}): ${bestUrl.substring(0, 80)}...`);
+      await chrome.sleep(800);
+      return bestUrl;
+    }
+  } else if (newCandidates.length > 1) {
+    // Multiple candidates — SLOT AMBIGUITY: do NOT auto-pick
+    console.warn(`[engine] ⚠️ SLOT AMBIGUITY: ${newCandidates.length} new candidates for slot ${index}`);
+    console.warn(`[engine]    candidates: ${newCandidates.map(c => `pos${c.pos}:${c.uuid}`).join(' | ')}`);
+    const err = new Error(`Slot ${index}: ${newCandidates.length} ambiguous candidates — cannot safely assign`);
+    err.errorClass = 'slot_ambiguity';
+    err.errorReason = 'slot_ambiguity';
+    err.candidates = newCandidates; // Preserve metadata for quarantine
+    throw err;
+  }
+
+  // True zero-candidate timeout
+  console.log(`[engine] ⚠️ TIMEOUT: Image ${index} — no valid candidate found after reconciliation (${elapsedTotal}s)`);
   return null;
 }
 
@@ -2016,7 +2373,7 @@ async function waitForSingleImage(page, feedCountBefore, fingerprintsBefore, ind
  */
 async function waitForNewImages(page, beforeCount, expected, onProgress) {
   const startTime = Date.now();
-  const deadline = startTime + GENERATION_TIMEOUT;
+  const deadline = startTime + HARD_TIMEOUT;
   let lastNewCount = 0;
 
   // Take snapshot of existing URLs to filter out later
@@ -2081,7 +2438,7 @@ async function waitForNewImages(page, beforeCount, expected, onProgress) {
     return timeoutNew.slice(0, expected);
   }
 
-  throw new Error(`Таймаут генерации (${Math.round(GENERATION_TIMEOUT / 1000)}с). Ни одно изображение не появилось.`);
+  throw new Error(`Таймаут генерации (${Math.round(HARD_TIMEOUT / 1000)}с). Ни одно изображение не появилось.`);
 }
 
 
@@ -2090,21 +2447,18 @@ async function waitForNewImages(page, beforeCount, expected, onProgress) {
 //  DOWNLOAD VALIDATION — strict file checks
 // ══════════════════════════════════════════════════════════════
 
-const MIN_FILE_SIZE = 1_000_000; // 1MB minimum for full-res
+const MIN_FILE_SIZE = 10_000; // 10KB minimum — below this is definitely corrupt/incomplete
 
 /**
  * Validate a downloaded image file.
- * All conditions must pass:
- * 1. dlResult.success === true
- * 2. File exists on disk
- * 3. File is not empty
- * 4. File size >= 1MB (full-res requirement)
- * 5. Valid image format (JPEG/PNG/WebP magic bytes)
+ * Rejects: missing, empty, < 10KB, non-image format.
+ * Accepts: valid images >= 10KB with quality tiers:
+ *   fullres (>2MB), acceptable (>1MB), preview (>10KB)
  */
 function validateDownload(filePath, dlResult) {
   // 1. Download reported success
   if (!dlResult || !dlResult.success) {
-    return { ok: false, reason: 'download_failed' };
+    return { ok: false, reason: 'download_failed', method: dlResult?.method || 'unknown' };
   }
 
   // 2. File exists on disk
@@ -2118,9 +2472,9 @@ function validateDownload(filePath, dlResult) {
     return { ok: false, reason: 'empty_file' };
   }
 
-  // 4. File size >= 1MB
+  // 4. File size >= 10KB (truly corrupt/incomplete below this)
   if (stat.size < MIN_FILE_SIZE) {
-    return { ok: false, reason: `too_small_${Math.round(stat.size / 1024)}KB_need_1MB` };
+    return { ok: false, reason: `corrupt_tiny_${Math.round(stat.size / 1024)}KB` };
   }
 
   // 5. Valid image format (magic bytes check)
@@ -2135,13 +2489,17 @@ function validateDownload(filePath, dlResult) {
     const isWebp = header[0] === 0x52 && header[1] === 0x49; // RIFF (WebP)
 
     if (!isJpeg && !isPng && !isWebp) {
-      return { ok: false, reason: 'invalid_image_format' };
+      const hexHeader = [...header].map(b => b.toString(16).padStart(2, '0')).join(' ');
+      return { ok: false, reason: `invalid_image_format (magic: ${hexHeader})` };
     }
 
     const format = isJpeg ? 'jpeg' : isPng ? 'png' : 'webp';
-    const quality = stat.size >= 2_000_000 ? 'fullres' : 'acceptable';
+    const sizeKB = Math.round(stat.size / 1024);
+    const quality = stat.size >= 2_000_000 ? 'fullres' 
+                  : stat.size >= 1_000_000 ? 'acceptable' 
+                  : 'preview';
 
-    console.log(`[engine] ✓ Validation passed: ${Math.round(stat.size / 1024)}KB, format=${format}, quality=${quality}`);
+    console.log(`[engine] ✓ Validation passed: ${sizeKB}KB, format=${format}, quality=${quality}`);
     return { ok: true, size: stat.size, quality, format };
   } catch (err) {
     return { ok: false, reason: `read_error: ${err.message}` };
@@ -2569,6 +2927,7 @@ function stopGeneration() {
 module.exports = {
   generatePrompt,
   downloadImage,
+  validateDownload,
   browserFetch,
   buildDownloadCandidates,
   stopGeneration,
@@ -2582,6 +2941,7 @@ module.exports = {
   verifyActiveModel,
   waitForFeedStable,
   snapshotFeedFingerprints,
+  countInFlightItems,
   preflightSettingsSync,
   setQuality,
   verifyQuality,
@@ -2593,4 +2953,3 @@ module.exports = {
   PAID_ONLY_MODELS,
   MODEL_QUALITY_OPTIONS,
 };
-

@@ -6,6 +6,8 @@
   "scripts": {
     "start": "electron .",
     "dev": "electron . --dev",
+    "v4": "electron . --v4",
+    "v4:dev": "electron . --v4 --dev",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:smoke": "node tests/smoke-persistence.js",

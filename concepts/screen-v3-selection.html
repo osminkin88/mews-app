@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <title>Mews v3 — Отбор кадров</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #F5F5F7; --bg-sidebar: #EDECED; --bg-card: #FFFFFF; --bg-hover: rgba(0,0,0,0.02);
+      --bg-input: #F0EFF1; --text-1: #1D1D1F; --text-2: #6E6E73; --text-3: #AEAEB2;
+      --accent: #007AFF; --accent-soft: rgba(0,122,255,0.08); --accent-glow: rgba(0,122,255,0.15);
+      --green: #34C759; --green-soft: rgba(52,199,89,0.1);
+      --red: #FF3B30; --orange: #FF9500; --orange-soft: rgba(255,149,0,0.08);
+      --border: rgba(0,0,0,0.06); --border-2: rgba(0,0,0,0.1);
+      --shadow-md: 0 2px 8px rgba(0,0,0,0.06), 0 0 0 0.5px rgba(0,0,0,0.03);
+      --r-sm: 8px; --r-lg: 12px;
+      --font: 'Inter', -apple-system, system-ui, sans-serif;
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; overflow: hidden; }
+    body { font-family: var(--font); font-size: 13px; line-height: 1.5; color: var(--text-1); background: var(--bg); -webkit-font-smoothing: antialiased; }
+    .app { display: flex; height: 100vh; }
+
+    /* ── SIDEBAR ── */
+    .sidebar { width: 220px; min-width: 220px; height: 100vh; background: var(--bg-sidebar); border-right: 1px solid var(--border); display: flex; flex-direction: column; padding-top: 52px; user-select: none; }
+    .sb-brand { display: flex; align-items: center; gap: 8px; padding: 0 16px 12px; }
+    .sb-brand-icon { width: 28px; height: 28px; background: var(--accent); border-radius: 7px; display: flex; align-items: center; justify-content: center; }
+    .sb-brand-icon svg { width: 14px; height: 14px; stroke: white; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+    .sb-brand-name { font-size: 14px; font-weight: 700; letter-spacing: -0.2px; }
+    .sb-brand-sub { font-size: 10px; color: var(--text-3); }
+    .sb-section-label { font-size: 10px; font-weight: 600; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.5px; padding: 12px 16px 5px; }
+    .sb-item { display: flex; align-items: center; gap: 8px; padding: 7px 12px; margin: 1px 8px; border-radius: var(--r-sm); cursor: pointer; font-size: 13px; color: var(--text-2); }
+    .sb-item:hover { background: rgba(0,0,0,0.03); }
+    .sb-item.on { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+    .sb-item svg { width: 16px; height: 16px; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; flex-shrink: 0; }
+    .sb-item-info { flex: 1; min-width: 0; }
+    .sb-item-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .sb-item-meta { font-size: 10px; color: var(--text-3); }
+    .sb-item.on .sb-item-meta { color: var(--accent); opacity: 0.5; }
+    .sb-steps { display: flex; gap: 2px; margin-top: 4px; }
+    .sb-step { flex: 1; height: 2px; border-radius: 1px; background: rgba(0,0,0,0.06); }
+    .sb-step.done { background: var(--green); }
+    .sb-step.now { background: var(--accent); }
+    .sb-add { display: flex; align-items: center; gap: 6px; padding: 7px 12px; margin: 4px 8px; border-radius: var(--r-sm); cursor: pointer; font-size: 12px; font-weight: 500; color: var(--text-3); }
+    .sb-add svg { width: 14px; height: 14px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; }
+    .sb-spacer { flex: 1; }
+    .sb-footer { padding: 10px 16px; border-top: 1px solid var(--border); display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-3); }
+    .sb-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); flex-shrink: 0; }
+
+    /* ── MAIN ── */
+    .main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+
+    /* ── PIPELINE HEADER ── */
+    .pipeline-header { display: flex; align-items: center; padding: 0 24px; border-bottom: 1px solid var(--border); background: rgba(245,245,247,0.85); backdrop-filter: blur(20px); flex-shrink: 0; }
+    .ph-project { display: flex; align-items: center; gap: 8px; padding: 10px 16px 10px 0; border-right: 1px solid var(--border); margin-right: 12px; }
+    .ph-project svg { width: 16px; height: 16px; stroke: var(--text-1); fill: none; stroke-width: 1.8; }
+    .ph-project-name { font-size: 14px; font-weight: 700; letter-spacing: -0.2px; }
+    .ph-steps { display: flex; align-items: center; gap: 0; }
+    .ph-step { display: flex; align-items: center; gap: 5px; padding: 10px 12px; font-size: 12px; font-weight: 500; color: var(--text-3); cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+    .ph-step.on { color: var(--accent); font-weight: 600; border-bottom-color: var(--accent); }
+    .ph-step.done { color: var(--green); }
+    .ph-step svg { width: 14px; height: 14px; stroke: currentColor; fill: none; stroke-width: 1.8; }
+    .ph-arrow { color: var(--text-3); font-size: 10px; margin: 0 2px; opacity: 0.3; }
+    .ph-spacer { flex: 1; }
+    .btn { display: inline-flex; align-items: center; gap: 5px; padding: 6px 14px; border-radius: var(--r-sm); font-family: var(--font); font-size: 12px; font-weight: 600; border: none; cursor: pointer; transition: all 0.12s; }
+    .btn svg { width: 13px; height: 13px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; }
+    .btn-p { background: var(--green); color: white; box-shadow: 0 1px 3px rgba(52,199,89,0.2); }
+    .btn-p:disabled { opacity: 0.4; cursor: not-allowed; }
+    .btn-s { background: var(--bg-card); color: var(--text-1); border: 1px solid var(--border-2); }
+
+    .content { flex: 1; overflow-y: auto; padding: 20px 24px 40px; display: flex; flex-direction: column; }
+    .content::-webkit-scrollbar { width: 6px; }
+    .content::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.06); border-radius: 3px; }
+    .card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--r-lg); box-shadow: var(--shadow-md); overflow: hidden; }
+
+    /* ── PROMPT NAV ── */
+    .prompt-nav { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+    .pn-counter { font-size: 14px; font-weight: 700; }
+    .pn-counter span { color: var(--text-3); font-weight: 500; }
+    .pn-arrows { display: flex; gap: 4px; }
+    .pn-arrow { width: 28px; height: 28px; border-radius: 6px; background: var(--bg-card); border: 1px solid var(--border-2); display: flex; align-items: center; justify-content: center; cursor: pointer; }
+    .pn-arrow svg { width: 14px; height: 14px; stroke: var(--text-2); fill: none; stroke-width: 2; }
+    .pn-arrow:hover { background: var(--bg-input); }
+    .pn-spacer { flex: 1; }
+    .pn-sel-count { font-size: 12px; color: var(--text-2); }
+    .pn-sel-count strong { color: var(--green); }
+
+    /* ── MINIMAP ── */
+    .minimap { display: flex; gap: 3px; flex-wrap: wrap; margin-bottom: 14px; }
+    .mm-dot { width: 26px; height: 22px; border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 600; cursor: pointer; transition: all 0.1s; border: 1.5px solid transparent; }
+    .mm-dot.pending { background: var(--bg-input); color: var(--text-3); }
+    .mm-dot.current { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
+    .mm-dot.done { background: var(--green-soft); color: var(--green); }
+
+    /* ── PROMPT TEXT ── */
+    .prompt-text { margin-bottom: 14px; }
+    .prompt-label { font-size: 10px; font-weight: 600; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.3px; margin-bottom: 4px; }
+    .prompt-content { font-size: 13px; color: var(--text-2); line-height: 1.6; }
+
+    /* ── IMAGE GRID (2×2) ── */
+    .image-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; flex: 1; min-height: 0; }
+    .image-card { border-radius: var(--r-lg); overflow: hidden; cursor: pointer; position: relative; border: 3px solid transparent; transition: all 0.15s; display: flex; align-items: center; justify-content: center; min-height: 180px; }
+    .image-card:hover { border-color: rgba(0,122,255,0.2); }
+    .image-card.selected { border-color: var(--green); box-shadow: 0 0 0 2px rgba(52,199,89,0.15); }
+    .image-card .img-number { position: absolute; top: 8px; left: 8px; font-size: 11px; font-weight: 700; color: white; background: rgba(0,0,0,0.4); backdrop-filter: blur(8px); padding: 2px 8px; border-radius: 4px; }
+    .image-card .img-select-badge { position: absolute; top: 8px; right: 8px; width: 24px; height: 24px; border-radius: 50%; background: var(--green); display: flex; align-items: center; justify-content: center; opacity: 0; transition: opacity 0.1s; }
+    .image-card .img-select-badge svg { width: 12px; height: 12px; stroke: white; fill: none; stroke-width: 2.5; }
+    .image-card.selected .img-select-badge { opacity: 1; }
+    .image-card:hover .img-select-badge { opacity: 0.3; }
+    .image-card.selected:hover .img-select-badge { opacity: 1; }
+
+    /* Color placeholder backgrounds */
+    .ic-1 { background: linear-gradient(135deg, #E8D5C4, #F0E4D8); }
+    .ic-2 { background: linear-gradient(135deg, #D4C4A0, #E4D8C0); }
+    .ic-3 { background: linear-gradient(135deg, #C4D8E0, #D8E8F0); }
+    .ic-4 { background: linear-gradient(135deg, #D0E0C4, #E0F0D8); }
+
+    /* ── FOOTER ── */
+    .sel-footer { display: flex; align-items: center; gap: 14px; padding: 12px 0 0; margin-top: 12px; border-top: 1px solid var(--border); }
+    .sf-info { flex: 1; font-size: 12px; color: var(--text-2); }
+    .sf-info strong { color: var(--green); }
+
+    .badge-concept { position: fixed; top: 12px; right: 16px; background: var(--accent); color: white; padding: 4px 14px; border-radius: 20px; font-size: 11px; font-weight: 700; z-index: 999; }
+  </style>
+</head>
+<body>
+
+<div class="badge-concept">V3 · SELECTION</div>
+
+<div class="app">
+  <!-- ── SIDEBAR ── -->
+  <aside class="sidebar">
+    <div class="sb-brand">
+      <div class="sb-brand-icon"><svg viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg></div>
+      <div>
+        <div class="sb-brand-name">Mews</div>
+        <div class="sb-brand-sub">Production Pipeline</div>
+      </div>
+    </div>
+    <div class="sb-section-label">Проекты</div>
+    <div class="sb-item on">
+      <svg viewBox="0 0 24 24"><rect x="2" y="2" width="20" height="20" rx="5"/><path d="M8 12l3 3 5-5"/></svg>
+      <div class="sb-item-info">
+        <div class="sb-item-name">Весенняя коллекция</div>
+        <div class="sb-item-meta">Отбор · 7 из 24</div>
+        <div class="sb-steps">
+          <div class="sb-step done"></div>
+          <div class="sb-step done"></div>
+          <div class="sb-step done"></div>
+          <div class="sb-step now"></div>
+        </div>
+      </div>
+    </div>
+    <div class="sb-item">
+      <svg viewBox="0 0 24 24"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+      <div class="sb-item-info"><div class="sb-item-name">Тест Banana Pro</div></div>
+    </div>
+    <div class="sb-add"><svg viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>Новый проект</div>
+    <div class="sb-spacer"></div>
+    <div class="sb-section-label">Система</div>
+    <div class="sb-item"><svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>Подключение</div>
+    <div class="sb-footer"><div class="sb-dot"></div><span>Higgsfield · Подключено</span></div>
+  </aside>
+
+  <main class="main">
+    <!-- ── PIPELINE HEADER ── -->
+    <div class="pipeline-header">
+      <div class="ph-project">
+        <svg viewBox="0 0 24 24"><rect x="2" y="2" width="20" height="20" rx="5"/><path d="M8 12l3 3 5-5"/></svg>
+        <span class="ph-project-name">Весенняя коллекция</span>
+      </div>
+      <div class="ph-steps">
+        <div class="ph-step done"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>Промпты</div>
+        <span class="ph-arrow">›</span>
+        <div class="ph-step done"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>Настройки</div>
+        <span class="ph-arrow">›</span>
+        <div class="ph-step done"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>Генерация</div>
+        <span class="ph-arrow">›</span>
+        <div class="ph-step on">
+          <svg viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+          Отбор
+        </div>
+        <span class="ph-arrow">›</span>
+        <div class="ph-step"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>Результат</div>
+      </div>
+      <div class="ph-spacer"></div>
+      <button class="btn btn-p" style="margin:6px 0">
+        <svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
+        Завершить отбор
+      </button>
+    </div>
+
+    <div class="content">
+      <!-- ── PROMPT NAV ── -->
+      <div class="prompt-nav">
+        <div class="pn-counter">Промпт 8 <span>из 24</span></div>
+        <div class="pn-arrows">
+          <div class="pn-arrow"><svg viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg></div>
+          <div class="pn-arrow"><svg viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg></div>
+        </div>
+        <div class="pn-spacer"></div>
+        <div class="pn-sel-count">Отобрано: <strong>7</strong> / 24</div>
+      </div>
+
+      <!-- ── MINIMAP ── -->
+      <div class="minimap">
+        <div class="mm-dot done">1</div>
+        <div class="mm-dot done">2</div>
+        <div class="mm-dot done">3</div>
+        <div class="mm-dot done">4</div>
+        <div class="mm-dot done">5</div>
+        <div class="mm-dot done">6</div>
+        <div class="mm-dot done">7</div>
+        <div class="mm-dot current">8</div>
+        <div class="mm-dot pending">9</div>
+        <div class="mm-dot pending">10</div>
+        <div class="mm-dot pending">11</div>
+        <div class="mm-dot pending">12</div>
+        <div class="mm-dot pending">13</div>
+        <div class="mm-dot pending">14</div>
+        <div class="mm-dot pending">15</div>
+        <div class="mm-dot pending">16</div>
+        <div class="mm-dot pending">17</div>
+        <div class="mm-dot pending">18</div>
+        <div class="mm-dot pending">19</div>
+        <div class="mm-dot pending">20</div>
+        <div class="mm-dot pending">21</div>
+        <div class="mm-dot pending">22</div>
+        <div class="mm-dot pending">23</div>
+        <div class="mm-dot pending">24</div>
+      </div>
+
+      <!-- ── PROMPT TEXT ── -->
+      <div class="prompt-text">
+        <div class="prompt-label">Промпт #8</div>
+        <div class="prompt-content">Futuristic cityscape at sunset with flying vehicles and neon accents, cinematic lighting, detailed architecture, 8K quality</div>
+      </div>
+
+      <!-- ── IMAGE GRID 2×2 — выберите лучший вариант ── -->
+      <div class="image-grid">
+        <div class="image-card ic-1">
+          <div class="img-number">Вариант 1</div>
+          <div class="img-select-badge"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></div>
+        </div>
+        <div class="image-card ic-2 selected">
+          <div class="img-number">Вариант 2</div>
+          <div class="img-select-badge"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></div>
+        </div>
+        <div class="image-card ic-3">
+          <div class="img-number">Вариант 3</div>
+          <div class="img-select-badge"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></div>
+        </div>
+        <div class="image-card ic-4">
+          <div class="img-number">Вариант 4</div>
+          <div class="img-select-badge"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></div>
+        </div>
+      </div>
+
+      <!-- ── FOOTER ── -->
+      <div class="sel-footer">
+        <div class="sf-info">Выбран <strong>Вариант 2</strong> · Клик на другую картинку сменит выбор · Автопереход через 0.5с</div>
+      </div>
+    </div>
+  </main>
+</div>
+</body>
+</html>

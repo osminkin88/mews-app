@@ -56,14 +56,10 @@ const IMAGE_COLORS = [
 
 // Original progress controls HTML (to restore after generation)
 const PROGRESS_CONTROLS_HTML = `
-  <button class="btn btn-secondary btn-sm" id="btn-pause" onclick="togglePause()">
-    ⏸ Пауза
-  </button>
-  <button class="btn btn-danger btn-sm" onclick="stopGeneration()">
-    ⏹ Стоп
-  </button>
+  <button class="btn btn-secondary btn-icon" id="btn-pause" onclick="togglePause()" title="Пауза">⏸</button>
+  <button class="btn btn-danger btn-icon" onclick="stopGeneration()" title="Остановить">⏹</button>
   <div style="flex: 1;"></div>
-  <span class="text-secondary" id="eta-text">—</span>
+  <span class="progress-eta" id="eta-text">—</span>
 `;
 
 // ── Meow Sound (preload for instant playback) ──
@@ -217,6 +213,11 @@ function navigateTo(screenId) {
   // FIX: Restore connection state when revisiting connection screen
   if (screenId === 'connection') {
     updateConnectionUI();
+  }
+
+  // Celebration sparkles on results screen
+  if (screenId === 'results') {
+    triggerCelebration();
   }
 
   // Render dynamic controls when visiting settings
@@ -2397,7 +2398,7 @@ function renderSelectionContent() {
   if (!grid) return;
 
   // FIX: Adapt grid columns to images-per-prompt
-  grid.className = 'image-grid';
+  grid.className = 'image-grid image-grid-zen';
   if (state.imagesPerPrompt === 1) grid.classList.add('cols-1');
   else if (state.imagesPerPrompt === 2) grid.classList.add('cols-2');
 
@@ -2424,7 +2425,9 @@ function renderRealImages(grid, promptIdx, images) {
   grid.innerHTML = images.map((img, imgIdx) => {
     const isSelected = selectedImg === imgIdx;
     return `
-      <div class="image-card ${isSelected ? 'selected' : ''}" onclick="selectImage(${promptIdx}, ${imgIdx})">
+      <div class="image-card ${isSelected ? 'selected' : ''}" 
+           onclick="selectImage(${promptIdx}, ${imgIdx})"
+           ondblclick="event.stopPropagation(); openLightbox('${img.dataUrl}', 'Вариант ${imgIdx + 1}', ${promptIdx}, ${imgIdx})">
         <img src="${img.dataUrl}" alt="Вариант ${imgIdx + 1}" style="width:100%; height:100%; object-fit:cover; border-radius: inherit;">
         <div class="image-card-number">Вариант ${imgIdx + 1}</div>
       </div>
@@ -2453,15 +2456,24 @@ function selectImage(promptIdx, imageIdx) {
   updateSelectionCounter();
   saveProjectState();
 
-  // FIX U3: Use selectable prompts for auto-advance
+  // Smart auto-advance: jump to nearest unselected prompt
   const selectablePrompts = state._selectablePromptsCache || _selectablePrompts();
   const totalPrompts = selectablePrompts.length;
-  // Auto-advance to next prompt after a short delay
-  if (promptIdx < totalPrompts - 1) {
+  // Find next unselected prompt
+  let nextUnselected = -1;
+  for (let j = promptIdx + 1; j < totalPrompts; j++) {
+    if (state.selections[j] === undefined) { nextUnselected = j; break; }
+  }
+  // If none found after current, search from beginning
+  if (nextUnselected === -1) {
+    for (let j = 0; j < promptIdx; j++) {
+      if (state.selections[j] === undefined) { nextUnselected = j; break; }
+    }
+  }
+  if (nextUnselected !== -1) {
     setTimeout(() => {
-      // FIX: Only auto-advance if still on the same prompt (user might have clicked minimap)
       if (state.selectionCurrentPrompt === promptIdx) {
-        nextPrompt();
+        jumpToPrompt(nextUnselected);
       }
     }, 500);
   }
@@ -2952,3 +2964,108 @@ document.addEventListener('DOMContentLoaded', async () => {
     Notification.requestPermission();
   }
 });
+
+/* ============================================================
+   LIGHTBOX — Full-screen image zoom for selection screen
+   ============================================================ */
+
+let _lightboxPromptIdx = null;
+let _lightboxImageIdx = null;
+
+function openLightbox(src, caption, promptIdx, imageIdx) {
+  const overlay = document.getElementById('lightbox');
+  const img = document.getElementById('lightbox-img');
+  const cap = document.getElementById('lightbox-caption');
+  if (!overlay || !img) return;
+  
+  img.src = src;
+  if (cap) cap.textContent = caption || '';
+  _lightboxPromptIdx = promptIdx;
+  _lightboxImageIdx = imageIdx;
+  overlay.classList.add('active');
+}
+
+function closeLightbox(event) {
+  // If clicking on the image itself, select it instead of closing
+  if (event && event.target && event.target.classList.contains('lightbox-img')) {
+    if (_lightboxPromptIdx !== null && _lightboxImageIdx !== null) {
+      selectImage(_lightboxPromptIdx, _lightboxImageIdx);
+    }
+    const overlay = document.getElementById('lightbox');
+    if (overlay) overlay.classList.remove('active');
+    _lightboxPromptIdx = null;
+    _lightboxImageIdx = null;
+    return;
+  }
+  
+  const overlay = document.getElementById('lightbox');
+  if (overlay) overlay.classList.remove('active');
+  _lightboxPromptIdx = null;
+  _lightboxImageIdx = null;
+}
+
+/* ── Keyboard Shortcuts ── */
+document.addEventListener('keydown', (e) => {
+  // Only active on selection screen
+  const selScreen = document.getElementById('screen-selection');
+  if (!selScreen || !selScreen.classList.contains('active')) return;
+  
+  // Lightbox is open → Esc closes
+  const lightbox = document.getElementById('lightbox');
+  if (lightbox && lightbox.classList.contains('active')) {
+    if (e.key === 'Escape') {
+      closeLightbox();
+      e.preventDefault();
+    }
+    return; // Don't process other keys while lightbox is open
+  }
+  
+  // Arrow keys: navigate prompts
+  if (e.key === 'ArrowLeft') {
+    prevPrompt();
+    e.preventDefault();
+  } else if (e.key === 'ArrowRight') {
+    nextPrompt();
+    e.preventDefault();
+  }
+  
+  // Number keys 1-4: select image variant
+  const num = parseInt(e.key);
+  if (num >= 1 && num <= 4) {
+    const maxImages = state.imagesPerPrompt || 4;
+    if (num <= maxImages) {
+      selectImage(state.selectionCurrentPrompt, num - 1);
+      e.preventDefault();
+    }
+  }
+});
+
+/* ── Celebration sparkles for Results screen ── */
+function triggerCelebration() {
+  const container = document.getElementById('celebration-particles');
+  if (!container) return;
+  container.innerHTML = '';
+  
+  const colors = ['#7CB342', '#9CCC65', '#FFB74D', '#FFD54F', '#81C784', '#AED581'];
+  const symbols = ['✦', '·', '★', '✦', '·'];
+  
+  for (let i = 0; i < 20; i++) {
+    const spark = document.createElement('span');
+    spark.textContent = symbols[Math.floor(Math.random() * symbols.length)];
+    spark.style.cssText = `
+      position: absolute;
+      top: -10px;
+      left: ${Math.random() * 100}%;
+      font-size: ${8 + Math.random() * 16}px;
+      color: ${colors[Math.floor(Math.random() * colors.length)]};
+      opacity: 0.7;
+      animation: sparkle-fall ${2 + Math.random() * 2}s ease-in forwards,
+                 sparkle-drift ${1 + Math.random() * 2}s ease-in-out infinite;
+      animation-delay: ${Math.random() * 1.5}s;
+    `;
+    container.appendChild(spark);
+  }
+  
+  // Clean up after animation
+  setTimeout(() => { if (container) container.innerHTML = ''; }, 4000);
+}

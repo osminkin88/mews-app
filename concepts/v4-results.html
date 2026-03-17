@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <title>Mews v4 — Results</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #1C1C1E;
+      --bg-elevated: #2C2C2E;
+      --bg-float: #3A3A3C;
+      --text-primary: #F5F5F7;
+      --text-secondary: #98989D;
+      --text-tertiary: #636366;
+      --accent: #0A84FF;
+      --accent-soft: rgba(10,132,255,0.12);
+      --green: #30D158;
+      --green-soft: rgba(48,209,88,0.12);
+      --purple: #BF5AF2;
+      --purple-soft: rgba(191,90,242,0.12);
+      --border: rgba(255,255,255,0.06);
+      --font: 'Inter', -apple-system, system-ui, sans-serif;
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; overflow: hidden; }
+    body { font-family: var(--font); font-size: 13px; line-height: 1.5; color: var(--text-primary); background: var(--bg); -webkit-font-smoothing: antialiased; }
+
+    .app { display: grid; grid-template-rows: 38px 1fr 36px; height: 100vh; }
+
+    .topbar { display: flex; align-items: center; padding: 0 16px; background: var(--bg-elevated); border-bottom: 1px solid var(--border); -webkit-app-region: drag; gap: 12px; }
+    .topbar-traffic { display: flex; gap: 8px; }
+    .dot { width: 12px; height: 12px; border-radius: 50%; }
+    .dot-r { background: #FF5F57; } .dot-y { background: #FEBC2E; } .dot-g { background: #28C840; }
+    .topbar-project { font-size: 13px; font-weight: 600; color: var(--text-secondary); margin-left: 12px; }
+    .topbar-project strong { color: var(--text-primary); }
+    .topbar-sep { color: var(--text-tertiary); margin: 0 4px; }
+    .topbar-step { font-size: 12px; font-weight: 600; color: var(--green); background: var(--green-soft); padding: 2px 10px; border-radius: 5px; }
+    .topbar-spacer { flex: 1; }
+    .topbar-actions { display: flex; gap: 6px; -webkit-app-region: no-drag; }
+    .topbar-btn {
+      display: flex; align-items: center; gap: 5px;
+      padding: 5px 12px; border-radius: 6px;
+      font-family: var(--font); font-size: 12px; font-weight: 600;
+      border: none; cursor: pointer; transition: all 0.1s;
+    }
+    .topbar-btn svg { width: 13px; height: 13px; stroke: currentColor; fill: none; stroke-width: 2; }
+    .topbar-btn-secondary { background: var(--bg-float); color: var(--text-secondary); }
+    .topbar-btn-secondary:hover { color: var(--text-primary); }
+    .topbar-btn-primary { background: var(--green); color: white; }
+
+    .main { display: flex; flex-direction: column; overflow: hidden; }
+
+    /* ── TOP SUMMARY ── */
+    .result-summary {
+      display: flex; align-items: center; gap: 16px;
+      padding: 14px 24px;
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .rs-title { font-size: 16px; font-weight: 800; letter-spacing: -0.3px; }
+    .rs-badge {
+      font-size: 11px; font-weight: 700;
+      padding: 3px 10px; border-radius: 5px;
+    }
+    .rs-spacer { flex: 1; }
+    .rs-stat {
+      text-align: center;
+      padding: 0 12px;
+    }
+    .rs-stat-value { font-size: 18px; font-weight: 800; }
+    .rs-stat-label { font-size: 10px; color: var(--text-tertiary); text-transform: uppercase; letter-spacing: 0.3px; }
+
+    /* ── GRID ── */
+    .result-grid {
+      flex: 1; overflow-y: auto;
+      padding: 16px 24px 40px;
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+      gap: 10px;
+      align-content: start;
+    }
+    .result-grid::-webkit-scrollbar { width: 6px; }
+    .result-grid::-webkit-scrollbar-thumb { background: var(--bg-float); border-radius: 3px; }
+
+    .result-card {
+      border-radius: 10px;
+      overflow: hidden;
+      position: relative;
+      cursor: pointer;
+      transition: all 0.15s;
+      border: 2px solid transparent;
+    }
+    .result-card:hover { border-color: rgba(255,255,255,0.15); transform: translateY(-2px); }
+    .rc-image {
+      aspect-ratio: 1;
+      width: 100%;
+    }
+    .rc-overlay {
+      position: absolute; inset: 0;
+      background: linear-gradient(180deg, transparent 50%, rgba(0,0,0,0.7) 100%);
+      display: flex; flex-direction: column; justify-content: flex-end;
+      padding: 10px;
+      opacity: 0; transition: opacity 0.15s;
+    }
+    .result-card:hover .rc-overlay { opacity: 1; }
+    .rc-index {
+      position: absolute; top: 6px; left: 6px;
+      font-size: 10px; font-weight: 700;
+      background: rgba(0,0,0,0.5); backdrop-filter: blur(8px);
+      padding: 2px 8px; border-radius: 4px;
+    }
+    .rc-check {
+      position: absolute; top: 6px; right: 6px;
+      width: 20px; height: 20px; border-radius: 50%;
+      background: var(--green);
+      display: flex; align-items: center; justify-content: center;
+    }
+    .rc-check svg { width: 12px; height: 12px; stroke: white; fill: none; stroke-width: 2.5; }
+    .rc-prompt {
+      font-size: 11px; line-height: 1.4;
+      color: rgba(255,255,255,0.9);
+      display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+    }
+    .rc-meta {
+      font-size: 9px; color: rgba(255,255,255,0.5);
+      margin-top: 4px;
+    }
+
+    /* Future animation hint */
+    .future-hint {
+      grid-column: 1 / -1;
+      display: flex; align-items: center; gap: 12px;
+      padding: 14px 18px;
+      background: var(--purple-soft);
+      border: 1px dashed rgba(191,90,242,0.3);
+      border-radius: 10px;
+      margin-top: 8px;
+    }
+    .fh-icon {
+      width: 36px; height: 36px; border-radius: 9px;
+      background: var(--purple-soft);
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+    }
+    .fh-icon svg { width: 18px; height: 18px; stroke: var(--purple); fill: none; stroke-width: 1.6; }
+    .fh-text { flex: 1; }
+    .fh-title { font-size: 13px; font-weight: 700; color: var(--purple); }
+    .fh-desc { font-size: 11px; color: var(--text-tertiary); margin-top: 2px; }
+
+    .statusbar { display: flex; align-items: center; padding: 0 16px; background: var(--bg-elevated); border-top: 1px solid var(--border); font-size: 11px; color: var(--text-tertiary); gap: 16px; }
+    .sb-item { display: flex; align-items: center; gap: 4px; }
+    .sb-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); }
+    .sb-spacer { flex: 1; }
+
+    .badge-v4 { position: fixed; top: 8px; right: 60px; background: linear-gradient(135deg, var(--green), #0A84FF); color: white; padding: 3px 12px; border-radius: 12px; font-size: 10px; font-weight: 700; letter-spacing: 0.5px; z-index: 999; }
+  </style>
+</head>
+<body>
+
+<div class="badge-v4">V4 · RESULTS</div>
+
+<div class="app">
+  <div class="topbar">
+    <div class="topbar-traffic"><div class="dot dot-r"></div><div class="dot dot-y"></div><div class="dot dot-g"></div></div>
+    <div class="topbar-project"><strong>Весенняя коллекция</strong><span class="topbar-sep">·</span>Результаты</div>
+    <span class="topbar-step">Завершён ✓</span>
+    <div class="topbar-spacer"></div>
+    <div class="topbar-actions">
+      <button class="topbar-btn topbar-btn-secondary">
+        <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        Экспорт
+      </button>
+      <button class="topbar-btn topbar-btn-secondary">
+        <svg viewBox="0 0 24 24"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+        Открыть папку
+      </button>
+    </div>
+  </div>
+
+  <div class="main">
+    <!-- Summary -->
+    <div class="result-summary">
+      <div class="rs-title">Отобранные кадры</div>
+      <span class="rs-badge" style="background:var(--green-soft);color:var(--green)">24 / 24 ✓</span>
+      <div class="rs-spacer"></div>
+      <div class="rs-stat"><div class="rs-stat-value">24</div><div class="rs-stat-label">отобрано</div></div>
+      <div class="rs-stat"><div class="rs-stat-value">96</div><div class="rs-stat-label">всего было</div></div>
+      <div class="rs-stat"><div class="rs-stat-value" style="color:var(--green)">25%</div><div class="rs-stat-label">отбор</div></div>
+    </div>
+
+    <!-- Grid -->
+    <div class="result-grid">
+      <div class="result-card"><div class="rc-image" style="background:linear-gradient(135deg,#3a4a5a,#4a5a3a)"></div><span class="rc-index">1</span><span class="rc-check"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></span><div class="rc-overlay"><div class="rc-prompt">A dreamy watercolor landscape with cherry blossoms and a small cottage by the lake</div><div class="rc-meta">Вариант 3 · Banana Pro · 2K</div></div></div>
+      <div class="result-card"><div class="rc-image" style="background:linear-gradient(135deg,#4a3a5a,#3a5a4a)"></div><span class="rc-index">2</span><span class="rc-check"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></span><div class="rc-overlay"><div class="rc-prompt">Minimalist abstract art with soft pastel gradients and geometric shapes</div><div class="rc-meta">Вариант 1 · Banana Pro · 2K</div></div></div>
+      <div class="result-card"><div class="rc-image" style="background:linear-gradient(135deg,#5a4a3a,#3a4a5a)"></div><span class="rc-index">3</span><span class="rc-check"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></span><div class="rc-overlay"><div class="rc-prompt">Vintage botanical illustration of wildflowers on aged paper texture</div><div class="rc-meta">Вариант 2 · Banana Pro · 2K</div></div></div>
+      <div class="result-card"><div class="rc-image" style="background:linear-gradient(135deg,#3a5a4a,#5a3a4a)"></div><span class="rc-index">4</span><span class="rc-check"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></span><div class="rc-overlay"><div class="rc-prompt">Cozy coffee shop interior with warm lighting and exposed brick</div><div class="rc-meta">Вариант 4 · Banana Pro · 2K</div></div></div>
+      <div class="result-card"><div class="rc-image" style="background:linear-gradient(135deg,#4a5a4a,#3a3a5a)"></div><span class="rc-index">5</span><span class="rc-check"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></span><div class="rc-overlay"><div class="rc-prompt">Japanese zen garden with raked sand patterns and mossy stones</div><div class="rc-meta">Вариант 2 · Banana Pro · 2K</div></div></div>
+      <div class="result-card"><div class="rc-image" style="background:linear-gradient(135deg,#5a3a5a,#4a5a3a)"></div><span class="rc-index">6</span><span class="rc-check"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></span><div class="rc-overlay"><div class="rc-prompt">Ethereal abstract composition in azure and cream</div><div class="rc-meta">Вариант 1 · Banana Pro · 2K</div></div></div>
+      <div class="result-card"><div class="rc-image" style="background:linear-gradient(135deg,#3a5a5a,#5a4a3a)"></div><span class="rc-index">7</span><span class="rc-check"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></span><div class="rc-overlay"><div class="rc-prompt">Scandinavian living room with large windows and plants</div><div class="rc-meta">Вариант 3 · Banana Pro · 2K</div></div></div>
+      <div class="result-card"><div class="rc-image" style="background:linear-gradient(135deg,#4a4a5a,#3a5a3a)"></div><span class="rc-index">8</span><span class="rc-check"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></span><div class="rc-overlay"><div class="rc-prompt">Futuristic cityscape at sunset with flying vehicles</div><div class="rc-meta">Вариант 2 · Banana Pro · 2K</div></div></div>
+      <div class="result-card"><div class="rc-image" style="background:linear-gradient(135deg,#5a5a3a,#3a4a5a)"></div><span class="rc-index">9</span><span class="rc-check"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></span><div class="rc-overlay"><div class="rc-prompt">Underwater coral reef with bioluminescent creatures</div><div class="rc-meta">Вариант 4 · Banana Pro · 2K</div></div></div>
+      <div class="result-card"><div class="rc-image" style="background:linear-gradient(135deg,#3a3a5a,#5a5a3a)"></div><span class="rc-index">10</span><span class="rc-check"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></span><div class="rc-overlay"><div class="rc-prompt">Mountain village in autumn fog with warm lights</div><div class="rc-meta">Вариант 1 · Banana Pro · 2K</div></div></div>
+      <div class="result-card"><div class="rc-image" style="background:linear-gradient(135deg,#5a4a4a,#3a5a5a)"></div><span class="rc-index">11</span><span class="rc-check"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></span><div class="rc-overlay"><div class="rc-prompt">Cyberpunk street market at midnight with neon</div><div class="rc-meta">Вариант 3 · Banana Pro · 2K</div></div></div>
+      <div class="result-card"><div class="rc-image" style="background:linear-gradient(135deg,#4a5a5a,#5a3a3a)"></div><span class="rc-index">12</span><span class="rc-check"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></span><div class="rc-overlay"><div class="rc-prompt">Enchanted forest with glowing mushrooms and fairy lights</div><div class="rc-meta">Вариант 2 · Banana Pro · 2K</div></div></div>
+
+      <!-- Future animation hint -->
+      <div class="future-hint">
+        <div class="fh-icon"><svg viewBox="0 0 24 24"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg></div>
+        <div class="fh-text">
+          <div class="fh-title">Готово к анимации</div>
+          <div class="fh-desc">24 отобранных кадра сохранены в папку selected/ · Следующий шаг — оживление в Kling/Clink</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="statusbar">
+    <div class="sb-item"><span class="sb-dot"></span> Higgsfield</div>
+    <div class="sb-item">24 отобрано из 96</div>
+    <div class="sb-spacer"></div>
+    <div class="sb-item">selected/ · 24 файла</div>
+  </div>
+</div>
+
+</body>
+</html>

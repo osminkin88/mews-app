@@ -45,6 +45,7 @@ const state = {
   connectionStatus: 'unknown',
   selections: {},
   selectionCurrentPrompt: 0,
+  generationRequested: false, // Set by settings launch, consumed by progress mount
 };
 
 // ── Event Bus ──
@@ -192,18 +193,32 @@ function updateTopbar(screenId) {
   }
 }
 
-// ── Statusbar ──
+// ── Statusbar + Topbar connection pill ──
 function updateStatusbar() {
   const dotEl = document.getElementById('sb-status-dot');
   const textEl = document.getElementById('sb-status-text');
+  const isOnline = state.connectionStatus === 'online';
+
+  // Bottom statusbar
   if (dotEl && textEl) {
-    if (state.connectionStatus === 'online') {
-      dotEl.style.background = 'var(--green)';
-      textEl.textContent = 'Higgsfield · Подключено';
-    } else {
-      dotEl.style.background = 'var(--text-tertiary)';
-      textEl.textContent = 'Не подключено';
-    }
+    dotEl.style.background = isOnline ? 'var(--green)' : 'var(--text-tertiary)';
+    textEl.textContent = isOnline ? 'Higgsfield · Подключено' : 'Не подключено';
+  }
+
+  // Topbar connection pill
+  let pill = document.getElementById('topbar-conn-pill');
+  const actionsEl = document.getElementById('topbar-actions');
+  if (actionsEl && !pill) {
+    pill = document.createElement('button');
+    pill.id = 'topbar-conn-pill';
+    pill.style.cssText = `display:flex;align-items:center;gap:5px;background:var(--bg-float);border:1px solid var(--border);border-radius:6px;padding:3px 10px 3px 8px;cursor:pointer;font-size:11px;font-family:var(--font);color:var(--text-secondary);transition:all 0.15s;`;
+    pill.addEventListener('click', () => navigate('connection'));
+    pill.addEventListener('mouseenter', () => pill.style.borderColor = 'var(--text-tertiary)');
+    pill.addEventListener('mouseleave', () => pill.style.borderColor = 'var(--border)');
+    actionsEl.prepend(pill);
+  }
+  if (pill) {
+    pill.innerHTML = `<span style="width:6px;height:6px;border-radius:50%;background:${isOnline ? 'var(--green)' : 'var(--red)'};flex-shrink:0;"></span>${isOnline ? 'Подключено' : 'Не подключено'}`;
   }
 }
 

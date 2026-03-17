@@ -13,11 +13,8 @@
 <div id="app" class="app">
   <!-- Topbar -->
   <div class="topbar">
-    <div class="topbar-traffic">
-      <div class="dot dot-r"></div>
-      <div class="dot dot-y"></div>
-      <div class="dot dot-g"></div>
-    </div>
+    <!-- Native macOS traffic lights rendered by Electron (hiddenInset) -->
+    <div class="topbar-traffic-spacer"></div>
     <div class="topbar-brand">Mews</div>
     <div id="topbar-nav" class="topbar-nav"></div>
     <div class="topbar-spacer"></div>
@@ -36,10 +33,10 @@
 
   <!-- Statusbar -->
   <div class="statusbar">
-    <div class="sb-item">
+    <button id="sb-conn-btn" class="sb-item sb-clickable" title="Настройки подключения">
       <span id="sb-status-dot" class="sb-dot"></span>
       <span id="sb-status-text">Проверка…</span>
-    </div>
+    </button>
     <div class="sb-spacer"></div>
     <div class="sb-item">v4</div>
   </div>

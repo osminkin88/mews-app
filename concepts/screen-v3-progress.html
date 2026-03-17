@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <title>Mews v3 — Генерация</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #F5F5F7; --bg-sidebar: #EDECED; --bg-card: #FFFFFF; --bg-hover: rgba(0,0,0,0.02);
+      --bg-input: #F0EFF1; --text-1: #1D1D1F; --text-2: #6E6E73; --text-3: #AEAEB2;
+      --accent: #007AFF; --accent-soft: rgba(0,122,255,0.08);
+      --green: #34C759; --green-soft: rgba(52,199,89,0.1);
+      --red: #FF3B30; --red-soft: rgba(255,59,48,0.08);
+      --orange: #FF9500; --orange-soft: rgba(255,149,0,0.08);
+      --border: rgba(0,0,0,0.06); --border-2: rgba(0,0,0,0.1);
+      --shadow-md: 0 2px 8px rgba(0,0,0,0.06), 0 0 0 0.5px rgba(0,0,0,0.03);
+      --r-sm: 8px; --r-lg: 12px;
+      --font: 'Inter', -apple-system, system-ui, sans-serif;
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; overflow: hidden; }
+    body { font-family: var(--font); font-size: 13px; line-height: 1.5; color: var(--text-1); background: var(--bg); -webkit-font-smoothing: antialiased; }
+    .app { display: flex; height: 100vh; }
+
+    /* ── SIDEBAR ── */
+    .sidebar { width: 220px; min-width: 220px; height: 100vh; background: var(--bg-sidebar); border-right: 1px solid var(--border); display: flex; flex-direction: column; padding-top: 52px; user-select: none; }
+    .sb-brand { display: flex; align-items: center; gap: 8px; padding: 0 16px 12px; }
+    .sb-brand-icon { width: 28px; height: 28px; background: var(--accent); border-radius: 7px; display: flex; align-items: center; justify-content: center; }
+    .sb-brand-icon svg { width: 14px; height: 14px; stroke: white; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+    .sb-brand-name { font-size: 14px; font-weight: 700; letter-spacing: -0.2px; }
+    .sb-brand-sub { font-size: 10px; color: var(--text-3); }
+    .sb-section-label { font-size: 10px; font-weight: 600; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.5px; padding: 12px 16px 5px; }
+    .sb-item { display: flex; align-items: center; gap: 8px; padding: 7px 12px; margin: 1px 8px; border-radius: var(--r-sm); cursor: pointer; font-size: 13px; color: var(--text-2); }
+    .sb-item:hover { background: rgba(0,0,0,0.03); }
+    .sb-item.on { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+    .sb-item svg { width: 16px; height: 16px; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; flex-shrink: 0; }
+    .sb-item-info { flex: 1; min-width: 0; }
+    .sb-item-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .sb-item-meta { font-size: 10px; color: var(--text-3); }
+    .sb-item.on .sb-item-meta { color: var(--accent); opacity: 0.5; }
+    .sb-steps { display: flex; gap: 2px; margin-top: 4px; }
+    .sb-step { flex: 1; height: 2px; border-radius: 1px; background: rgba(0,0,0,0.06); }
+    .sb-step.done { background: var(--green); }
+    .sb-step.now { background: var(--accent); animation: pulse-step 1.5s ease-in-out infinite; }
+    @keyframes pulse-step { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+    .sb-add { display: flex; align-items: center; gap: 6px; padding: 7px 12px; margin: 4px 8px; border-radius: var(--r-sm); cursor: pointer; font-size: 12px; font-weight: 500; color: var(--text-3); }
+    .sb-add svg { width: 14px; height: 14px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; }
+    .sb-spacer { flex: 1; }
+    .sb-footer { padding: 10px 16px; border-top: 1px solid var(--border); display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-3); }
+    .sb-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); flex-shrink: 0; }
+
+    /* ── MAIN ── */
+    .main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+
+    .pipeline-header { display: flex; align-items: center; padding: 0 24px; border-bottom: 1px solid var(--border); background: rgba(245,245,247,0.85); backdrop-filter: blur(20px); flex-shrink: 0; }
+    .ph-project { display: flex; align-items: center; gap: 8px; padding: 10px 16px 10px 0; border-right: 1px solid var(--border); margin-right: 12px; }
+    .ph-project svg { width: 16px; height: 16px; stroke: var(--text-1); fill: none; stroke-width: 1.8; }
+    .ph-project-name { font-size: 14px; font-weight: 700; letter-spacing: -0.2px; }
+    .ph-steps { display: flex; align-items: center; }
+    .ph-step { display: flex; align-items: center; gap: 5px; padding: 10px 12px; font-size: 12px; font-weight: 500; color: var(--text-3); cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+    .ph-step.on { color: var(--accent); font-weight: 600; border-bottom-color: var(--accent); }
+    .ph-step.done { color: var(--green); }
+    .ph-step svg { width: 14px; height: 14px; stroke: currentColor; fill: none; stroke-width: 1.8; }
+    .ph-arrow { color: var(--text-3); font-size: 10px; margin: 0 2px; opacity: 0.3; }
+    .ph-spacer { flex: 1; }
+    .btn { display: inline-flex; align-items: center; gap: 5px; padding: 6px 14px; border-radius: var(--r-sm); font-family: var(--font); font-size: 12px; font-weight: 600; border: none; cursor: pointer; transition: all 0.12s; }
+    .btn svg { width: 13px; height: 13px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; }
+    .btn-danger { background: transparent; color: var(--red); border: 1px solid rgba(255,59,48,0.2); }
+    .btn-s { background: var(--bg-card); color: var(--text-1); border: 1px solid var(--border-2); }
+
+    .content { flex: 1; overflow-y: auto; padding: 20px 24px 40px; }
+    .content::-webkit-scrollbar { width: 6px; }
+    .content::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.06); border-radius: 3px; }
+    .card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--r-lg); box-shadow: var(--shadow-md); overflow: hidden; }
+
+    /* ── RING PROGRESS ── */
+    .ring-card { display: flex; align-items: center; gap: 24px; padding: 20px; }
+    .ring-wrap { position: relative; width: 100px; height: 100px; flex-shrink: 0; }
+    .ring-svg { width: 100px; height: 100px; transform: rotate(-90deg); }
+    .ring-bg { fill: none; stroke: rgba(0,0,0,0.04); stroke-width: 6; }
+    .ring-fill { fill: none; stroke: var(--accent); stroke-width: 6; stroke-linecap: round; transition: stroke-dashoffset 0.3s; }
+    .ring-label { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+    .ring-fraction { font-size: 20px; font-weight: 700; }
+    .ring-fraction span { color: var(--text-3); font-weight: 500; font-size: 14px; }
+    .ring-pct { font-size: 10px; font-weight: 600; color: var(--accent); }
+    .ring-info { flex: 1; }
+    .ring-current { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+    .spinner { width: 14px; height: 14px; border: 2px solid var(--accent-soft); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; flex-shrink: 0; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .ring-current-text { font-size: 13px; font-weight: 600; }
+    .ring-current-prompt { font-size: 12px; color: var(--text-2); margin-bottom: 10px; }
+    .prog-bar-wrap { margin-bottom: 6px; }
+    .prog-bar { height: 4px; background: rgba(0,0,0,0.04); border-radius: 2px; overflow: hidden; }
+    .prog-fill { height: 100%; border-radius: 2px; background: var(--accent); }
+    .prog-label { font-size: 11px; color: var(--text-3); margin-top: 3px; }
+    .ring-controls { display: flex; gap: 6px; margin-top: 8px; }
+
+    /* ── PROMPT STATUS LIST ── */
+    .gen-item { display: flex; align-items: center; gap: 10px; padding: 8px 16px; border-bottom: 1px solid var(--border); font-size: 12px; }
+    .gen-item:last-of-type { border-bottom: none; }
+    .gen-idx { font-weight: 600; color: var(--text-3); min-width: 20px; text-align: right; }
+    .gen-prompt { flex: 1; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .gen-status { font-weight: 600; display: flex; align-items: center; gap: 4px; }
+    .gen-status svg { width: 12px; height: 12px; stroke: currentColor; fill: none; stroke-width: 2; }
+    .gen-ok { color: var(--green); }
+    .gen-err { color: var(--red); }
+    .gen-wait { color: var(--text-3); }
+    .gen-now { color: var(--accent); font-weight: 600; }
+    .gen-imgs { font-size: 10px; font-weight: 600; color: var(--text-3); }
+
+    .sum-bar { display: flex; align-items: center; gap: 14px; padding: 10px 16px; background: var(--bg-input); border-top: 1px solid var(--border); font-size: 11px; }
+    .sum-l { color: var(--text-3); }
+    .sum-v { font-weight: 700; }
+
+    .section { margin-bottom: 16px; }
+    .sec-label { font-size: 11px; font-weight: 600; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.4px; margin-bottom: 6px; }
+
+    .badge-concept { position: fixed; top: 12px; right: 16px; background: var(--accent); color: white; padding: 4px 14px; border-radius: 20px; font-size: 11px; font-weight: 700; z-index: 999; }
+  </style>
+</head>
+<body>
+
+<div class="badge-concept">V3 · PROGRESS</div>
+
+<div class="app">
+  <aside class="sidebar">
+    <div class="sb-brand">
+      <div class="sb-brand-icon"><svg viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg></div>
+      <div>
+        <div class="sb-brand-name">Mews</div>
+        <div class="sb-brand-sub">Production Pipeline</div>
+      </div>
+    </div>
+    <div class="sb-section-label">Проекты</div>
+    <div class="sb-item on">
+      <svg viewBox="0 0 24 24"><rect x="2" y="2" width="20" height="20" rx="5"/><path d="M8 12l3 3 5-5"/></svg>
+      <div class="sb-item-info">
+        <div class="sb-item-name">Весенняя коллекция</div>
+        <div class="sb-item-meta">Генерация · 62%</div>
+        <div class="sb-steps">
+          <div class="sb-step done"></div>
+          <div class="sb-step done"></div>
+          <div class="sb-step now"></div>
+          <div class="sb-step"></div>
+        </div>
+      </div>
+    </div>
+    <div class="sb-item">
+      <svg viewBox="0 0 24 24"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+      <div class="sb-item-info"><div class="sb-item-name">Тест Banana Pro</div></div>
+    </div>
+    <div class="sb-add"><svg viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>Новый проект</div>
+    <div class="sb-spacer"></div>
+    <div class="sb-section-label">Система</div>
+    <div class="sb-item"><svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>Подключение</div>
+    <div class="sb-footer"><div class="sb-dot"></div><span>Higgsfield · Подключено</span></div>
+  </aside>
+
+  <main class="main">
+    <div class="pipeline-header">
+      <div class="ph-project">
+        <svg viewBox="0 0 24 24"><rect x="2" y="2" width="20" height="20" rx="5"/><path d="M8 12l3 3 5-5"/></svg>
+        <span class="ph-project-name">Весенняя коллекция</span>
+      </div>
+      <div class="ph-steps">
+        <div class="ph-step done"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>Промпты</div>
+        <span class="ph-arrow">›</span>
+        <div class="ph-step done"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>Настройки</div>
+        <span class="ph-arrow">›</span>
+        <div class="ph-step on">
+          <svg viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+          Генерация
+        </div>
+        <span class="ph-arrow">›</span>
+        <div class="ph-step"><svg viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>Отбор</div>
+        <span class="ph-arrow">›</span>
+        <div class="ph-step"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>Результат</div>
+      </div>
+      <div class="ph-spacer"></div>
+      <button class="btn btn-s" style="margin:6px 6px 6px 0">
+        <svg viewBox="0 0 24 24"><rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/></svg>
+        Пауза
+      </button>
+      <button class="btn btn-danger" style="margin:6px 0">
+        <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/></svg>
+        Стоп
+      </button>
+    </div>
+
+    <div class="content">
+      <!-- ── RING PROGRESS ── -->
+      <div class="section">
+        <div class="card">
+          <div class="ring-card">
+            <div class="ring-wrap">
+              <svg class="ring-svg" viewBox="0 0 120 120">
+                <circle class="ring-bg" cx="60" cy="60" r="54"/>
+                <circle class="ring-fill" cx="60" cy="60" r="54" stroke-dasharray="339.29" stroke-dashoffset="84.82"/>
+              </svg>
+              <div class="ring-label">
+                <div class="ring-fraction">3<span>/4</span></div>
+                <div class="ring-pct">75%</div>
+              </div>
+            </div>
+            <div class="ring-info">
+              <div class="ring-current">
+                <div class="spinner"></div>
+                <div class="ring-current-text">Промпт #16 · Вариант 3 из 4</div>
+              </div>
+              <div class="ring-current-prompt">Serene mountain lake reflecting snow-capped peaks at golden hour with mist rising from the water surface</div>
+              <div class="prog-bar-wrap">
+                <div class="prog-bar"><div class="prog-fill" style="width:62%"></div></div>
+                <div class="prog-label">Промпт 15 из 24 · Общий прогресс 62%</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── PROMPT LIST ── -->
+      <div class="section">
+        <div class="sec-label">Промпты</div>
+        <div class="card">
+          <div class="gen-item"><span class="gen-idx">16</span><span class="gen-prompt gen-now">Serene mountain lake reflecting snow-capped peaks...</span><span class="gen-status" style="color:var(--accent)"><div class="spinner" style="width:10px;height:10px;border-width:1.5px"></div>3/4</span></div>
+          <div class="gen-item"><span class="gen-idx">15</span><span class="gen-prompt">Old European cobblestone street with vintage cafes</span><span class="gen-status gen-ok"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></span><span class="gen-imgs">4 img</span></div>
+          <div class="gen-item"><span class="gen-idx">14</span><span class="gen-prompt">Underwater coral reef with tropical fish</span><span class="gen-status gen-ok"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></span><span class="gen-imgs">4 img</span></div>
+          <div class="gen-item"><span class="gen-idx">13</span><span class="gen-prompt">Autumn forest path covered with golden leaves</span><span class="gen-status gen-ok"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></span><span class="gen-imgs">4 img</span></div>
+          <div class="gen-item"><span class="gen-idx">12</span><span class="gen-prompt">Art deco interior with geometric patterns</span><span class="gen-status gen-ok"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></span><span class="gen-imgs">4 img</span></div>
+          <div class="gen-item"><span class="gen-idx">11</span><span class="gen-prompt">Scandinavian living room with hanging plants</span><span class="gen-status gen-ok"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></span><span class="gen-imgs">4 img</span></div>
+          <div class="gen-item" style="background:var(--red-soft)"><span class="gen-idx">7</span><span class="gen-prompt">Mystical cave with bioluminescent crystals</span><span class="gen-status gen-err"><svg viewBox="0 0 24 24"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg></span><span class="gen-imgs">retry</span></div>
+          <div class="sum-bar">
+            <span class="sum-l">Готово:</span><span class="sum-v" style="color:var(--green)">15</span>
+            <span class="sum-l">В очереди:</span><span class="sum-v">9</span>
+            <span class="sum-l">Ошибки:</span><span class="sum-v" style="color:var(--red)">1</span>
+            <div style="flex:1"></div>
+            <span class="sum-v" style="color:var(--accent)">~9 мин. осталось</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+</body>
+</html>

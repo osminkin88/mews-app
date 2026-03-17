@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <title>Mews v4 — Connection</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #1C1C1E;
+      --bg-elevated: #2C2C2E;
+      --bg-float: #3A3A3C;
+      --text-primary: #F5F5F7;
+      --text-secondary: #98989D;
+      --text-tertiary: #636366;
+      --accent: #0A84FF;
+      --accent-soft: rgba(10,132,255,0.12);
+      --green: #30D158;
+      --green-soft: rgba(48,209,88,0.12);
+      --red: #FF453A;
+      --red-soft: rgba(255,69,58,0.12);
+      --orange: #FF9F0A;
+      --orange-soft: rgba(255,159,10,0.12);
+      --border: rgba(255,255,255,0.06);
+      --border-2: rgba(255,255,255,0.1);
+      --font: 'Inter', -apple-system, system-ui, sans-serif;
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; overflow: hidden; }
+    body { font-family: var(--font); font-size: 13px; line-height: 1.5; color: var(--text-primary); background: var(--bg); -webkit-font-smoothing: antialiased; }
+
+    .app { display: grid; grid-template-rows: 38px 1fr 36px; height: 100vh; }
+
+    .topbar { display: flex; align-items: center; padding: 0 16px; background: var(--bg-elevated); border-bottom: 1px solid var(--border); -webkit-app-region: drag; gap: 12px; }
+    .topbar-traffic { display: flex; gap: 8px; }
+    .dot { width: 12px; height: 12px; border-radius: 50%; }
+    .dot-r { background: #FF5F57; } .dot-y { background: #FEBC2E; } .dot-g { background: #28C840; }
+    .topbar-brand { font-size: 14px; font-weight: 800; letter-spacing: -0.3px; margin-left: 12px; background: linear-gradient(135deg, #0A84FF, #5E5CE6); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+    .topbar-spacer { flex: 1; }
+
+    .main { display: flex; align-items: center; justify-content: center; overflow-y: auto; }
+
+    /* ── CONNECTION CARD ── */
+    .conn-card {
+      width: 420px;
+      background: var(--bg-elevated);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      overflow: hidden;
+    }
+
+    .conn-header {
+      padding: 28px 28px 20px;
+      text-align: center;
+    }
+    .conn-icon {
+      width: 56px; height: 56px;
+      margin: 0 auto 16px;
+      border-radius: 14px;
+      display: flex; align-items: center; justify-content: center;
+      background: var(--accent-soft);
+    }
+    .conn-icon svg { width: 28px; height: 28px; stroke: var(--accent); fill: none; stroke-width: 1.6; }
+    .conn-title { font-size: 18px; font-weight: 800; letter-spacing: -0.3px; }
+    .conn-subtitle { font-size: 13px; color: var(--text-tertiary); margin-top: 4px; }
+
+    .conn-body { padding: 0 28px 24px; }
+
+    /* Status indicator */
+    .conn-status {
+      display: flex; align-items: center; gap: 10px;
+      padding: 12px 14px;
+      background: var(--green-soft);
+      border-radius: 10px;
+      margin-bottom: 20px;
+    }
+    .conn-status.offline { background: var(--red-soft); }
+    .cs-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--green); flex-shrink: 0; }
+    .conn-status.offline .cs-dot { background: var(--red); }
+    .cs-text { font-size: 13px; font-weight: 600; color: var(--green); }
+    .conn-status.offline .cs-text { color: var(--red); }
+    .cs-spacer { flex: 1; }
+    .cs-ping { font-size: 11px; color: var(--text-tertiary); }
+
+    /* Config fields */
+    .conn-field { margin-bottom: 14px; }
+    .conn-label {
+      font-size: 10px; font-weight: 700; color: var(--text-tertiary);
+      text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 5px;
+    }
+    .conn-input {
+      width: 100%; padding: 9px 12px;
+      font-family: var(--font); font-size: 13px; font-weight: 500;
+      background: var(--bg); border: 1px solid var(--border);
+      border-radius: 8px; color: var(--text-primary); outline: none;
+    }
+    .conn-input:focus { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(10,132,255,0.15); }
+    .conn-input-row {
+      display: flex; gap: 8px;
+    }
+    .conn-input-row .conn-input:last-child { max-width: 100px; }
+
+    /* Info rows */
+    .conn-info {
+      display: grid; grid-template-columns: 1fr 1fr;
+      gap: 8px; margin-top: 16px;
+    }
+    .ci-item {
+      padding: 10px 12px;
+      background: var(--bg);
+      border-radius: 8px;
+    }
+    .ci-label { font-size: 9px; font-weight: 600; color: var(--text-tertiary); text-transform: uppercase; letter-spacing: 0.3px; }
+    .ci-value { font-size: 13px; font-weight: 700; margin-top: 2px; }
+    .ci-value.ok { color: var(--green); }
+
+    /* Footer */
+    .conn-footer {
+      display: flex; gap: 8px;
+      padding: 14px 28px 24px;
+    }
+    .btn {
+      flex: 1; padding: 10px;
+      border-radius: 8px; border: none;
+      font-family: var(--font); font-size: 13px; font-weight: 600;
+      cursor: pointer; transition: all 0.12s;
+      display: flex; align-items: center; justify-content: center; gap: 6px;
+    }
+    .btn svg { width: 14px; height: 14px; stroke: currentColor; fill: none; stroke-width: 2; }
+    .btn-primary { background: var(--accent); color: white; }
+    .btn-primary:hover { filter: brightness(1.1); }
+    .btn-secondary { background: var(--bg-float); color: var(--text-secondary); }
+    .btn-secondary:hover { color: var(--text-primary); }
+
+    .statusbar { display: flex; align-items: center; padding: 0 16px; background: var(--bg-elevated); border-top: 1px solid var(--border); font-size: 11px; color: var(--text-tertiary); gap: 16px; }
+    .sb-item { display: flex; align-items: center; gap: 4px; }
+    .sb-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); }
+    .sb-spacer { flex: 1; }
+
+    .badge-v4 { position: fixed; top: 8px; right: 60px; background: linear-gradient(135deg, #5E5CE6, #0A84FF); color: white; padding: 3px 12px; border-radius: 12px; font-size: 10px; font-weight: 700; letter-spacing: 0.5px; z-index: 999; }
+  </style>
+</head>
+<body>
+
+<div class="badge-v4">V4 · CONNECTION</div>
+
+<div class="app">
+  <div class="topbar">
+    <div class="topbar-traffic"><div class="dot dot-r"></div><div class="dot dot-y"></div><div class="dot dot-g"></div></div>
+    <div class="topbar-brand">Mews</div>
+    <div class="topbar-spacer"></div>
+  </div>
+
+  <div class="main">
+    <div class="conn-card">
+      <div class="conn-header">
+        <div class="conn-icon">
+          <svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+        </div>
+        <div class="conn-title">Подключение к Higgsfield</div>
+        <div class="conn-subtitle">Сервер генерации изображений</div>
+      </div>
+
+      <div class="conn-body">
+        <!-- Status -->
+        <div class="conn-status">
+          <div class="cs-dot"></div>
+          <span class="cs-text">Подключено</span>
+          <div class="cs-spacer"></div>
+          <span class="cs-ping">45ms</span>
+        </div>
+
+        <!-- Server config -->
+        <div class="conn-field">
+          <div class="conn-label">Адрес сервера</div>
+          <div class="conn-input-row">
+            <input class="conn-input" type="text" value="192.168.1.100">
+            <input class="conn-input" type="text" value="8080">
+          </div>
+        </div>
+
+        <div class="conn-field">
+          <div class="conn-label">API ключ</div>
+          <input class="conn-input" type="password" value="sk-xxxxxxxxxxxxxxxxxxxx">
+        </div>
+
+        <!-- Server info -->
+        <div class="conn-info">
+          <div class="ci-item">
+            <div class="ci-label">Статус</div>
+            <div class="ci-value ok">Online</div>
+          </div>
+          <div class="ci-item">
+            <div class="ci-label">Модели</div>
+            <div class="ci-value">4 доступно</div>
+          </div>
+          <div class="ci-item">
+            <div class="ci-label">GPU</div>
+            <div class="ci-value">RTX 4090</div>
+          </div>
+          <div class="ci-item">
+            <div class="ci-label">Лимит</div>
+            <div class="ci-value ok">∞ Unlimited</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="conn-footer">
+        <button class="btn btn-secondary">
+          <svg viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+          Переподключить
+        </button>
+        <button class="btn btn-primary">
+          <svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
+          Сохранить
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <div class="statusbar">
+    <div class="sb-item"><span class="sb-dot"></span> Higgsfield · Подключено</div>
+    <div class="sb-spacer"></div>
+    <div class="sb-item">v1.4.2</div>
+  </div>
+</div>
+
+</body>
+</html>

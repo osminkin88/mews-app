@@ -42,6 +42,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('projects:get-images', { projectId, promptIndex }),
     saveSelection: (projectId, selections) =>
       ipcRenderer.invoke('projects:save-selection', { projectId, selections }),
+    getProjectPath: (projectId) =>
+      ipcRenderer.invoke('projects:get-project-path', { projectId }),
+    getSelectedImages: (projectId) =>
+      ipcRenderer.invoke('projects:get-selected-images', { projectId }),
   },
 
   // ── Generation ──
@@ -77,5 +81,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // ── App Info ──
   app: {
     info: () => ipcRenderer.invoke('app:info'),
+  },
+
+  // ── Model Capabilities ──
+  models: {
+    getUnlimitedList: () => ipcRenderer.invoke('models:get-unlimited-list'),
+    resolveSettings: (settings) => ipcRenderer.invoke('models:resolve-settings', settings),
   },
 });

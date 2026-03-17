@@ -225,6 +225,17 @@ async function render() {
       }
     }
 
+    // ── New cycle: clear old selection state ──
+    state.selections = {};
+    state.selectionCurrentPrompt = 0;
+    if (project) {
+      api.projects.update(project.id, {
+        selections: {},
+        selectionCurrentPrompt: 0,
+      });
+    }
+
+    state.generationRequested = true;
     navigate('progress');
   });
 }

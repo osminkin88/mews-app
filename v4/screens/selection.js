@@ -13,7 +13,18 @@ async function loadPromptImages(idx) {
   if (!project) return;
   const result = await api.projects.getImages(project.id, idx);
   images = result?.images || [];
-  viewingVariant = selections[idx] !== undefined ? selections[idx] : 0;
+
+  // Clamp: if saved selection points beyond available images, treat as invalid
+  const savedSel = selections[idx];
+  if (savedSel !== undefined && savedSel >= images.length) {
+    delete selections[idx]; // stale selection from previous cycle
+  }
+
+  // viewingVariant: use valid selection or default to 0, clamped to range
+  viewingVariant = selections[idx] !== undefined
+    ? selections[idx]
+    : Math.min(0, images.length - 1);
+  if (viewingVariant < 0) viewingVariant = 0;
 }
 
 // Persist selections to state (cross-screen) and project.json (cross-restart)
@@ -36,14 +47,14 @@ async function selectVariant(variantIdx) {
   persistSelections();
   render(); // Show selection state immediately
 
-  // Auto-advance after brief delay (legacy parity: 500ms to let user see their choice)
+  // Auto-advance after brief delay (800ms to let user clearly see their choice)
   const nextUnfinished = findNextUnfinished(currentIndex);
   if (nextUnfinished !== null) {
     setTimeout(async () => {
       currentIndex = nextUnfinished;
       await loadPromptImages(currentIndex);
       render();
-    }, 500);
+    }, 800);
   }
 }
 
@@ -78,14 +89,9 @@ function render() {
   const imgCount = images.length;
 
   const heroSrc = images[viewingVariant]?.dataUrl || '';
-  const heroBg = heroSrc ? `url(${heroSrc})` : 'linear-gradient(135deg, #1a2a4a, #2a4a3a)';
-
-  // Filmstrip: show exact number of images, cap width for 1-2 image case
-  const filmCols = imgCount;
-  const filmMaxW = imgCount <= 2 ? `max-width:${imgCount * 120}px` : '';
 
   // Keyboard hint based on real image count
-  const keyHint = imgCount > 1 ? `1–${imgCount} выбрать · 0 снять · ←→ навигация` : imgCount === 1 ? 'Нажмите 1 или кликните · 0 снять' : '';
+  const keyHint = imgCount > 1 ? `1–${imgCount} выбрать · 0 снять · ←→ навигация` : imgCount === 1 ? 'Нажмите 1 или кнопку ниже · 0 снять' : '';
 
   // Next/Finish button state
   let nextBtnText, nextBtnAction;
@@ -106,34 +112,89 @@ function render() {
     nextBtnAction = 'next';
   }
 
+  // ── Build hero zone based on image count ──
+  let heroZoneHTML = '';
+
+  if (imgCount === 0) {
+    // ── EMPTY STATE ──
+    heroZoneHTML = `
+      <div class="sel-empty-state">
+        <div class="sel-empty-icon">
+          <svg viewBox="0 0 24 24" width="48" height="48"><rect x="3" y="3" width="18" height="18" rx="2" ry="2" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="8.5" cy="8.5" r="1.5" fill="currentColor"/><polyline points="21 15 16 10 5 21" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
+        </div>
+        <div class="sel-empty-title">Не сгенерировано</div>
+        <div class="sel-empty-hint">Этот промпт ещё не был обработан.<br>Пропустите или вернитесь после генерации.</div>
+      </div>`;
+
+  } else if (imgCount === 1) {
+    // ── SINGLE IMAGE: hero + explicit select button ──
+    heroZoneHTML = `
+      <div class="hero-image" id="hero-img">
+        ${heroSrc ? `<img src="${heroSrc}" class="hero-img-el" draggable="false" />` : ''}
+        <span class="hero-label">Единственный вариант</span>
+        ${selected === 0 ? '<span class="hero-selected-badge">✓ Выбрано</span>' : ''}
+      </div>
+      ${selected === undefined ? `
+        <button id="btn-select-single" class="btn btn-primary sel-select-single-btn">
+          <svg viewBox="0 0 24 24" width="15" height="15" style="fill:none;stroke:currentColor;stroke-width:2.5"><polyline points="20 6 9 17 4 12"/></svg>
+          Выбрать этот вариант
+        </button>
+      ` : ''}`;
+
+  } else if (imgCount === 2) {
+    heroZoneHTML = `
+      <div class="hero-image" id="hero-img">
+        ${heroSrc ? `<img src="${heroSrc}" class="hero-img-el" draggable="false" />` : ''}
+        <span class="hero-label">Вариант ${viewingVariant + 1} из 2</span>
+        ${selected === viewingVariant ? '<span class="hero-selected-badge">✓ Выбрано</span>' : ''}
+      </div>
+      <div class="filmstrip filmstrip-duo">
+        ${images.map((img, i) => {
+          const src = img.dataUrl || '';
+          const isViewing = i === viewingVariant;
+          const isSelected = selected === i;
+          const classes = ['film-thumb'];
+          if (isViewing) classes.push('viewing');
+          if (isSelected) classes.push('selected');
+          return `<div class="${classes.join(' ')}" data-idx="${i}">
+            ${src ? `<img src="${src}" class="film-thumb-img" draggable="false" />` : ''}
+            <span class="film-num">${i + 1}</span>
+            ${isSelected ? '<span class="film-check"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></span>' : ''}
+          </div>`;
+        }).join('')}
+      </div>`;
+
+  } else {
+    // ── GALLERY: hero + compact filmstrip (3-4 images) ──
+    heroZoneHTML = `
+      <div class="hero-image" id="hero-img">
+        ${heroSrc ? `<img src="${heroSrc}" class="hero-img-el" draggable="false" />` : ''}
+        <span class="hero-label">Вариант ${viewingVariant + 1} из ${imgCount}</span>
+        ${selected === viewingVariant ? '<span class="hero-selected-badge">✓ Выбрано</span>' : ''}
+      </div>
+      <div class="filmstrip">
+        ${images.map((img, i) => {
+          const src = img.dataUrl || '';
+          const isViewing = i === viewingVariant;
+          const isSelected = selected === i;
+          const classes = ['film-thumb'];
+          if (isViewing) classes.push('viewing');
+          if (isSelected) classes.push('selected');
+          return `<div class="${classes.join(' ')}" data-idx="${i}">
+            ${src ? `<img src="${src}" class="film-thumb-img" draggable="false" />` : ''}
+            <span class="film-num">${i + 1}</span>
+            ${isSelected ? '<span class="film-check"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></span>' : ''}
+          </div>`;
+        }).join('')}
+      </div>`;
+  }
+
   container.innerHTML = `
     <div style="display:grid;grid-template-columns:1fr 280px;overflow:hidden;flex:1">
       <!-- Hero zone -->
       <div style="display:flex;flex-direction:column;overflow:hidden;padding:16px;gap:12px">
-        <div class="hero-image" id="hero-img" style="background-image:${heroBg}">
-          ${imgCount > 1 ? `<span class="hero-label">Вариант ${viewingVariant + 1} из ${imgCount}</span>` : ''}
-          ${imgCount === 1 ? '<span class="hero-label">Единственный вариант</span>' : ''}
-          ${imgCount === 0 ? '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-tertiary);font-size:14px;font-weight:600">Не сгенерировано</div>' : ''}
-        </div>
-        <!-- Filmstrip -->
-        ${imgCount > 1 ? `
-          <div class="filmstrip" style="grid-template-columns:repeat(${filmCols}, 1fr);${filmMaxW}">
-            ${images.map((img, i) => {
-              const bg = img.dataUrl ? `url(${img.dataUrl})` : '';
-              const isViewing = i === viewingVariant;
-              const isSelected = selected === i;
-              const classes = ['film-thumb'];
-              if (isViewing) classes.push('viewing');
-              if (isSelected) classes.push('selected');
-              return `<div class="${classes.join(' ')}" data-idx="${i}" style="${bg ? `background-image:${bg}` : ''}">
-                <span class="film-num">${i + 1}</span>
-                ${isSelected ? '<span class="film-check"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></span>' : ''}
-              </div>`;
-            }).join('')}
-          </div>
-        ` : ''}
+        ${heroZoneHTML}
       </div>
-      <!-- Decision panel -->
       <div class="decision-panel">
         <div class="decision-header">
           <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
@@ -141,7 +202,7 @@ function render() {
             <small style="font-size:14px;color:var(--text-tertiary)">/ ${totalCount}</small>
           </div>
           <div class="decision-progress"><div class="decision-progress-fill" style="width:${pct}%"></div></div>
-          <div style="display:flex;justify-content:space-between;margin-top:4px;font-size:11px;color:var(--text-tertiary)"><span>${doneCount} отобрано</span><span>${totalCount - doneCount} осталось</span></div>
+          <div style="display:flex;justify-content:space-between;margin-top:4px;font-size:11px;color:var(--text-tertiary)"><span>${doneCount} промпт. отобрано</span><span>${totalCount - doneCount} осталось</span></div>
         </div>
         <div class="decision-prompt">
           <div class="section-label" style="margin-bottom:4px">Промпт #${currentIndex + 1}</div>
@@ -167,7 +228,10 @@ function render() {
         </div>
         <div class="decision-footer">
           ${selected !== undefined
-            ? `<div style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-secondary)"><span style="width:8px;height:8px;border-radius:50%;background:var(--green)"></span>Выбран: Вариант ${selected + 1} <span style="color:var(--text-tertiary);margin-left:4px;cursor:pointer" id="btn-clear-sel" title="Снять выбор">✕</span></div>`
+            ? `<div class="sel-clear-row">
+                <span class="sel-selected-label"><span class="sel-selected-dot"></span>Выбран: Вариант ${selected + 1}</span>
+                <button id="btn-clear-sel" class="sel-clear-btn" title="Снять выбор">✕ Снять</button>
+              </div>`
             : imgCount > 0
               ? `<div style="font-size:12px;color:var(--text-tertiary)">${keyHint}</div>`
               : `<div style="font-size:12px;color:var(--text-tertiary)">Не сгенерировано — пропустите или вернитесь после генерации</div>`
@@ -181,7 +245,7 @@ function render() {
 
   // ── Events ──
 
-  // Filmstrip: click to view, dblclick to toggle select
+  // Filmstrip and duo: click to view, dblclick to toggle select
   container.querySelectorAll('.film-thumb').forEach(el => {
     el.addEventListener('click', () => {
       viewingVariant = parseInt(el.dataset.idx);
@@ -199,6 +263,11 @@ function render() {
 
   // Clear selection button
   container.querySelector('#btn-clear-sel')?.addEventListener('click', clearSelection);
+
+  // Single-image: explicit select button
+  container.querySelector('#btn-select-single')?.addEventListener('click', () => {
+    selectVariant(0);
+  });
 
   // Queue: click to jump
   container.querySelectorAll('.queue-item').forEach(el => {
@@ -233,50 +302,159 @@ function render() {
   // Early finish button
   container.querySelector('#btn-finish')?.addEventListener('click', doFinish);
 
-  // Hero image: zoom overlay on click (when image exists)
-  if (imgCount > 0) {
+  // Hero image: always opens zoom for inspection (all image counts)
+  if (imgCount >= 1) {
     const heroEl = container.querySelector('#hero-img');
-    heroEl?.addEventListener('click', (e) => {
-      // One-image case: first click = auto-select, subsequent = zoom
-      if (imgCount === 1 && selected === undefined) {
-        selectVariant(0);
-        return;
-      }
-      openZoom(heroSrc);
-    });
+    heroEl?.addEventListener('click', () => openZoom(heroSrc));
   }
 }
 
 function openZoom(src) {
   if (!src) return;
+  let scale = 1;
+  let panX = 0, panY = 0;
+  let isDragging = false, dragStartX = 0, dragStartY = 0, startPanX = 0, startPanY = 0;
+
   const overlay = document.createElement('div');
-  overlay.style.cssText = `position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.8);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;cursor:zoom-out;animation:zoomIn 0.2s ease;`;
+  overlay.style.cssText = `position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.85);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);display:flex;align-items:center;justify-content:center;cursor:default;`;
+
+  const imgWrap = document.createElement('div');
+  imgWrap.style.cssText = `position:relative;display:flex;align-items:center;justify-content:center;width:100%;height:100%;overflow:hidden;`;
 
   const img = document.createElement('img');
   img.src = src;
-  img.style.cssText = `max-width:90vw;max-height:85vh;object-fit:contain;border-radius:12px;box-shadow:0 8px 40px rgba(0,0,0,0.5);cursor:pointer;`;
+  img.draggable = false;
+  img.style.cssText = `max-width:90vw;max-height:90vh;object-fit:contain;border-radius:8px;box-shadow:0 8px 40px rgba(0,0,0,0.5);transform-origin:center center;user-select:none;-webkit-user-select:none;will-change:transform;`;
 
-  const hint = document.createElement('div');
-  hint.style.cssText = `font-size:12px;color:rgba(255,255,255,0.6);`;
-  hint.textContent = 'Клик на изображение = выбрать · Клик на фон = закрыть · Esc = закрыть';
+  function applyTransform(smooth) {
+    img.style.transition = smooth ? 'transform 0.2s cubic-bezier(0.25,0.1,0.25,1)' : 'none';
+    // translate in screen-space THEN scale — pan feels natural at any zoom level
+    img.style.transform = `translate(${panX}px, ${panY}px) scale(${scale})`;
+    img.style.cursor = scale > 1 ? (isDragging ? 'grabbing' : 'grab') : 'zoom-in';
+  }
 
-  const close = () => { overlay.style.opacity = '0'; setTimeout(() => overlay.remove(), 200); document.removeEventListener('keydown', escHandler); };
+  function zoomTo(newScale, smooth = true) {
+    scale = Math.max(1, Math.min(newScale, 8));
+    if (scale === 1) { panX = 0; panY = 0; }
+    applyTransform(smooth);
+  }
 
-  // Click on image = select variant (legacy parity: lightbox click = select)
-  img.addEventListener('click', (e) => {
-    e.stopPropagation();
-    selectVariant(viewingVariant);
-    close();
+  function zoomIn() { zoomTo(scale * 1.25); }
+  function zoomOut() { zoomTo(scale / 1.25); }
+  function resetZoom() { zoomTo(1); }
+
+  // ── Toolbar ──
+  const toolbar = document.createElement('div');
+  toolbar.style.cssText = `position:fixed;bottom:24px;left:50%;transform:translateX(-50%);display:flex;gap:4px;background:rgba(30,30,30,0.9);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);padding:4px;border-radius:10px;z-index:10000;border:1px solid rgba(255,255,255,0.1);`;
+
+  const btnStyle = `display:flex;align-items:center;justify-content:center;width:36px;height:36px;border-radius:7px;border:none;background:transparent;color:rgba(255,255,255,0.8);font-size:16px;cursor:pointer;transition:background 0.12s;font-family:var(--font);`;
+
+  const makeBtn = (text, title, fn) => {
+    const b = document.createElement('button');
+    b.style.cssText = btnStyle;
+    b.innerHTML = text;
+    b.title = title;
+    b.addEventListener('click', (e) => { e.stopPropagation(); fn(); });
+    b.addEventListener('mouseenter', () => b.style.background = 'rgba(255,255,255,0.12)');
+    b.addEventListener('mouseleave', () => b.style.background = 'transparent');
+    return b;
+  };
+
+  toolbar.appendChild(makeBtn('＋', 'Увеличить (+)', zoomIn));
+  toolbar.appendChild(makeBtn('−', 'Уменьшить (-)', zoomOut));
+  toolbar.appendChild(makeBtn('1:1', 'Сбросить (0)', resetZoom));
+
+  const selectBtn = makeBtn('✓', 'Выбрать этот вариант', () => { selectVariant(viewingVariant); close(); });
+  selectBtn.style.color = '#30D158';
+  toolbar.appendChild(selectBtn);
+
+  toolbar.appendChild(makeBtn('✕', 'Закрыть (Esc)', () => close()));
+
+  // ── Close ──
+  const close = () => {
+    overlay.style.opacity = '0';
+    overlay.style.transition = 'opacity 0.15s';
+    setTimeout(() => overlay.remove(), 150);
+    document.removeEventListener('keydown', keyHandler);
+    document.removeEventListener('mousemove', onMouseMove);
+    document.removeEventListener('mouseup', onMouseUp);
+  };
+
+  // ── Zoom level indicator ──
+  const zoomLabel = document.createElement('span');
+  zoomLabel.style.cssText = `display:flex;align-items:center;padding:0 8px;font-size:11px;color:rgba(255,255,255,0.5);font-variant-numeric:tabular-nums;min-width:36px;justify-content:center;`;
+  zoomLabel.textContent = '100%';
+  toolbar.insertBefore(zoomLabel, toolbar.children[3]); // before select btn
+
+  function updateZoomLabel() {
+    zoomLabel.textContent = `${Math.round(scale * 100)}%`;
+  }
+
+  // Patch zoomTo to update label
+  const _origZoomTo = zoomTo;
+  zoomTo = function(s, sm) { _origZoomTo(s, sm); updateZoomLabel(); };
+
+  // ── Wheel zoom (trackpad-aware) ──
+  imgWrap.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    // Normalize: mouse wheel gives large deltaY (~100), trackpad gives small (~1-10)
+    const rawDelta = -e.deltaY;
+    const normalized = Math.sign(rawDelta) * Math.min(Math.abs(rawDelta), 100);
+    const factor = Math.pow(1.005, normalized); // ~1.005^100 ≈ 1.64x per full scroll tick
+    zoomTo(scale * factor);
+  }, { passive: false });
+
+  // ── Pan (drag) ──
+  img.addEventListener('mousedown', (e) => {
+    if (scale <= 1) return;
+    e.preventDefault();
+    isDragging = true;
+    dragStartX = e.clientX;
+    dragStartY = e.clientY;
+    startPanX = panX;
+    startPanY = panY;
+    applyTransform(false); // no transition during drag start
   });
 
-  // Click on background = close
-  overlay.addEventListener('click', close);
+  const onMouseMove = (e) => {
+    if (!isDragging) return;
+    panX = startPanX + (e.clientX - dragStartX);
+    panY = startPanY + (e.clientY - dragStartY);
+    applyTransform(false); // no transition during drag
+  };
 
-  const escHandler = (e) => { if (e.key === 'Escape') close(); };
-  document.addEventListener('keydown', escHandler);
+  const onMouseUp = () => {
+    if (!isDragging) return;
+    isDragging = false;
+    applyTransform(false);
+  };
 
-  overlay.appendChild(img);
-  overlay.appendChild(hint);
+  document.addEventListener('mousemove', onMouseMove);
+  document.addEventListener('mouseup', onMouseUp);
+
+  // ── Click image when not zoomed = zoom in ──
+  img.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (!isDragging && scale <= 1) zoomIn();
+  });
+
+  // ── Click background = close ──
+  overlay.addEventListener('click', (e) => {
+    if (e.target === overlay || e.target === imgWrap) close();
+  });
+
+  // ── Keyboard ──
+  const keyHandler = (e) => {
+    if (e.key === 'Escape') close();
+    if (e.key === '+' || e.key === '=') zoomIn();
+    if (e.key === '-') zoomOut();
+    if (e.key === '0') resetZoom();
+  };
+  document.addEventListener('keydown', keyHandler);
+
+  imgWrap.appendChild(img);
+  overlay.appendChild(imgWrap);
+  overlay.appendChild(toolbar);
   document.body.appendChild(overlay);
 }
 

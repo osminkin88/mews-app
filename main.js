@@ -34,9 +34,11 @@ const chrome = require('./chrome-manager');
 const engine = require('./higgsfield-engine');
 const { importFile } = require('./file-importer');
 const config = require('./config-manager');
+const { getUnlimitedModelList, resolveCompatibleSettings } = require('./model-capabilities');
 
 // ── Constants ────────────────────────────────────────────────
 const IS_DEV = !app.isPackaged;
+const USE_V4 = process.argv.includes('--v4');
 const APP_NAME = 'Mews';
 const WINDOW_CONFIG = {
   width: 1440,
@@ -73,7 +75,8 @@ function createWindow() {
     mainWindow.show();
   });
 
-  mainWindow.loadFile('index.html');
+  mainWindow.loadFile(USE_V4 ? path.join('v4', 'index.html') : 'index.html');
+  if (USE_V4) console.log('[main] V4 renderer loaded');
 
   if (IS_DEV) {
     mainWindow.webContents.openDevTools({ mode: 'detach' });
@@ -232,6 +235,17 @@ ipcMain.handle('generate:start', async (event, { prompts, settings, projectId })
     };
   }
 
+  // ── All preflight checks passed — mark project as in_progress ──
+  if (projectId) {
+    const allProjects = loadProjects();
+    const proj = allProjects.find(p => p.id === projectId);
+    if (proj && proj.status !== 'in_progress') {
+      proj.status = 'in_progress';
+      saveProject(proj);
+      console.log(`[main] project.status → in_progress for ${projectId}`);
+    }
+  }
+
   // Process each prompt sequentially
   console.log(`[main] ═══ GENERATE:START received ═══`);
   console.log(`[main] Prompts to process: ${prompts.length}`);
@@ -304,9 +318,10 @@ ipcMain.handle('generate:start', async (event, { prompts, settings, projectId })
 
     // Send progress to renderer
     sendToRenderer('generate:progress', {
-      current: runIndex,
-      total: prompts.length,
-      prompt: prompt.prompt,
+      promptCurrent: runIndex,
+      promptTotal: prompts.length,
+      promptText: prompt.prompt,
+      imagesPerPrompt: targetCount,
       status: 'generating',
       message: `Промпт ${runIndex}/${prompts.length}...`,
     });
@@ -323,25 +338,177 @@ ipcMain.handle('generate:start', async (event, { prompts, settings, projectId })
         imagesCount: targetCount,
         outputDir: promptDir,
         excludeFingerprints: crossPromptExcludeFingerprints,
-        onProgress: (progress) => {
-          sendToRenderer('generate:progress', {
-            current: runIndex,
-            total: prompts.length,
-            prompt: prompt.prompt,
+        onProgress: async (progress) => {
+          const enriched = {
+            // Prompt-level fields (never overwritten by engine)
+            promptCurrent: runIndex,
+            promptTotal: prompts.length,
+            promptText: prompt.prompt,
+            imagesPerPrompt: targetCount,
+            // Engine slot-level fields pass through as-is
             ...progress,
-          });
+          };
+
+          // Enrich 'saved' events with a base64 preview thumbnail (async)
+          if (progress.step === 'saved' && progress.savedSlot) {
+            try {
+              // Small delay to ensure file is fully flushed to disk
+              await new Promise(r => setTimeout(r, 300));
+              let filePath = path.join(promptDir, `gen_${progress.savedSlot}.jpg`);
+              // Fallback: try .webp if .jpg doesn't exist
+              if (!require('fs').existsSync(filePath)) {
+                const altPath = path.join(promptDir, `gen_${progress.savedSlot}.webp`);
+                if (require('fs').existsSync(altPath)) filePath = altPath;
+              }
+              const data = await fs.promises.readFile(filePath);
+              const ext = path.extname(filePath).slice(1) || 'jpeg';
+              enriched.previewDataUrl = `data:image/${ext};base64,${data.toString('base64')}`;
+              enriched.promptIndex = runIndex;
+              enriched.slotIndex = progress.savedSlot;
+            } catch (e) {
+              // File may not exist yet — non-fatal, progress.js will show placeholder
+              console.warn('[main] Preview read error (tile will show placeholder):', e.message);
+              enriched.promptIndex = runIndex;
+              enriched.slotIndex = progress.savedSlot;
+              
+              // Deferred retry: try again after 1.5s to upgrade placeholder with real preview
+              const retrySlot = progress.savedSlot;
+              const retryPromptDir = promptDir;
+              const retryRunIndex = runIndex;
+              setTimeout(async () => {
+                try {
+                  let fp = path.join(retryPromptDir, `gen_${retrySlot}.jpg`);
+                  if (!require('fs').existsSync(fp)) {
+                    const alt = path.join(retryPromptDir, `gen_${retrySlot}.webp`);
+                    if (require('fs').existsSync(alt)) fp = alt;
+                  }
+                  if (require('fs').existsSync(fp)) {
+                    const d = await fs.promises.readFile(fp);
+                    const ext = path.extname(fp).slice(1) || 'jpeg';
+                    sendToRenderer('generate:progress', {
+                      step: 'saved',
+                      promptCurrent: retryRunIndex,
+                      promptTotal: prompts.length,
+                      promptIndex: retryRunIndex,
+                      slotIndex: retrySlot,
+                      savedSlot: retrySlot,
+                      previewDataUrl: `data:image/${ext};base64,${d.toString('base64')}`,
+                      _retryUpgrade: true, // marker so progress.js doesn't duplicate log/progress
+                    });
+                    console.log(`[main] ✅ Deferred preview retry succeeded for slot ${retrySlot}`);
+                  }
+                } catch (_) { /* silent — placeholder stays */ }
+              }, 1500);
+            }
+          }
+
+          sendToRenderer('generate:progress', enriched);
         },
       });
 
-      // ── МЕЖПРОМПТОВЫЙ БАРЬЕР (RC-3, RC-6) ──
+      // ── МЕЖПРОМПТОВЫЙ БАРЬЕР (RC-3, RC-6, RC-DESYNC) ──
       // Ждём стабилизации ленты и фиксируем ТЕКУЩИЕ UUID для защиты следующего промпта
       if (i < prompts.length - 1 && !engine.getShouldStop()) {
         console.log(`[main] ⏳ После промпта ${runIndex}: ждём стабилизации ленты...`);
         const page = require('./chrome-manager').getActivePage();
         if (page) {
-          await engine.waitForFeedStable(page, 45_000);
+          const stabilityResult = await engine.waitForFeedStable(page, 45_000);
+
+          // ── DESYNC DETECTION: verify no late arrivals ──
+          // Wait 5s after stability, then re-snapshot and compare
+          console.log(`[main] 🔍 Десинк-проверка: ждём 5с после стабильности...`);
+          await new Promise(r => setTimeout(r, 5000));
+
+          const postWaitUUIDs = await engine.snapshotFeedFingerprints(page, 10); // same depth as waitForFeedStable
+          const inFlightAfter = await engine.countInFlightItems(page);
+
+          // Check for late-arriving images (UUIDs that appeared during verification window)
+          const stableUUIDs = new Set(stabilityResult.finalUUIDs);
+          const lateUUIDs = postWaitUUIDs.filter(u => !stableUUIDs.has(u));
+
+          if (lateUUIDs.length > 0 || inFlightAfter.total > 0) {
+            const reason = lateUUIDs.length > 0 
+              ? `${lateUUIDs.length} late UUID(s) detected after stability` 
+              : `${inFlightAfter.total} in-flight items still active`;
+            console.warn(`[main] ⚠️ BOUNDARY DESYNC (recoverable): ${reason}`);
+            console.warn(`[main]    lateUUIDs: ${lateUUIDs.join(', ')}`);
+            console.warn(`[main]    inFlight: Q=${inFlightAfter.queued} G=${inFlightAfter.generating}`);
+
+            // ── QUARANTINE: isolate ambiguous results ──
+            const quarantineDir = path.join(baseOutputDir, '..', '_desync_recovery');
+            if (!fs.existsSync(quarantineDir)) fs.mkdirSync(quarantineDir, { recursive: true });
+
+            // Write desync event log for post-mortem analysis
+            const eventFile = path.join(quarantineDir, `desync_prompt_${runIndex}_${Date.now()}.json`);
+            fs.writeFileSync(eventFile, JSON.stringify({
+              timestamp: new Date().toISOString(),
+              promptIndex: runIndex,
+              promptText: prompt.prompt?.substring(0, 100),
+              reason,
+              lateUUIDs,
+              inFlightAfter,
+              stabilityResult: { stable: stabilityResult.stable, uuidCount: stabilityResult.finalUUIDs.length },
+            }, null, 2));
+
+            console.log(`[main] 📦 Десинк-событие записано: ${path.basename(eventFile)}`);
+
+            // ── Mark prompt as partial_desync but preserve saved images ──
+            const dsSavedImages = (result.images || []).filter(r => r.state === 'saved' && r.file);
+            const dsFiles = dsSavedImages.map(r => path.basename(r.file));
+            const dsSlots = (result.images || []).map(img => ({
+              slot: img.index, state: img.state, file: img.file || null,
+              attempts: img.attempts || 1, errorReason: img.errorReason || null, size: img.size || null,
+            }));
+
+            meta.status = 'partial_desync';
+            meta.saved_count = result.savedCount || dsFiles.length;
+            meta.failed_count = result.failedCount || 0;
+            meta.files = dsFiles;
+            meta.slots = dsSlots;
+            meta.error = `Boundary desync: ${reason}. Late results quarantined.`;
+            meta.error_reason = 'boundary_desync';
+            meta.timestamps.completed = new Date().toISOString();
+            saveMeta(promptDir, meta);
+
+            // Notify renderer — recoverable, not fatal
+            sendToRenderer('generate:progress', {
+              step: 'boundary_desync',
+              message: `⚠️ Десинк после промпта ${runIndex}: изолирую, продолжаю batch.`,
+              promptCurrent: runIndex,
+              promptTotal: prompts.length,
+            });
+
+            // ── RESYNC: wait for all in-flight to clear before continuing ──
+            console.log(`[main] 🔄 Ресинк: жду полной очистки in-flight...`);
+            const resyncDeadline = Date.now() + 60_000;
+            while (Date.now() < resyncDeadline) {
+              const inf = await engine.countInFlightItems(page);
+              if (inf.total === 0) {
+                console.log(`[main] ✅ Ресинк: in-flight очистился`);
+                break;
+              }
+              console.log(`[main] ⏳ Ресинк: in-flight=${inf.total} (Q=${inf.queued} G=${inf.generating})`);
+              await new Promise(r => setTimeout(r, 3000));
+            }
+
+            // Fresh boundary snapshot after resync
+            crossPromptExcludeFingerprints = await engine.snapshotFeedFingerprints(page, 20);
+            console.log(`[main] ✅ Ресинк завершён: ${crossPromptExcludeFingerprints.length} UUID зафиксировано для следующего промпта`);
+
+            // Push result with saved data (no break — continue to next prompt)
+            results.push({
+              idx: folderIndex, id: prompt.id, status: 'partial_desync',
+              savedCount: result.savedCount || dsFiles.length,
+              failedCount: result.failedCount || 0,
+              totalSlots: targetCount, slots: dsSlots,
+              errorReason: 'boundary_desync',
+            });
+            continue; // ← KEY: continue loop instead of break
+          }
+
+          // Use wider snapshot (20) for exclude fingerprints — more conservative for next prompt
           crossPromptExcludeFingerprints = await engine.snapshotFeedFingerprints(page, 20);
-          console.log(`[main] ✅ Барьер: зафиксировано ${crossPromptExcludeFingerprints.length} UUID для исключения`);
+          console.log(`[main] ✅ Барьер: зафиксировано ${crossPromptExcludeFingerprints.length} UUID для исключения (стабильно=${stabilityResult.stable})`);
         }
       }
 
@@ -766,6 +933,51 @@ ipcMain.handle('projects:save-selection', (event, { projectId, selections }) => 
   return { success: true, copied };
 });
 
+// ── Get project folder path (for open-folder in results) ──
+ipcMain.handle('projects:get-project-path', (event, { projectId }) => {
+  const projects = loadProjects();
+  const project = projects.find(p => p.id === projectId);
+  if (!project) return { success: false, path: null };
+
+  const projectDir = path.join(config.ensureOutputDir(), project.folderName || projectId);
+  return { success: true, path: projectDir };
+});
+
+// ── Get selected images from selected/ directory ──
+ipcMain.handle('projects:get-selected-images', (event, { projectId }) => {
+  const projects = loadProjects();
+  const project = projects.find(p => p.id === projectId);
+  if (!project) return { success: false, images: [] };
+
+  const projectDir = path.join(config.ensureOutputDir(), project.folderName || projectId);
+  const selectedDir = path.join(projectDir, 'selected');
+
+  if (!fs.existsSync(selectedDir)) return { success: true, images: [] };
+
+  try {
+    const files = fs.readdirSync(selectedDir)
+      .filter(f => /\.(png|jpg|jpeg|webp)$/i.test(f))
+      .sort();
+
+    const images = files.map(f => {
+      const filePath = path.join(selectedDir, f);
+      const data = fs.readFileSync(filePath);
+      const ext = path.extname(f).slice(1).toLowerCase();
+      const mime = ext === 'jpg' ? 'image/jpeg' : `image/${ext}`;
+      return {
+        name: f,
+        path: filePath,
+        dataUrl: `data:${mime};base64,${data.toString('base64')}`,
+      };
+    });
+
+    return { success: true, images };
+  } catch (err) {
+    console.error('[projects] get-selected-images error:', err);
+    return { success: false, images: [] };
+  }
+});
+
 // =============================================================
 //  IPC HANDLERS — File System
 // =============================================================
@@ -824,3 +1036,7 @@ ipcMain.handle('app:info', () => ({
   chromePath: chrome.findChromePath(),
   appData: config.APP_DATA,
 }));
+
+// ── Model Capabilities ──────────────────────────────────────
+ipcMain.handle('models:get-unlimited-list', () => getUnlimitedModelList());
+ipcMain.handle('models:resolve-settings', (event, settings) => resolveCompatibleSettings(settings));

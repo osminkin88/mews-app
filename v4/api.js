@@ -32,6 +32,8 @@ const STUBS = {
     loadPrompts: async () => ({ success: true, prompts: [] }),
     getImages: async () => ({ success: true, images: [] }),
     saveSelection: async () => ({ success: true }),
+    getProjectPath: async () => ({ success: false, path: null }),
+    getSelectedImages: async () => ({ success: true, images: [] }),
   },
   generate: {
     start: async () => ({ success: false }),
@@ -49,6 +51,12 @@ const STUBS = {
     set: async () => ({ success: true }),
     getAll: async () => ({}),
     selectOutputDir: async () => null,
+  },
+  models: {
+    getUnlimitedList: async () => [
+      { id: 'nano_banana_pro', name: 'Nano Banana Pro', qualities: ['1K','2K'], defaultQuality: '2K', aspects: ['1:1','3:4','4:3','9:16','16:9'], defaultAspect: '1:1' },
+    ],
+    resolveSettings: async (s) => ({ effective: s, warnings: [], blocked: false }),
   },
 };
 

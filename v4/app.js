@@ -396,6 +396,19 @@ async function init() {
   // Initial navigation
   navigate(initialScreen);
 
+  // ── Dismiss splash screen ──
+  // Minimum 600ms display so the branded boot feels intentional
+  const splashEl = document.getElementById('splash');
+  if (splashEl) {
+    const elapsed = performance.now();
+    const minDisplay = 600;
+    const delay = Math.max(0, minDisplay - elapsed);
+    setTimeout(() => {
+      splashEl.classList.add('fade-out');
+      setTimeout(() => splashEl.remove(), 500); // remove after CSS transition
+    }, delay);
+  }
+
   // Check connection status via canonical poller
   startConnectionPoller();
 }

@@ -38,7 +38,6 @@ const { getUnlimitedModelList, resolveCompatibleSettings } = require('./model-ca
 
 // ── Constants ────────────────────────────────────────────────
 const IS_DEV = !app.isPackaged;
-const USE_V4 = process.argv.includes('--v4');
 const APP_NAME = 'Mews';
 const WINDOW_CONFIG = {
   width: 1440,
@@ -75,8 +74,8 @@ function createWindow() {
     mainWindow.show();
   });
 
-  mainWindow.loadFile(USE_V4 ? path.join('v4', 'index.html') : 'index.html');
-  if (USE_V4) console.log('[main] V4 renderer loaded');
+  mainWindow.loadFile(path.join('v4', 'index.html'));
+  console.log('[main] V4 renderer loaded');
 
   if (IS_DEV) {
     mainWindow.webContents.openDevTools({ mode: 'detach' });

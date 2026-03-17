@@ -1,28 +1,86 @@
 {
-  "name": "higgsfield-studio",
+  "name": "mews",
+  "productName": "Mews",
   "version": "1.0.0",
-  "description": "Higgsfield Studio — AI Image Generation Desktop App",
+  "description": "Mews — AI Image Generation Desktop App",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
     "dev": "electron . --dev",
-    "v4": "electron . --v4",
-    "v4:dev": "electron . --v4 --dev",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:smoke": "node tests/smoke-persistence.js",
-    "test:all": "npm run test && npm run test:smoke"
+    "test:all": "npm run test && npm run test:smoke",
+    "build": "electron-builder --mac",
+    "build:dir": "electron-builder --mac --dir"
   },
   "keywords": [
-    "higgsfield",
+    "mews",
     "ai",
     "image-generation"
   ],
   "author": "Antigravity",
   "license": "MIT",
   "type": "commonjs",
+  "build": {
+    "appId": "com.antigravity.mews",
+    "productName": "Mews",
+    "copyright": "Copyright © 2026 Antigravity",
+    "mac": {
+      "category": "public.app-category.graphics-design",
+      "icon": "icon.icns",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": ["universal"]
+        },
+        {
+          "target": "zip",
+          "arch": ["universal"]
+        }
+      ],
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.inherit.plist",
+      "notarize": false
+    },
+    "dmg": {
+      "title": "Mews",
+      "iconSize": 80,
+      "background": "build/dmg-background.png",
+      "window": {
+        "width": 660,
+        "height": 400
+      },
+      "contents": [
+        { "x": 180, "y": 200 },
+        { "x": 480, "y": 200, "type": "link", "path": "/Applications" }
+      ]
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "chrome-manager.js",
+      "higgsfield-engine.js",
+      "file-importer.js",
+      "config-manager.js",
+      "model-capabilities.js",
+      "utils.js",
+      "icon.png",
+      "Шаблон_промптов.xlsx",
+      "v4/**/*",
+      "!v4/**/*.map"
+    ],
+    "extraResources": [],
+    "directories": {
+      "output": "dist"
+    },
+    "asar": true
+  },
   "devDependencies": {
     "electron": "^41.0.2",
+    "electron-builder": "^26.8.1",
     "exceljs": "^4.4.0",
     "vitest": "^4.1.0"
   },

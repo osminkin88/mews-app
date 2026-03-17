@@ -3,3 +3,5 @@ node_modules/
 output/
 session.json
 package-lock.json
+dist/
+release/

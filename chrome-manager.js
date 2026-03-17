@@ -142,13 +142,33 @@ async function connectCDP() {
 
     console.log('[chrome-manager] Connected to Chrome via CDP');
 
-    // Find or create Higgsfield tab
+    // Find best Higgsfield tab — priority:
+    // 1. Tab already on /image/ model page (ideal)
+    // 2. Any higgsfield.ai tab (not sign-in/login)
+    // 3. First higgsfield.ai tab (even sign-in)
+    // 4. First tab
     const pages = await browser.pages();
-    activePage = pages.find(p => p.url().includes('higgsfield.ai'));
+    console.log(`[chrome-manager] Found ${pages.length} tabs`);
 
-    if (!activePage && pages.length > 0) {
-      activePage = pages[0];
+    let modelPage = null;
+    let hfPage = null;
+    let anyHfPage = null;
+
+    for (const p of pages) {
+      const url = p.url();
+      console.log(`[chrome-manager]   tab: ${url.substring(0, 80)}`);
+      if (url.includes('higgsfield.ai')) {
+        if (!anyHfPage) anyHfPage = p;
+        if (url.includes('/image/')) {
+          modelPage = p;
+        } else if (!url.includes('sign-in') && !url.includes('login') && !url.includes('/auth')) {
+          if (!hfPage) hfPage = p;
+        }
+      }
     }
+
+    activePage = modelPage || hfPage || anyHfPage || (pages.length > 0 ? pages[0] : null);
+    console.log(`[chrome-manager] Selected tab: ${activePage ? activePage.url().substring(0, 80) : 'NONE'}`);
 
     return { success: true };
   } catch (err) {
@@ -380,11 +400,49 @@ async function navigateToModel(modelId) {
   const currentUrl = activePage.url();
 
   if (currentUrl.includes(`/image/${modelId}`)) {
+    console.log(`[chrome-manager] Already on model page: ${modelId}`);
     return; // Already on the right page
   }
 
+  console.log(`[chrome-manager] Navigating to model: ${url}`);
   await activePage.goto(url, { waitUntil: 'networkidle2', timeout: 30000 });
-  await sleep(2000); // Wait for JS to initialize
+
+  // Verify we landed on the right page (not redirected to sign-in)
+  const landedUrl = activePage.url();
+  console.log(`[chrome-manager] Landed on: ${landedUrl.substring(0, 80)}`);
+
+  if (landedUrl.includes('sign-in') || landedUrl.includes('login') || landedUrl.includes('/auth')) {
+    throw new Error('Higgsfield перенаправил на страницу входа. Войдите в аккаунт в Chrome.');
+  }
+
+  // Wait for prompt field to appear (page fully loaded) — up to 15s
+  const PROMPT_SELECTORS = [
+    'div[id="hf:tour-image-prompt"]',
+    'div[role="textbox"][contenteditable="true"]',
+  ];
+
+  let promptFound = false;
+  for (let i = 0; i < 15; i++) {
+    await sleep(1000);
+    try {
+      promptFound = await Promise.race([
+        activePage.evaluate((sels) => {
+          return sels.some(sel => !!document.querySelector(sel));
+        }, PROMPT_SELECTORS),
+        new Promise(res => setTimeout(() => res(false), 3000)),
+      ]);
+    } catch {
+      promptFound = false;
+    }
+    if (promptFound) break;
+  }
+
+  if (!promptFound) {
+    console.log('[chrome-manager] ⚠️ Prompt field not found after 15s — page may not be ready');
+    throw new Error('Страница модели не загрузилась полностью. Поле промпта не найдено. Попробуйте перезапустить Chrome.');
+  }
+
+  console.log(`[chrome-manager] ✅ Model page ready: ${modelId}`);
 }
 
 // ── Cleanup ───────────────────────────────────────────────────

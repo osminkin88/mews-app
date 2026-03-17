@@ -21,6 +21,17 @@ const SOFT_TIMEOUT = 4 * 60 * 1000;  // 4 minutes — warn, but keep waiting if 
 const HARD_TIMEOUT = 10 * 60 * 1000; // 10 minutes — absolute max, stop unconditionally
 const POLL_INTERVAL = 3000;         // 3s polling
 const DEFAULT_MODEL = 'nano_banana_pro';
+const PREFLIGHT_STEP_TIMEOUT = 15000; // 15s — max time for any single preflight step
+
+// ── Timeout wrapper ──
+function withTimeout(promise, ms, label) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error(`Timeout (${ms/1000}s): ${label}`)), ms)
+    ),
+  ]);
+}
 
 // ── State ─────────────────────────────────────────────────────
 let isGenerating = false;
@@ -1548,7 +1559,7 @@ async function preflightSettingsSync(page, settings, onProgress = () => {}) {
 
   // ── 1. Model verification ──
   onProgress({ step: 'preflight', message: `Проверяю модель ${modelInfo.name}...` });
-  const modelOk = await verifyActiveModel(page, modelInfo);
+  const modelOk = await withTimeout(verifyActiveModel(page, modelInfo), PREFLIGHT_STEP_TIMEOUT, 'verifyActiveModel');
   results.model = { expected: modelInfo.name, actual: modelOk ? modelInfo.name : '???', ok: modelOk };
   if (!modelOk) {
     logPreflightTable(results);
@@ -1556,16 +1567,16 @@ async function preflightSettingsSync(page, settings, onProgress = () => {}) {
   }
 
   // ── 2. Dismiss overlays ──
-  await dismissOverlays(page);
+  await withTimeout(dismissOverlays(page), PREFLIGHT_STEP_TIMEOUT, 'dismissOverlays');
 
   // ── 3. Clear prompt field (prevent ghost gens from toggle clicks) ──
   onProgress({ step: 'preflight', message: 'Очищаю поле промпта...' });
-  await clearPromptField(page);
+  await withTimeout(clearPromptField(page), PREFLIGHT_STEP_TIMEOUT, 'clearPromptField');
 
   // ── 4. Extra Free Gens → OFF ──
   onProgress({ step: 'preflight', message: 'Отключаю Extra free gens...' });
-  const extraOk = await ensureExtraFreeGensOff(page);
-  const extraState = await isExtraFreeGensOn(page);
+  const extraOk = await withTimeout(ensureExtraFreeGensOff(page), PREFLIGHT_STEP_TIMEOUT, 'ensureExtraFreeGensOff');
+  const extraState = await withTimeout(isExtraFreeGensOn(page), PREFLIGHT_STEP_TIMEOUT, 'isExtraFreeGensOn');
   results.extraFreeGens = { expected: 'OFF', actual: extraState ? 'ON' : 'OFF', ok: !extraState };
   if (extraState) {
     logPreflightTable(results);
@@ -1574,8 +1585,8 @@ async function preflightSettingsSync(page, settings, onProgress = () => {}) {
 
   // ── 5. Batch size → 1/4 ──
   onProgress({ step: 'preflight', message: 'Устанавливаю batch 1/4...' });
-  const batchOk = await ensureBatchSize1(page);
-  const batchNow = await getBatchSize(page);
+  const batchOk = await withTimeout(ensureBatchSize1(page), PREFLIGHT_STEP_TIMEOUT, 'ensureBatchSize1');
+  const batchNow = await withTimeout(getBatchSize(page), PREFLIGHT_STEP_TIMEOUT, 'getBatchSize');
   const batchStr = batchNow ? `${batchNow.current}/${batchNow.max}` : '???';
   results.batch = { expected: '1/4', actual: batchStr, ok: batchOk && batchNow && batchNow.current === 1 };
   if (!results.batch.ok) {
@@ -1585,8 +1596,8 @@ async function preflightSettingsSync(page, settings, onProgress = () => {}) {
 
   // ── 6. Unlimited → ON (LAST toggle action) ──
   onProgress({ step: 'preflight', message: 'Включаю Unlimited...' });
-  const unlimitedOk = await ensureUnlimited(page);
-  const unlimitedState = await isUnlimitedOn(page);
+  const unlimitedOk = await withTimeout(ensureUnlimited(page), PREFLIGHT_STEP_TIMEOUT, 'ensureUnlimited');
+  const unlimitedState = await withTimeout(isUnlimitedOn(page), PREFLIGHT_STEP_TIMEOUT, 'isUnlimitedOn');
   results.unlimited = { expected: 'ON', actual: unlimitedState === true ? 'ON' : unlimitedState === false ? 'OFF' : '???', ok: unlimitedState === true };
   if (!results.unlimited.ok) {
     logPreflightTable(results);
@@ -1596,7 +1607,7 @@ async function preflightSettingsSync(page, settings, onProgress = () => {}) {
   // ── 7. Quality / Resolution ──
   onProgress({ step: 'preflight', message: `Устанавливаю качество ${quality || 'auto'}...` });
   if (quality) {
-    await setQuality(page, quality, model);
+    await withTimeout(setQuality(page, quality, model), PREFLIGHT_STEP_TIMEOUT, 'setQuality');
   }
   const qualityVerify = await verifyQuality(page, quality, model);
   results.quality = {

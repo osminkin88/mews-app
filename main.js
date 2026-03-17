@@ -206,13 +206,18 @@ ipcMain.handle('file:download-template', async () => {
 ipcMain.handle('generate:start', async (event, { prompts, settings, projectId }) => {
   const { model, aspect, quality, imagesCount } = settings;
 
-  // Route output to project's generated/ folder if projectId is set
+  // Route output to active prompt set's generated/ folder
   let baseOutputDir = config.ensureOutputDir();
   if (projectId) {
     const projects = loadProjects();
     const project = projects.find(p => p.id === projectId);
     if (project) {
-      baseOutputDir = path.join(config.ensureOutputDir(), project.folderName || projectId, 'generated');
+      const activeSet = getActiveSet(project);
+      if (activeSet) {
+        baseOutputDir = path.join(getSetDir(project, activeSet.id), 'generated');
+      } else {
+        baseOutputDir = path.join(config.ensureOutputDir(), project.folderName || projectId, 'generated');
+      }
       if (!fs.existsSync(baseOutputDir)) fs.mkdirSync(baseOutputDir, { recursive: true });
     }
   }
@@ -666,6 +671,121 @@ ipcMain.handle('chrome:check-installed', () => {
 //  IPC HANDLERS — Projects
 // =============================================================
 
+// ── Prompt Set Helpers ──
+function generateSetId() {
+  return 'set_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+}
+
+/**
+ * Generate a clean, human-readable folder name for a new prompt set.
+ * Pattern: prompt-set-NNN (001, 002, etc.) — unique within the project.
+ */
+function generateSetFolderName(project) {
+  const existing = (project.promptSets || []).map(s => s.folderName || s.id);
+  for (let i = 1; i <= 999; i++) {
+    const candidate = `prompt-set-${String(i).padStart(3, '0')}`;
+    if (!existing.includes(candidate)) return candidate;
+  }
+  // Fallback (should never happen): use id-based name
+  return 'prompt-set-' + Date.now().toString(36);
+}
+
+function getActiveSet(project) {
+  if (!project.promptSets || !project.activePromptSetId) return null;
+  return project.promptSets.find(s => s.id === project.activePromptSetId) || null;
+}
+
+/**
+ * Resolve disk path for a prompt set.
+ * Uses set.folderName if available (new clean naming), falls back to set.id (old ugly naming).
+ */
+function getSetDir(project, setId) {
+  const set = (project.promptSets || []).find(s => s.id === setId);
+  const folder = set?.folderName || setId;
+  return path.join(config.ensureOutputDir(), project.folderName || project.id, 'sets', folder);
+}
+
+/**
+ * Migrate old flat-project to prompt-set model.
+ * Moves generated/ and selected/ into sets/<migratedSetId>/.
+ */
+function migrateProjectToSets(project) {
+  if (project.promptSets && project.promptSets.length > 0) return; // Already migrated
+  if (!project.prompts || project.prompts.length === 0) {
+    // No prompts yet — just initialize empty
+    project.promptSets = [];
+    project.activePromptSetId = null;
+    delete project.prompts;
+    delete project.promptCount;
+    return;
+  }
+
+  const setId = generateSetId();
+  const projectDir = path.join(config.ensureOutputDir(), project.folderName || project.id);
+  const setDir = path.join(projectDir, 'sets', setId);
+
+  // Create set directory
+  fs.mkdirSync(setDir, { recursive: true });
+
+  // Move generated/ → sets/<setId>/generated/
+  const oldGenDir = path.join(projectDir, 'generated');
+  const newGenDir = path.join(setDir, 'generated');
+  if (fs.existsSync(oldGenDir)) {
+    try { fs.renameSync(oldGenDir, newGenDir); } catch (e) {
+      console.warn('[migration] Could not move generated/, copying instead:', e.message);
+      try {
+        fs.cpSync(oldGenDir, newGenDir, { recursive: true });
+        fs.rmSync(oldGenDir, { recursive: true, force: true });
+      } catch (_) {}
+    }
+  }
+
+  // Move selected/ → sets/<setId>/selected/
+  const oldSelDir = path.join(projectDir, 'selected');
+  const newSelDir = path.join(setDir, 'selected');
+  if (fs.existsSync(oldSelDir)) {
+    try { fs.renameSync(oldSelDir, newSelDir); } catch (e) {
+      console.warn('[migration] Could not move selected/, copying instead:', e.message);
+      try {
+        fs.cpSync(oldSelDir, newSelDir, { recursive: true });
+        fs.rmSync(oldSelDir, { recursive: true, force: true });
+      } catch (_) {}
+    }
+  }
+
+  // Move prompts.csv if exists
+  const oldCsv = path.join(projectDir, 'prompts.csv');
+  if (fs.existsSync(oldCsv)) {
+    try { fs.renameSync(oldCsv, path.join(setDir, 'prompts.csv')); } catch (_) {}
+  }
+
+  // Build prompt set from old flat fields
+  const promptSet = {
+    id: setId,
+    name: project.sourceMeta?.originalFileName || 'Набор 1',
+    prompts: project.prompts || [],
+    promptCount: project.promptCount || project.prompts?.length || 0,
+    sourceMeta: project.sourceMeta || null,
+    status: project.status || 'draft',
+    selections: project.selections || {},
+    selectionCurrentPrompt: project.selectionCurrentPrompt || 0,
+    createdAt: project.createdAt || new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+
+  project.promptSets = [promptSet];
+  project.activePromptSetId = setId;
+
+  // Clean old flat fields
+  delete project.prompts;
+  delete project.promptCount;
+  delete project.sourceMeta;
+  delete project.selections;
+  delete project.selectionCurrentPrompt;
+
+  console.log(`[migration] Project "${project.name}" migrated to prompt-set model (setId=${setId})`);
+}
+
 function loadProjects() {
   const outputDir = config.getOutputDir();
   if (!fs.existsSync(outputDir)) return [];
@@ -685,14 +805,16 @@ function loadProjects() {
           fs.writeFileSync(projectJsonPath, JSON.stringify(p, null, 2), 'utf-8');
         }
       }
-      // Backup and remove old file
       fs.renameSync(oldFile, path.join(outputDir, 'projects_backup.json'));
     } catch(err) {
       console.error('[projects] Migration error:', err);
     }
   }
 
-  const folders = fs.readdirSync(outputDir).filter(f => fs.statSync(path.join(outputDir, f)).isDirectory());
+  const folders = fs.readdirSync(outputDir).filter(f => {
+    const fp = path.join(outputDir, f);
+    return fs.statSync(fp).isDirectory();
+  });
   const projects = [];
 
   for (const folder of folders) {
@@ -700,7 +822,14 @@ function loadProjects() {
     if (fs.existsSync(projectFile)) {
       try {
         const projectData = JSON.parse(fs.readFileSync(projectFile, 'utf-8'));
-        projectData.folderName = folder; // enforce folder link
+        projectData.folderName = folder;
+
+        // Auto-migrate old flat projects to prompt-set model
+        if (!projectData.promptSets) {
+          migrateProjectToSets(projectData);
+          saveProject(projectData);
+        }
+
         projects.push(projectData);
       } catch (e) {
         console.error(`[projects] Error reading ${projectFile}:`, e);
@@ -708,7 +837,6 @@ function loadProjects() {
     }
   }
 
-  // Sort by createdAt descending
   return projects.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 }
 
@@ -737,25 +865,17 @@ ipcMain.handle('projects:create', (event, { name, icon }) => {
     icon: icon || '🎬',
     folderName,
     createdAt: new Date().toISOString(),
-    status: 'draft',        // draft | in_progress | completed
+    status: 'draft',
     model: config.get('selectedModel') || 'nano_banana_pro',
-    promptCount: 0,
-    prompts: [], // Array to hold {id, text, status...}
-    sourceMeta: null,
+    promptSets: [],
+    activePromptSetId: null,
   };
   
-  // Create project folder structure and save project.json
   const projectDir = path.join(config.ensureOutputDir(), folderName);
   if (!fs.existsSync(projectDir)) {
     fs.mkdirSync(projectDir, { recursive: true });
   }
   saveProject(project);
-
-  // Create subfolders
-  const generatedDir = path.join(projectDir, 'generated');
-  const selectedDir = path.join(projectDir, 'selected');
-  if (!fs.existsSync(generatedDir)) fs.mkdirSync(generatedDir, { recursive: true });
-  if (!fs.existsSync(selectedDir)) fs.mkdirSync(selectedDir, { recursive: true });
 
   return project;
 });
@@ -810,11 +930,22 @@ ipcMain.handle('projects:update', (event, { id, updates }) => {
   const projects = loadProjects();
   const idx = projects.findIndex(p => p.id === id);
   if (idx === -1) return { success: false, error: 'Project not found' };
+
+  const project = projects[idx];
+  // Route selection keys into active prompt set, not project root
+  const activeSet = getActiveSet(project);
+  if (activeSet && (updates.selections !== undefined || updates.selectionCurrentPrompt !== undefined)) {
+    if (updates.selections !== undefined) activeSet.selections = updates.selections;
+    if (updates.selectionCurrentPrompt !== undefined) activeSet.selectionCurrentPrompt = updates.selectionCurrentPrompt;
+    activeSet.updatedAt = new Date().toISOString();
+    delete updates.selections;
+    delete updates.selectionCurrentPrompt;
+  }
+
+  Object.assign(project, updates);
+  saveProject(project);
   
-  Object.assign(projects[idx], updates);
-  saveProject(projects[idx]);
-  
-  return { success: true, project: projects[idx] };
+  return { success: true, project };
 });
 
 // ── Save prompts to project folder ──
@@ -826,43 +957,127 @@ ipcMain.handle('projects:save-prompts', (event, { projectId, prompts, sourceFile
   const projectDir = path.join(config.ensureOutputDir(), project.folderName || projectId);
   if (!fs.existsSync(projectDir)) fs.mkdirSync(projectDir, { recursive: true });
 
-  // Copy source CSV if available
+  // Create a NEW prompt set (never overwrite existing)
+  const setId = generateSetId();
+  const setFolderName = generateSetFolderName(project);
+  const setDir = path.join(projectDir, 'sets', setFolderName);
+  fs.mkdirSync(path.join(setDir, 'generated'), { recursive: true });
+  fs.mkdirSync(path.join(setDir, 'selected'), { recursive: true });
+
+  let sourceMeta = null;
   if (sourceFile && fs.existsSync(sourceFile)) {
-    fs.copyFileSync(sourceFile, path.join(projectDir, 'prompts.csv'));
-    project.sourceMeta = {
+    fs.copyFileSync(sourceFile, path.join(setDir, 'prompts.csv'));
+    sourceMeta = {
       originalFileName: require('path').basename(sourceFile),
       importedAt: new Date().toISOString()
     };
   }
 
-  // Update project metadata
-  project.prompts = prompts;
-  project.promptCount = prompts.length;
+  const setNumber = (project.promptSets || []).length + 1;
+  const promptSet = {
+    id: setId,
+    folderName: setFolderName,
+    name: sourceMeta?.originalFileName || `Набор ${setNumber}`,
+    prompts,
+    promptCount: prompts.length,
+    sourceMeta,
+    status: 'draft',
+    selections: {},
+    selectionCurrentPrompt: 0,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+
+  if (!project.promptSets) project.promptSets = [];
+  project.promptSets.push(promptSet);
+  project.activePromptSetId = setId;
   saveProject(project);
 
-  return { success: true, count: prompts.length };
+  console.log(`[projects] New prompt set created: "${promptSet.name}" (${setId}), ${prompts.length} prompts`);
+  return { success: true, count: prompts.length, setId };
 });
 
-// ── Load prompts from project ──
+// ── Load prompts from active prompt set ──
 ipcMain.handle('projects:load-prompts', (event, { projectId }) => {
   const projects = loadProjects();
   const project = projects.find(p => p.id === projectId);
-  if (!project) return { success: false, prompts: [] };
+  if (!project) return { success: false, prompts: [], promptSets: [] };
 
-  const projectDir = path.join(config.ensureOutputDir(), project.folderName || projectId);
-  const oldPromptsFile = path.join(projectDir, 'prompts.json');
+  const activeSet = getActiveSet(project);
+  return {
+    success: true,
+    prompts: activeSet?.prompts || [],
+    promptSets: (project.promptSets || []).map(s => ({
+      id: s.id, name: s.name, promptCount: s.promptCount,
+      status: s.status, createdAt: s.createdAt,
+    })),
+    activePromptSetId: project.activePromptSetId,
+    sourceMeta: activeSet?.sourceMeta || null,
+    selections: activeSet?.selections || {},
+    selectionCurrentPrompt: activeSet?.selectionCurrentPrompt || 0,
+  };
+});
 
-  // Migration: If old prompts.json exists and project.json doesn't have prompts yet
-  if ((!project.prompts || project.prompts.length === 0) && fs.existsSync(oldPromptsFile)) {
-    try {
-      project.prompts = JSON.parse(fs.readFileSync(oldPromptsFile, 'utf-8'));
-      project.promptCount = project.prompts.length;
-      saveProject(project);
-      fs.renameSync(oldPromptsFile, path.join(projectDir, 'prompts_backup.json'));
-    } catch {}
+// ── Switch active prompt set ──
+ipcMain.handle('projects:switch-set', (event, { projectId, setId }) => {
+  const projects = loadProjects();
+  const project = projects.find(p => p.id === projectId);
+  if (!project) return { success: false };
+
+  const targetSet = (project.promptSets || []).find(s => s.id === setId);
+  if (!targetSet) return { success: false, error: 'Set not found' };
+
+  project.activePromptSetId = setId;
+  saveProject(project);
+  console.log(`[projects] Switched to prompt set: "${targetSet.name}" (${setId})`);
+  return { success: true };
+});
+
+// ── Delete a prompt set ──
+ipcMain.handle('projects:delete-set', (event, { projectId, setId }) => {
+  const projects = loadProjects();
+  const project = projects.find(p => p.id === projectId);
+  if (!project) return { success: false, error: 'Project not found' };
+
+  const setIdx = (project.promptSets || []).findIndex(s => s.id === setId);
+  if (setIdx === -1) return { success: false, error: 'Set not found' };
+
+  const targetSet = project.promptSets[setIdx];
+
+  // Block deletion of actively generating set
+  if (targetSet.status === 'in_progress') {
+    return { success: false, error: 'Набор сейчас генерируется. Остановите генерацию перед удалением.' };
   }
 
-  return { success: true, prompts: project.prompts || [] };
+  // Remove set folder from disk
+  const setDir = getSetDir(project, setId);
+  if (fs.existsSync(setDir)) {
+    try {
+      fs.rmSync(setDir, { recursive: true, force: true });
+      console.log(`[projects] Deleted set folder: ${setDir}`);
+    } catch (e) {
+      console.error('[projects] Failed to delete set folder:', e.message);
+    }
+  }
+
+  // Remove from metadata
+  project.promptSets.splice(setIdx, 1);
+
+  // Handle active set switching
+  if (project.activePromptSetId === setId) {
+    if (project.promptSets.length > 0) {
+      // Switch to last remaining set
+      project.activePromptSetId = project.promptSets[project.promptSets.length - 1].id;
+    } else {
+      // No sets left — project returns to empty state
+      project.activePromptSetId = null;
+      project.status = 'draft';
+    }
+  }
+
+  saveProject(project);
+  console.log(`[projects] Deleted prompt set: "${targetSet.name}" (${setId})`);
+  return { success: true, remainingSets: project.promptSets.length };
 });
 
 // ── Get generated images for a prompt ──
@@ -871,8 +1086,14 @@ ipcMain.handle('projects:get-images', (event, { projectId, promptIndex }) => {
   const project = projects.find(p => p.id === projectId);
   if (!project) return { success: false, images: [] };
 
-  const projectDir = path.join(config.ensureOutputDir(), project.folderName || projectId);
-  const promptDir = path.join(projectDir, 'generated', String(promptIndex + 1).padStart(3, '0'));
+  const activeSet = getActiveSet(project);
+  let promptDir;
+  if (activeSet) {
+    promptDir = path.join(getSetDir(project, activeSet.id), 'generated', String(promptIndex + 1).padStart(3, '0'));
+  } else {
+    const projectDir = path.join(config.ensureOutputDir(), project.folderName || projectId);
+    promptDir = path.join(projectDir, 'generated', String(promptIndex + 1).padStart(3, '0'));
+  }
 
   if (!fs.existsSync(promptDir)) return { success: true, images: [] };
 
@@ -900,20 +1121,32 @@ ipcMain.handle('projects:get-images', (event, { projectId, promptIndex }) => {
   }
 });
 
-// ── Save selection ──
+// ── Save selection (scoped to active set) ──
 ipcMain.handle('projects:save-selection', (event, { projectId, selections }) => {
   const projects = loadProjects();
   const project = projects.find(p => p.id === projectId);
   if (!project) return { success: false };
 
-  const projectDir = path.join(config.ensureOutputDir(), project.folderName || projectId);
-  const selectedDir = path.join(projectDir, 'selected');
+  const activeSet = getActiveSet(project);
+  let generatedBase, selectedDir;
+  if (activeSet) {
+    const sd = getSetDir(project, activeSet.id);
+    generatedBase = path.join(sd, 'generated');
+    selectedDir = path.join(sd, 'selected');
+    // Persist selections in set
+    activeSet.selections = selections;
+    activeSet.status = 'completed';
+    activeSet.updatedAt = new Date().toISOString();
+  } else {
+    const projectDir = path.join(config.ensureOutputDir(), project.folderName || projectId);
+    generatedBase = path.join(projectDir, 'generated');
+    selectedDir = path.join(projectDir, 'selected');
+  }
   if (!fs.existsSync(selectedDir)) fs.mkdirSync(selectedDir, { recursive: true });
 
-  // selections = { promptIndex: imageIndex, ... }
   let copied = 0;
   for (const [promptIdx, imageIdx] of Object.entries(selections)) {
-    const promptDir = path.join(projectDir, 'generated', String(Number(promptIdx) + 1).padStart(3, '0'));
+    const promptDir = path.join(generatedBase, String(Number(promptIdx) + 1).padStart(3, '0'));
     if (!fs.existsSync(promptDir)) continue;
 
     const files = fs.readdirSync(promptDir).filter(f => /\.(png|jpg|jpeg|webp)$/i.test(f)).sort();
@@ -926,31 +1159,39 @@ ipcMain.handle('projects:save-selection', (event, { projectId, selections }) => 
     copied++;
   }
 
-  // Update project status
   project.status = 'completed';
   saveProject(project);
 
   return { success: true, copied };
 });
 
-// ── Get project folder path (for open-folder in results) ──
+// ── Get project path (scoped to active set) ──
 ipcMain.handle('projects:get-project-path', (event, { projectId }) => {
   const projects = loadProjects();
   const project = projects.find(p => p.id === projectId);
   if (!project) return { success: false, path: null };
 
+  const activeSet = getActiveSet(project);
+  if (activeSet) {
+    return { success: true, path: getSetDir(project, activeSet.id) };
+  }
   const projectDir = path.join(config.ensureOutputDir(), project.folderName || projectId);
   return { success: true, path: projectDir };
 });
 
-// ── Get selected images from selected/ directory ──
+// ── Get selected images (scoped to active set) ──
 ipcMain.handle('projects:get-selected-images', (event, { projectId }) => {
   const projects = loadProjects();
   const project = projects.find(p => p.id === projectId);
   if (!project) return { success: false, images: [] };
 
-  const projectDir = path.join(config.ensureOutputDir(), project.folderName || projectId);
-  const selectedDir = path.join(projectDir, 'selected');
+  const activeSet = getActiveSet(project);
+  let selectedDir;
+  if (activeSet) {
+    selectedDir = path.join(getSetDir(project, activeSet.id), 'selected');
+  } else {
+    selectedDir = path.join(config.ensureOutputDir(), project.folderName || projectId, 'selected');
+  }
 
   if (!fs.existsSync(selectedDir)) return { success: true, images: [] };
 

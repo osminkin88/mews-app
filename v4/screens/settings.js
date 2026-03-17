@@ -6,8 +6,12 @@ let container = null;
 async function render() {
   const project = state.currentProject;
   const cfg = await api.config.getAll() || {};
-  const prompts = project ? (await api.projects.loadPrompts(project.id))?.prompts || [] : [];
-  const promptCount = prompts.length || project?.promptCount || 0;
+  const loadResult = project ? (await api.projects.loadPrompts(project.id)) : {};
+  const prompts = loadResult?.prompts || [];
+  const promptSets = loadResult?.promptSets || [];
+  const activeSetId = loadResult?.activePromptSetId || null;
+  const sourceMeta = loadResult?.sourceMeta || null;
+  const promptCount = prompts.length;
 
   // ── Fetch model capabilities from single source of truth ──
   const models = await api.models.getUnlimitedList() || [];
@@ -30,6 +34,22 @@ async function render() {
 
   const totalImages = promptCount * imagesCount;
 
+  // Build set-switcher chips HTML (only if >1 set)
+  const setChipsHTML = promptSets.length > 1 ? `
+    <div class="set-switcher">
+      <div class="field-label" style="margin-bottom:6px">Наборы промптов</div>
+      <div class="set-chips">
+        ${promptSets.map(s => `
+          <div class="set-chip ${s.id === activeSetId ? 'active' : ''}" data-set-id="${s.id}">
+            <span class="set-chip-name">${s.name}</span>
+            <span class="set-chip-count">${s.promptCount}</span>
+            <button class="set-chip-del" data-del-id="${s.id}" data-del-name="${s.name}" data-del-count="${s.promptCount}" title="Удалить набор">&times;</button>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+  ` : '';
+
   container.innerHTML = `
     <div style="overflow-y:auto;padding:16px 24px 40px;flex:1">
       <div class="settings-card">
@@ -47,11 +67,12 @@ async function render() {
                   <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
                 </div>
                 <div class="source-info">
-                  <div class="source-name">${project?.sourceMeta?.originalFileName || 'prompts.csv'}</div>
+                  <div class="source-name">${sourceMeta?.originalFileName || 'prompts.csv'}</div>
                   <div class="source-meta">${promptCount} промптов</div>
                 </div>
-                <button id="btn-replace-file" class="source-replace">Заменить</button>
+                <button id="btn-replace-file" class="source-replace">Добавить новый</button>
               </div>
+              ${setChipsHTML}
             ` : `
               <div id="drop-zone" class="drop-zone">
                 <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
@@ -139,16 +160,86 @@ async function render() {
     const filePath = await api.file.select();
     if (!filePath) return;
     const result = await api.file.import(filePath);
-    // file-importer.js returns { success, rows, count } — use .rows
     const importedPrompts = result.rows || result.prompts;
     if (result.success && importedPrompts && project) {
       await api.projects.savePrompts(project.id, importedPrompts, filePath);
-      state.currentProject = { ...project, promptCount: importedPrompts.length, sourceMeta: { originalFileName: filePath.split('/').pop() } };
+      // Reload project to get updated promptSets
+      const projects = await api.projects.list();
+      const updatedProject = projects.find(p => p.id === project.id);
+      if (updatedProject) state.currentProject = updatedProject;
       render();
     }
   };
   dropZone?.addEventListener('click', importFile);
   replaceBtn?.addEventListener('click', importFile);
+
+  // Set-switcher chip clicks (switch set)
+  container.querySelectorAll('.set-chip').forEach(chip => {
+    chip.addEventListener('click', async (e) => {
+      if (e.target.closest('.set-chip-del')) return; // handled separately
+      const setId = chip.dataset.setId;
+      if (setId === activeSetId) return;
+      await api.projects.switchSet(project.id, setId);
+      state.selections = {};
+      state.selectionCurrentPrompt = 0;
+      const projects = await api.projects.list();
+      const updatedProject = projects.find(p => p.id === project.id);
+      if (updatedProject) state.currentProject = updatedProject;
+      render();
+    });
+  });
+
+  // Set-chip delete buttons
+  container.querySelectorAll('.set-chip-del').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const delId = btn.dataset.delId;
+      const delName = btn.dataset.delName;
+      const delCount = btn.dataset.delCount;
+
+      // Confirmation modal
+      const overlay = document.createElement('div');
+      overlay.className = 'modal-overlay';
+      overlay.innerHTML = `
+        <div class="modal-card" style="width:360px">
+          <div class="modal-header">Удалить набор?</div>
+          <div class="modal-body">
+            <div style="font-size:13px;margin-bottom:8px">
+              <strong>${delName}</strong> &mdash; ${delCount} промптов
+            </div>
+            <div style="font-size:12px;color:var(--text-tertiary);line-height:1.5">
+              Все сгенерированные и отобранные файлы этого набора будут удалены.
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button id="del-cancel" class="btn btn-secondary">Отмена</button>
+            <button id="del-confirm" class="btn" style="background:var(--red);color:#fff">Удалить</button>
+          </div>
+        </div>
+      `;
+      container.appendChild(overlay);
+
+      overlay.querySelector('#del-cancel').addEventListener('click', () => overlay.remove());
+      overlay.addEventListener('click', (ev) => { if (ev.target === overlay) overlay.remove(); });
+
+      overlay.querySelector('#del-confirm').addEventListener('click', async () => {
+        overlay.remove();
+        const result = await api.projects.deleteSet(project.id, delId);
+        if (!result.success) {
+          showToast(result.error || 'Не удалось удалить');
+          return;
+        }
+        // Reset selection state
+        state.selections = {};
+        state.selectionCurrentPrompt = 0;
+        // Reload project
+        const projects = await api.projects.list();
+        const updatedProject = projects.find(p => p.id === project.id);
+        if (updatedProject) state.currentProject = updatedProject;
+        render();
+      });
+    });
+  });
 
   // Model change → re-render to update quality/aspect options
   container.querySelector('#sel-model')?.addEventListener('change', async (e) => {
@@ -229,9 +320,11 @@ async function render() {
     state.selections = {};
     state.selectionCurrentPrompt = 0;
     if (project) {
+      // Reset active set selections and mark as in_progress
       api.projects.update(project.id, {
         selections: {},
         selectionCurrentPrompt: 0,
+        status: 'in_progress',
       });
     }
 

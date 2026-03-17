@@ -513,10 +513,16 @@ export default {
       prompts = result?.prompts || [];
     }
 
-    // Restore selections from state (cross-screen) or project (cross-restart)
+    // Restore selections from state (cross-screen) or active set (cross-restart)
     if (Object.keys(state.selections).length > 0) {
       selections = { ...state.selections };
       currentIndex = state.selectionCurrentPrompt || 0;
+    } else if (result?.selections && Object.keys(result.selections).length > 0) {
+      // Restore from active set persisted in project.json
+      selections = { ...result.selections };
+      currentIndex = result.selectionCurrentPrompt || 0;
+      state.selections = { ...selections };
+      state.selectionCurrentPrompt = currentIndex;
     } else {
       selections = {};
       currentIndex = 0;

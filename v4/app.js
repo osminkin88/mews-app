@@ -273,11 +273,14 @@ async function init() {
       const lastProject = projectsList.find(p => p.id === lastProjectId);
       if (lastProject) {
         state.currentProject = lastProject;
-        // Restore selections from project.json
-        if (lastProject.selections) {
-          state.selections = lastProject.selections;
-          state.selectionCurrentPrompt = lastProject.selectionCurrentPrompt || 0;
-        }
+        // Restore selections from active prompt set (not project root)
+        try {
+          const loadResult = await api.projects.loadPrompts(lastProject.id);
+          if (loadResult?.selections && Object.keys(loadResult.selections).length > 0) {
+            state.selections = loadResult.selections;
+            state.selectionCurrentPrompt = loadResult.selectionCurrentPrompt || 0;
+          }
+        } catch (_) {}
         // Navigate to last screen if it makes sense
         const lastScreen = cfg.lastScreen;
         if (lastScreen && SCREENS.includes(lastScreen) && lastScreen !== 'connection' && lastScreen !== 'progress') {

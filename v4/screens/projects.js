@@ -26,7 +26,9 @@ function getIconSvg(emoji) {
 function getProjectStep(p) {
   if (p.status === 'completed') return 5;
   if (p.status === 'in_progress') return 3;
-  if (p.promptCount > 0) return 1;
+  const activeSet = (p.promptSets || []).find(s => s.id === p.activePromptSetId);
+  const pc = activeSet?.promptCount || p.promptCount || 0;
+  if (pc > 0) return 1;
   return 0;
 }
 
@@ -107,12 +109,17 @@ function renderProjectCard(p) {
   const step = getProjectStep(p);
   const date = p.createdAt ? new Date(p.createdAt).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' }) : '';
 
+  const activeSet = (p.promptSets || []).find(s => s.id === p.activePromptSetId);
+  const pc = activeSet?.promptCount || p.promptCount || 0;
+  const setsCount = (p.promptSets || []).length;
+  const setsInfo = setsCount > 1 ? ` · ${setsCount} наборов` : '';
+
   return `
     <div class="project-card" data-id="${p.id}">
       <div class="pc-icon">${getIconSvg(p.icon)}</div>
       <div class="pc-info">
         <div class="pc-title" data-id="${p.id}">${p.name}</div>
-        <div class="pc-sub">${p.promptCount || 0} промптов</div>
+        <div class="pc-sub">${pc} промптов${setsInfo}</div>
         <div class="pc-pipeline">${renderPipeline(step)}</div>
       </div>
       <div class="pc-right">
@@ -342,7 +349,7 @@ async function handleAction(action, projectId) {
 
     case 'duplicate': {
       const newProject = await api.projects.create(project.name + ' (копия)', project.icon || '🎬');
-      if (newProject && newProject.id && project.promptCount > 0) {
+      if (newProject && newProject.id) {
         const result = await api.projects.loadPrompts(project.id);
         if (result?.prompts?.length > 0) {
           await api.projects.savePrompts(newProject.id, result.prompts);

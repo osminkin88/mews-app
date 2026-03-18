@@ -276,46 +276,121 @@ async function checkAuth() {
   }
 
   try {
-    const url = activePage.url();
-    const isSignIn = url.includes('sign-in') || url.includes('login');
-    console.log(`[chrome-manager] checkAuth: url=${url.substring(0, 80)}, isSignIn=${isSignIn}`);
+    let url;
+    try {
+      url = activePage.url();
+    } catch {
+      return { connected: true, authenticated: false, error: 'Страница недоступна' };
+    }
 
-    if (isSignIn) return { connected: true, authenticated: false, url };
-    if (!url.includes('higgsfield.ai')) {
-      console.log('[chrome-manager] checkAuth: not on higgsfield.ai');
+    console.log(`[chrome-manager] checkAuth: url=${url.substring(0, 80)}`);
+
+    // Immediate reject: sign-in / login page
+    if (url.includes('sign-in') || url.includes('login') || url.includes('/auth/')) {
       return { connected: true, authenticated: false, url };
+    }
+
+    // If not on higgsfield.ai at all — not authenticated
+    if (!url.includes('higgsfield.ai') && !url.includes('higgsfield.com')) {
+      console.log('[chrome-manager] checkAuth: not on higgsfield — trying to find a better tab');
+      // Try to find a higgsfield tab among all pages
+      try {
+        const pages = await browser.pages();
+        const hfPage = pages.find(p => {
+          const u = p.url();
+          return u.includes('higgsfield') && !u.includes('sign-in') && !u.includes('login');
+        });
+        if (hfPage && hfPage !== activePage) {
+          activePage = hfPage;
+          url = activePage.url();
+          console.log(`[chrome-manager] checkAuth: switched to better tab: ${url.substring(0, 80)}`);
+        } else {
+          return { connected: true, authenticated: false, url };
+        }
+      } catch {
+        return { connected: true, authenticated: false, url };
+      }
     }
 
     let authenticated = false;
 
-    // ── Level 1: DOM + localStorage ──
+    // ── Level 0: STRONGEST — on model page with prompt field visible ──
+    // If the user is on /image/ and the prompt field exists, they ARE logged in.
+    // An unauthenticated user would be redirected to sign-in.
+    if (url.includes('/image/')) {
+      try {
+        const hasPromptField = await Promise.race([
+          activePage.evaluate(() => {
+            const selectors = [
+              'div[id="hf:tour-image-prompt"]',
+              'div[role="textbox"][contenteditable="true"]',
+              'div[contenteditable="true"]',
+            ];
+            return selectors.some(sel => {
+              const el = document.querySelector(sel);
+              return el && el.offsetParent !== null;
+            });
+          }),
+          new Promise(res => setTimeout(() => res(false), 5000)),
+        ]);
+
+        if (hasPromptField) {
+          console.log('[chrome-manager] checkAuth: ✅ Level 0 — on model page with prompt field');
+          return { connected: true, authenticated: true, url };
+        }
+      } catch (e) {
+        console.log('[chrome-manager] checkAuth Level 0 error:', e.message);
+      }
+    }
+
+    // ── Level 1: DOM signals ──
     try {
       const evalPromise = activePage.evaluate(() => {
-        const r = { hasToken: false, avatar: null, menuCount: 0, lsKeys: 0, lsPreview: '', signInVisible: false };
+        const r = {
+          hasToken: false,
+          hasAvatar: false,
+          hasGenerateBtn: false,
+          lsKeys: 0,
+          signInVisible: false,
+        };
 
-        // JWT / session token in localStorage
+        // JWT / session in localStorage
         for (let i = 0; i < window.localStorage.length; i++) {
           const key = window.localStorage.key(i);
           const val = window.localStorage.getItem(key) || '';
-          if (val.length > 30 && (val.startsWith('ey') || val.includes('"token"') || val.includes('"user"') || val.includes('"id"'))) {
-            r.hasToken = true; break;
+          if (val.length > 30 && (val.startsWith('ey') || val.includes('"token"') || val.includes('"user"') || val.includes('"id"') || val.includes('"email"'))) {
+            r.hasToken = true;
+            break;
           }
         }
         r.lsKeys = window.localStorage.length;
-        r.lsPreview = Object.keys(window.localStorage).slice(0, 8).join(',');
 
-        // Avatar with user-related alt
-        for (const img of document.querySelectorAll('img')) {
+        // Avatar — any user profile image (broader selectors)
+        const imgs = document.querySelectorAll('img');
+        for (const img of imgs) {
+          const src = (img.src || '').toLowerCase();
           const alt = (img.alt || '').toLowerCase();
-          if (alt.includes('avatar') || alt.includes('user') || alt.includes('profile')) {
-            r.avatar = img.src.substring(0, 60); break;
+          // Common patterns for user avatars
+          if (alt.includes('avatar') || alt.includes('user') || alt.includes('profile') ||
+              src.includes('avatar') || src.includes('profile') || src.includes('user') ||
+              src.includes('googleusercontent') || src.includes('lh3.google')) {
+            r.hasAvatar = true;
+            break;
           }
         }
-        // Menus / profile-related elements
-        r.menuCount = document.querySelectorAll('[class*="user"],[class*="User"],[class*="account"],[class*="Account"],[class*="profile"],[class*="Profile"]').length;
+
+        // Generate button visible — strong signal of logged-in state
+        const buttons = document.querySelectorAll('button');
+        for (const btn of buttons) {
+          const text = (btn.textContent || '').trim().toLowerCase();
+          if ((text.includes('generate') || text.includes('create')) && btn.offsetParent !== null) {
+            r.hasGenerateBtn = true;
+            break;
+          }
+        }
 
         // Sign-in link visible
-        const sl = document.querySelector('a[href*="sign-in"], a[href*="login"]');
+        const sl = document.querySelector('a[href*="sign-in"], a[href*="login"], button[class*="sign"]');
         r.signInVisible = !!(sl && sl.offsetParent !== null);
 
         return r;
@@ -326,8 +401,11 @@ async function checkAuth() {
 
       if (ev) {
         console.log('[chrome-manager] checkAuth DOM:', JSON.stringify(ev));
-        if (ev.signInVisible) return { connected: true, authenticated: false, url };
-        if (ev.hasToken || ev.avatar || (ev.lsKeys > 3 && ev.menuCount > 0)) {
+        if (ev.signInVisible && !ev.hasGenerateBtn) {
+          return { connected: true, authenticated: false, url };
+        }
+        // Any strong signal → authenticated
+        if (ev.hasToken || ev.hasAvatar || ev.hasGenerateBtn || ev.lsKeys > 5) {
           authenticated = true;
         }
       } else {

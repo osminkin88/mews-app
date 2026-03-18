@@ -84,20 +84,20 @@ function renderFromState() {
       </div>
     `;
   } else if (isNoAuth) {
-    // CDP connected, but NOT signed in to Higgsfield
+    // CDP connected, but NOT signed in to Higgsfield (or auth not detected)
     actionsHTML = `
-      <button id="btn-save-session" class="btn btn-secondary" style="flex:1">
-        <svg viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
-        ${hasSession ? 'Обновить сессию' : 'Сохранить сессию'}
+      <button id="btn-recheck-auth" class="btn btn-primary" style="flex:1">
+        <svg viewBox="0 0 24 24"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+        Проверить снова
       </button>
-      <button id="btn-go-projects" class="btn btn-primary" style="flex:1">
+      <button id="btn-go-projects" class="btn btn-secondary" style="flex:1">
         К проектам →
       </button>
     `;
     stepsHTML = `
       <div class="conn-steps">
         <div class="conn-step done"><span class="conn-step-num">✓</span><span>Chrome подключён</span></div>
-        <div class="conn-step active"><span class="conn-step-num">2</span><span>Войдите в аккаунт Higgsfield</span></div>
+        <div class="conn-step active"><span class="conn-step-num">2</span><span>Войдите в аккаунт на higgsfield.ai в Chrome, затем нажмите «Проверить снова»</span></div>
         <div class="conn-step"><span class="conn-step-num">3</span><span>Перейдите к проектам</span></div>
       </div>
     `;
@@ -169,6 +169,15 @@ function renderFromState() {
     if (btn) { btn.disabled = true; btn.textContent = 'Сохраняю…'; }
     await api.chrome.saveSession();
     await refreshConnectionNow();
+  });
+
+  container.querySelector('#btn-recheck-auth')?.addEventListener('click', async () => {
+    const btn = container.querySelector('#btn-recheck-auth');
+    if (btn) { btn.disabled = true; btn.textContent = 'Проверяю…'; }
+    // Reconnect CDP to refresh active tab selection
+    await api.chrome.connect();
+    await refreshConnectionNow();
+    if (btn) { btn.disabled = false; btn.textContent = 'Проверить снова'; }
   });
 
   container.querySelector('#btn-go-projects')?.addEventListener('click', () => navigate('projects'));

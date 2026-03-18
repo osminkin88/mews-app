@@ -277,16 +277,19 @@ ipcMain.handle('generate:start', async (event, { prompts, settings, projectId })
   }
 
   // ── Auth preflight: verify actual Higgsfield sign-in ──
+  // Soft check — let navigateToModel catch real auth failures with clear errors
   try {
     const auth = await chrome.checkAuth();
     if (!auth.authenticated) {
-      const hint = auth.url && (auth.url.includes('sign-in') || auth.url.includes('login'))
-        ? 'Откройте Chrome и войдите в аккаунт Higgsfield.'
-        : 'Перейдите на higgsfield.ai в Chrome и войдите в аккаунт.';
-      return {
-        success: false,
-        error: `Вы не вошли в Higgsfield. ${hint}`,
-      };
+      // Only hard-block if we're definitely on a sign-in page
+      if (auth.url && (auth.url.includes('sign-in') || auth.url.includes('login') || auth.url.includes('/auth/'))) {
+        return {
+          success: false,
+          error: 'Вы не вошли в Higgsfield. Откройте Chrome и войдите в аккаунт.',
+        };
+      }
+      // Otherwise just warn — model page navigation will be the real test
+      console.warn('[main] Auth preflight: not authenticated, but proceeding — model navigation will verify');
     }
   } catch (authErr) {
     console.warn('[main] Auth preflight failed:', authErr.message);

@@ -43,6 +43,10 @@ let chromeProcess = null;
 let browser = null;
 let activePage = null;
 
+// Session auto-save throttle: save at most once every 5 minutes
+const SESSION_SAVE_THROTTLE_MS = 5 * 60 * 1000;
+let _lastSessionSaveTime = 0;
+
 // ── Chrome Path Detection ─────────────────────────────────────
 function findChromePath() {
   for (const p of CHROME_PATHS) {
@@ -94,12 +98,16 @@ async function launchChrome() {
   // Ensure profile directory exists
   const profileDir = getProfileDir();
 
+  // Check if the isolated profile already has a session (has Cookies file with content)
+  // If yes — reuse it. If empty — Chrome will just open a blank tab and user logs in once.
+  // NOTE: we do NOT force SIGNIN_URL here — that was causing the "always opens new login" bug.
   const args = [
     `--remote-debugging-port=${CDP_PORT}`,
     `--user-data-dir=${profileDir}`,
     '--no-first-run',
     '--no-default-browser-check',
-    SIGNIN_URL,
+    // No URL arg: Chrome will restore the previous session (tabs & cookies)
+    // from the profile dir, so if user was already logged in, they stay logged in.
   ];
 
   try {
@@ -146,7 +154,7 @@ async function connectCDP() {
     // 1. Tab already on /image/ model page (ideal)
     // 2. Any higgsfield.ai tab (not sign-in/login)
     // 3. First higgsfield.ai tab (even sign-in)
-    // 4. First tab
+    // 4. null — will create tab on demand
     const pages = await browser.pages();
     console.log(`[chrome-manager] Found ${pages.length} tabs`);
 
@@ -169,6 +177,44 @@ async function connectCDP() {
     // Only use Higgsfield tabs — never hijack arbitrary user tabs
     activePage = modelPage || hfPage || anyHfPage || null;
     console.log(`[chrome-manager] Selected tab: ${activePage ? activePage.url().substring(0, 80) : 'NONE (will create new tab when needed)'}`);
+
+    // ── AUTO-SESSION RESTORE ──
+    // If we have a saved session but the active tab is on sign-in or blank — apply cookies.
+    // This restores auth state without requiring the user to log in again.
+    const savedSession = loadSession();
+    if (savedSession && savedSession.cookies && savedSession.cookies.length > 0) {
+      const currentUrl = activePage ? activePage.url() : '';
+      // Covers: no tab, empty URL ':' (Chrome startup), about:blank, chrome:// system pages, newtab, sign-in
+      const isOnSignIn = !currentUrl
+        || currentUrl === ':'
+        || currentUrl === ''
+        || currentUrl.startsWith('chrome://')
+        || currentUrl.startsWith('chrome-extension://')
+        || currentUrl === 'about:blank'
+        || currentUrl === 'about:newtab'
+        || currentUrl.includes('sign-in')
+        || currentUrl.includes('login')
+        || currentUrl.includes('/auth/');
+
+      if (isOnSignIn || !activePage) {
+        console.log(`[chrome-manager] connectCDP: applying saved session (${savedSession.cookies.length} cookies) — current tab is unauthed/system (url: "${currentUrl || 'none'}")`);
+        // Create a dedicated Higgsfield tab and apply session to it
+        const newTab = await browser.newPage();
+        await applySession(newTab);
+        // Navigate to Higgsfield after applying cookies so they take effect
+        await newTab.goto(HIGGSFIELD_URL, { waitUntil: 'domcontentloaded', timeout: 15000 }).catch((e) => {
+          console.log(`[chrome-manager] connectCDP: goto Higgsfield failed: ${e.message} — user may still be authed`);
+        });
+        activePage = newTab;
+        console.log(`[chrome-manager] connectCDP: session applied, navigated to Higgsfield`);
+      } else {
+        // Tab is already on Higgsfield — boost it with saved cookies too (reinforces)
+        console.log(`[chrome-manager] connectCDP: tab already on Higgsfield, reinforcing session cookies`);
+        await applySession(activePage);
+      }
+    } else {
+      console.log(`[chrome-manager] connectCDP: no saved session found — user will need to log in manually`);
+    }
 
     return { success: true };
   } catch (err) {
@@ -422,7 +468,23 @@ async function checkAuth() {
         const { cookies } = await client.send('Network.getAllCookies');
         const hfCookies = cookies.filter(c => c.domain.includes('higgsfield'));
         console.log(`[chrome-manager] checkAuth cookies: total=${cookies.length}, higgsfield=${hfCookies.length}`);
-        if (hfCookies.length >= 3) authenticated = true;
+        // Look for strong auth signals: session token cookies (common patterns for NextAuth / JWT)
+        const hasStrongAuthCookie = hfCookies.some(c =>
+          c.name.includes('session') ||
+          c.name.includes('token') ||
+          c.name.includes('auth') ||
+          c.name.startsWith('__Secure') ||
+          c.name.startsWith('sb-') ||         // Supabase auth
+          c.name === 'next-auth.session-token' ||  // NextAuth
+          (c.name.startsWith('ey') && c.value.length > 100) // JWT token stored as cookie
+        );
+        if (hasStrongAuthCookie) {
+          authenticated = true;
+          console.log(`[chrome-manager] checkAuth: ✅ strong auth cookie found`);
+        } else if (hfCookies.length >= 3) {
+          // Fallback: enough cookies = probably logged in
+          authenticated = true;
+        }
         await client.detach().catch(() => {});
       } catch (e) {
         console.log('[chrome-manager] checkAuth cookie error:', e.message);
@@ -430,6 +492,19 @@ async function checkAuth() {
     }
 
     console.log(`[chrome-manager] checkAuth → authenticated=${authenticated}`);
+
+    // ── AUTO-SESSION SAVE on confirmed auth (throttled: max once per 5 minutes) ──
+    if (authenticated && activePage) {
+      const now = Date.now();
+      if (now - _lastSessionSaveTime > SESSION_SAVE_THROTTLE_MS) {
+        _lastSessionSaveTime = now;
+        // Fire-and-forget: non-blocking, non-critical
+        saveSession().then(r => {
+          if (r.success) console.log(`[chrome-manager] 💾 Auto-saved session (${r.cookieCount} cookies)`);
+        }).catch(() => {});
+      }
+    }
+
     return { connected: true, authenticated, pageReady: false, url };
   } catch (err) {
     console.error('[chrome-manager] checkAuth fatal:', err.message);

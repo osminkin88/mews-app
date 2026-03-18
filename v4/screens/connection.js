@@ -95,7 +95,7 @@ function getStages(status) {
       return {
         statusClass: 'warning',
         statusText: 'Войдите в Higgsfield',
-        hint: 'Chrome подключён. Откройте Chrome, войдите в аккаунт на higgsfield.ai, затем нажмите «Проверить».',
+        hint: 'Chrome подключён. Нажмите «Проверить» — Mews попробует восстановить сохранённую сессию. Если не получится, откройте Chrome и войдите вручную.',
         stepsHTML: buildSteps(stepLabels, 1),
         actionsHTML: `
           <button id="btn-open-higgsfield" class="btn btn-secondary" style="flex:1">

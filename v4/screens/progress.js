@@ -1,11 +1,15 @@
 /* ── Progress Screen ── */
 import { api, navigate, state } from '../app.js';
 
+const MAX_VISIBLE_TILES = 16;  // DOM cap: only most recent N tile nodes mounted
+const MAX_STATE_WITH_PREVIEW = 24; // state cap: beyond this, strip data URLs from old tiles
+
 let container = null;
 let cleanupProgress = null;
 let isRunning = false;
 let lastPct = 0;       // monotonic: bar never goes backwards
 let isStopping = false; // immediate stop feedback
+let lastRunSnapshot = null; // {promptTotal, agedCounts, liveTileCount, primary, detail} — post-run context
 
 // Format raw seconds in messages: (102с) → (1м 42с)
 function formatTime(msg) {
@@ -25,8 +29,10 @@ let lastState = {
   primary: 'Генерация изображений',
   detail: 'Ожидание запуска…',
   detailColor: '',
-  logEntries: [],      // [{message}]
-  liveTiles: [],       // [{key, html}]
+  logEntries: [],      // [{message, step}]
+  liveTiles: [],       // [{key, html, promptIdx}] — recent tiles with full html
+  agedCounts: { done: 0, failed: 0 }, // aggregate counters for aged-out tiles
+  agedSlots: new Map(),   // Map<promptIdx, bitmask> — bits 0-7: done slots, bits 8-15: failed slots
   promptCur: 0,
   promptTotal: 0,
   savedSlotsPerPrompt: {}, // {promptIdx: maxSavedSlot} — confirmed progress floor
@@ -34,7 +40,7 @@ let lastState = {
 
 function render() {
   // Only reset progress counters if NOT resuming an active generation
-  if (!isRunning) {
+  if (!isRunning && !lastRunSnapshot) {
     lastPct = 0;
     isStopping = false;
     lastState = {
@@ -44,6 +50,8 @@ function render() {
       detailColor: '',
       logEntries: [],
       liveTiles: [],
+      agedCounts: { done: 0, failed: 0 },
+      agedSlots: new Map(),
       promptCur: 0,
       promptTotal: 0,
       savedSlotsPerPrompt: {},
@@ -55,6 +63,10 @@ function render() {
   const detail = isRunning ? lastState.detail : 'Ожидание запуска…';
   const detailColor = isRunning ? lastState.detailColor : '';
   const logCount = isRunning ? `${lastState.promptCur} / ${lastState.promptTotal}` : '0 / 0';
+
+  // Compute summary counts
+  const agedTotal = lastState.agedCounts.done + lastState.agedCounts.failed;
+  const totalGenerated = lastState.liveTiles.length + agedTotal;
 
   container.innerHTML = `
     <div style="display:grid;grid-template-columns:1fr 280px;overflow:hidden;flex:1">
@@ -68,16 +80,22 @@ function render() {
             <div class="progress-bar-track"><div id="ph-bar" class="progress-bar-fill" style="width:${pct}%"></div></div>
           </div>
           <div>
-            <button id="btn-stop" class="btn btn-secondary" style="font-size:11px;padding:6px 12px;color:var(--red)" ${isStopping ? 'disabled' : ''}>${isStopping ? 'Останавливаю…' : 'Остановить'}</button>
+            <button id="btn-stop" class="btn btn-secondary" style="font-size:11px;padding:6px 12px;color:var(--red)" ${isStopping ? 'disabled' : ''}>${isStopping ? 'Останавливаю\u2026' : 'Остановить'}</button>
           </div>
         </div>
         <!-- Live grid -->
-        <div id="live-grid" class="live-grid"></div>
+        <div id="live-grid" class="live-grid">
+          ${agedTotal > 0 ? `<div class="prompt-summary-row">
+            <span class="prompt-summary-num">\u2714</span>
+            <span>${agedTotal} \u0440\u0430\u043D\u0435\u0435</span>
+            <span class="prompt-summary-count">${totalGenerated} \u0432\u0441\u0435\u0433\u043E</span>
+          </div>` : ''}
+        </div>
       </div>
       <!-- Log panel -->
       <div class="log-panel">
         <div class="log-header">
-          <span class="log-title">Лог генерации</span>
+          <span class="log-title">\u041B\u043E\u0433 \u0433\u0435\u043D\u0435\u0440\u0430\u0446\u0438\u0438</span>
           <span id="log-count" class="log-count">${logCount}</span>
         </div>
         <div id="log-list" class="log-list"></div>
@@ -100,20 +118,25 @@ function render() {
     }
   }
 
-  // Restore live tiles on remount
+  // Restore live tiles on remount (only most recent MAX_VISIBLE_TILES)
   if (isRunning && lastState.liveTiles.length > 0) {
     const grid = document.getElementById('live-grid');
     if (grid) {
-      lastState.liveTiles.forEach(tile => {
+      const startIdx = Math.max(0, lastState.liveTiles.length - MAX_VISIBLE_TILES);
+      for (let i = startIdx; i < lastState.liveTiles.length; i++) {
+        const tile = lastState.liveTiles[i];
         const el = document.createElement('div');
         el.className = 'live-tile';
         el.dataset.key = tile.key;
         el.style.cssText = `position:relative;border-radius:10px;overflow:hidden;aspect-ratio:1;background:var(--bg-float);`;
         el.innerHTML = tile.html;
         grid.appendChild(el);
-      });
+      }
     }
   }
+
+  // Update summary row
+  updateSummaryRow();
 
   container.querySelector('#btn-stop')?.addEventListener('click', async () => {
     isStopping = true;
@@ -157,6 +180,69 @@ function showError(message) {
   }
 }
 
+// ── DOM cap: enforce maximum mounted tile count ──
+function enforceDomCap() {
+  const grid = document.getElementById('live-grid');
+  if (!grid) return;
+  const tiles = grid.querySelectorAll('.live-tile');
+  if (tiles.length <= MAX_VISIBLE_TILES) return;
+  const excess = tiles.length - MAX_VISIBLE_TILES;
+  for (let i = 0; i < excess; i++) {
+    tiles[i].remove();
+  }
+  updateSummaryRow();
+}
+
+// ── State cap: age out old tiles to free memory ──
+function ageOutOldTiles() {
+  while (lastState.liveTiles.length > MAX_STATE_WITH_PREVIEW) {
+    const old = lastState.liveTiles.shift();
+    // Aggregate into compact counters instead of keeping individual records
+    if (old.isFailed) {
+      lastState.agedCounts.failed++;
+    } else {
+      lastState.agedCounts.done++;
+    }
+    // Track slot in compact per-prompt bitmask for accurate reconciliation
+    // Bits 0-7: done slots, Bits 8-15: failed slots
+    const promptIdx = old.promptIdx || 0;
+    const slotMatch = old.key.match(/s(\d+)/);
+    if (slotMatch) {
+      const slotBit = parseInt(slotMatch[1]) - 1; // 0-based
+      const shift = old.isFailed ? slotBit + 8 : slotBit;
+      const prev = lastState.agedSlots.get(promptIdx) || 0;
+      lastState.agedSlots.set(promptIdx, prev | (1 << shift));
+    }
+  }
+}
+
+// ── Update summary row in the live grid ──
+function updateSummaryRow() {
+  const grid = document.getElementById('live-grid');
+  if (!grid) return;
+  const { done, failed } = lastState.agedCounts;
+  const agedTotal = done + failed;
+  const totalGenerated = lastState.liveTiles.length + agedTotal;
+  let row = grid.querySelector('.prompt-summary-row');
+  if (agedTotal > 0) {
+    if (!row) {
+      row = document.createElement('div');
+      row.className = 'prompt-summary-row';
+      grid.insertBefore(row, grid.firstChild);
+    }
+    const parts = [];
+    if (done > 0) parts.push(`${done} сохранено`);
+    if (failed > 0) parts.push(`<span style="color:var(--red)">${failed} ошибок</span>`);
+    row.innerHTML = `
+      <span class="prompt-summary-num">✔</span>
+      <span>${parts.join(' · ')}</span>
+      <span class="prompt-summary-count">${totalGenerated} всего</span>
+    `;
+  } else if (row) {
+    row.remove();
+  }
+}
+
 // ── Tile reconciliation ──
 // After a prompt is 'done', ensure all expected slots have tiles.
 // This catches any missed/late/reordered 'saved' events.
@@ -164,10 +250,15 @@ function reconcileTiles(promptIdx, slotCount) {
   for (let s = 1; s <= slotCount; s++) {
     const key = `p${promptIdx}-s${s}`;
     const exists = lastState.liveTiles.find(t => t.key === key);
-    // Also check for failed tiles
+    // Also check for failed tiles and aged tiles
     const failKey = `p${promptIdx}-s${s}-fail`;
     const failExists = lastState.liveTiles.find(t => t.key === failKey);
-    if (!exists && !failExists) {
+    // Check if this specific slot was already aged out (bitmask lookup)
+    const mask = lastState.agedSlots.get(promptIdx) || 0;
+    const slotBit = s - 1; // 0-based
+    const doneAged = (mask & (1 << slotBit)) !== 0;
+    const failAged = (mask & (1 << (slotBit + 8))) !== 0;
+    if (!exists && !failExists && !doneAged && !failAged) {
       // Backfill placeholder tile
       const slotLabel = `${promptIdx}.${s}`;
       const tileHtml = `
@@ -178,7 +269,8 @@ function reconcileTiles(promptIdx, slotCount) {
         <span style="position:absolute;bottom:6px;left:6px;font-size:10px;font-weight:700;background:rgba(0,0,0,0.6);color:#fff;padding:2px 6px;border-radius:4px;">${slotLabel}</span>
         <span style="position:absolute;top:6px;right:6px;width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 6px var(--green);"></span>
       `;
-      lastState.liveTiles.push({ key, html: tileHtml });
+      lastState.liveTiles.push({ key, html: tileHtml, promptIdx });
+      ageOutOldTiles();
 
       // Also add to DOM if mounted
       if (container) {
@@ -191,6 +283,7 @@ function reconcileTiles(promptIdx, slotCount) {
           tile.style.cssText = 'position:relative;border-radius:10px;overflow:hidden;aspect-ratio:1;background:var(--bg-float);animation: liveTileFadeIn 0.35s ease;';
           tile.innerHTML = tileHtml;
           grid.appendChild(tile);
+          enforceDomCap();
         }
       }
     }
@@ -198,7 +291,7 @@ function reconcileTiles(promptIdx, slotCount) {
 }
 
 function updateProgress(data) {
-  // Always reset isRunning on terminal states, even if container is unmounted
+  // ── Terminal states ──
   if (data.status === 'complete' || data.status === 'fatal_error' || data.status === 'auth_error') {
     isRunning = false;
   }
@@ -214,8 +307,6 @@ function updateProgress(data) {
       lastState.detailColor = 'var(--green)';
 
       // ── RECONCILE: final sweep across all prompts ──
-      // Ensures every expected slot has a tile, even if 'saved' events were missed.
-      // Results are in order: result[0] → runIndex 1, result[1] → runIndex 2, etc.
       if (data.results && Array.isArray(data.results)) {
         data.results.forEach((r, i) => {
           const runIdx = i + 1;
@@ -228,6 +319,19 @@ function updateProgress(data) {
       lastState.detail = 'Генерация остановлена. Сохранённые изображения доступны для отбора.';
       lastState.detailColor = 'var(--orange)';
     }
+
+    // ── Snapshot AFTER reconciliation — accurate final counts ──
+    const liveDone = lastState.liveTiles.filter(t => !t.isFailed).length;
+    const liveFailed = lastState.liveTiles.filter(t => t.isFailed).length;
+    lastRunSnapshot = {
+      promptTotal: lastState.promptTotal,
+      doneCount: lastState.agedCounts.done + liveDone,
+      failedCount: lastState.agedCounts.failed + liveFailed,
+      status: data.status,
+      isStopped: isStopping,
+      recentLogs: lastState.logEntries.slice(0, 5),
+      recentTiles: lastState.liveTiles.slice(-8).map(t => ({ key: t.key, html: t.html, isFailed: t.isFailed })),
+    };
 
     if (!container) return;
 
@@ -375,7 +479,8 @@ function updateProgress(data) {
           <span style="position:absolute;bottom:6px;left:6px;font-size:10px;font-weight:700;background:rgba(0,0,0,0.6);color:#fff;padding:2px 6px;border-radius:4px;">${slotLabel}</span>
           <span style="position:absolute;top:6px;right:6px;width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 6px var(--green);"></span>
         `;
-      lastState.liveTiles.push({ key, html: tileHtml });
+      lastState.liveTiles.push({ key, html: tileHtml, promptIdx: data.promptIndex || promptCur });
+      ageOutOldTiles();
     }
   }
 
@@ -392,7 +497,8 @@ function updateProgress(data) {
         <span style="position:absolute;bottom:6px;left:6px;font-size:10px;font-weight:700;background:rgba(0,0,0,0.6);color:var(--red);padding:2px 6px;border-radius:4px;">${promptCur}.${data.failedSlot}</span>
         <span style="position:absolute;top:6px;right:6px;width:8px;height:8px;border-radius:50%;background:var(--red);box-shadow:0 0 6px var(--red);"></span>
       `;
-      lastState.liveTiles.push({ key, html: tileHtml, isFailed: true });
+      lastState.liveTiles.push({ key, html: tileHtml, isFailed: true, promptIdx: promptCur });
+      ageOutOldTiles();
     }
   }
 
@@ -454,6 +560,7 @@ function updateProgress(data) {
         tile.style.cssText = `position:relative;border-radius:10px;overflow:hidden;aspect-ratio:1;background:var(--bg-float);animation: liveTileFadeIn 0.35s ease;`;
         tile.innerHTML = tileData.html;
         grid.appendChild(tile);
+        enforceDomCap();
       }
     }
   }
@@ -472,6 +579,7 @@ function updateProgress(data) {
           tile.style.cssText = `position:relative;border-radius:10px;overflow:hidden;aspect-ratio:1;background:var(--bg-float);border:1px solid rgba(255,59,48,0.2);animation: liveTileFadeIn 0.35s ease;`;
           tile.innerHTML = tileData.html;
           grid.appendChild(tile);
+          enforceDomCap();
         }
       }
     }
@@ -481,22 +589,123 @@ function updateProgress(data) {
 function showIdleState() {
   if (!container) return;
   const heroEl = container.querySelector('.progress-hero');
-  if (heroEl) {
+  if (!heroEl) return;
+
+  if (lastRunSnapshot) {
+    const s = lastRunSnapshot;
+
+    // Status-dependent title, icon, tone
+    let statusIcon, statusTitle, statusColor;
+    if (s.status === 'auth_error') {
+      statusIcon = '🔒';
+      statusTitle = 'Ошибка авторизации';
+      statusColor = 'var(--red)';
+    } else if (s.status === 'fatal_error') {
+      statusIcon = '❌';
+      statusTitle = 'Генерация прервана ошибкой';
+      statusColor = 'var(--red)';
+    } else if (s.isStopped) {
+      statusIcon = '⏹️';
+      statusTitle = 'Генерация остановлена';
+      statusColor = 'var(--orange)';
+    } else {
+      statusIcon = s.failedCount > 0 ? '⚠️' : '✅';
+      statusTitle = 'Генерация завершена';
+      statusColor = s.failedCount > 0 ? 'var(--orange)' : 'var(--green)';
+    }
+
+    // Summary stats
+    const parts = [];
+    if (s.promptTotal > 0) parts.push(`${s.promptTotal} промптов`);
+    if (s.doneCount > 0) parts.push(`${s.doneCount} сохранено`);
+    if (s.failedCount > 0) parts.push(`<span style="color:var(--red)">${s.failedCount} ошибок</span>`);
+
+    // Recent logs
+    const logsHtml = (s.recentLogs && s.recentLogs.length > 0)
+      ? `<div style="margin-top:8px;text-align:left;max-width:400px;width:100%">
+           ${s.recentLogs.map(l => `<div style="font-size:11px;color:var(--text-tertiary);line-height:1.5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${l.message}</div>`).join('')}
+         </div>`
+      : '';
+
     heroEl.innerHTML = `
-      <div style="display:flex;flex-direction:column;align-items:center;gap:12px;padding:40px;text-align:center">
-        <div style="font-size:36px;opacity:0.5">⏸</div>
-        <div style="font-size:16px;font-weight:700;color:var(--text-secondary)">Нет активной генерации</div>
-        <div style="font-size:13px;color:var(--text-tertiary);line-height:1.6">Перейдите в Настройки и нажмите<br>«Запустить генерацию»</div>
-        <button class="btn btn-secondary" style="margin-top:8px;font-size:12px;padding:6px 16px" id="btn-idle-settings">← Перейти в настройки</button>
+      <div style="display:flex;flex-direction:column;align-items:center;gap:10px;padding:24px;text-align:center">
+        <div style="font-size:28px">${statusIcon}</div>
+        <div style="font-size:15px;font-weight:700;color:${statusColor}">${statusTitle}</div>
+        <div style="font-size:13px;color:var(--text-secondary);line-height:1.6">
+          ${parts.join(' · ')}
+        </div>
+        ${logsHtml}
+        <div style="display:flex;gap:8px;margin-top:4px">
+          ${s.doneCount > 0 ? `<button class="btn btn-primary" style="font-size:12px;padding:6px 16px" id="btn-idle-selection">Перейти к отбору</button>` : ''}
+          <button class="btn btn-secondary" style="font-size:12px;padding:6px 16px" id="btn-idle-settings">Новая генерация</button>
+        </div>
       </div>`;
     container.querySelector('#btn-idle-settings')?.addEventListener('click', () => navigate('settings'));
+    container.querySelector('#btn-idle-selection')?.addEventListener('click', () => navigate('selection'));
+
+    // Update log panel with last-run entries
+    const logList = container.querySelector('#log-list');
+    const logCount = container.querySelector('#log-count');
+    if (logList && s.recentLogs) {
+      s.recentLogs.forEach(entry => {
+        const div = document.createElement('div');
+        div.className = 'log-entry';
+        div.textContent = entry.message;
+        logList.appendChild(div);
+      });
+    }
+    if (logCount) logCount.textContent = `${s.promptTotal} / ${s.promptTotal}`;
+
+    // Restore bounded recent tiles into live grid
+    const grid = document.getElementById('live-grid');
+    if (grid && s.recentTiles && s.recentTiles.length > 0) {
+      s.recentTiles.forEach(t => {
+        const tile = document.createElement('div');
+        tile.className = 'live-tile';
+        tile.dataset.key = t.key;
+        tile.style.cssText = `position:relative;border-radius:10px;overflow:hidden;aspect-ratio:1;background:var(--bg-float);${t.isFailed ? 'border:1px solid rgba(255,59,48,0.2);' : ''}`;
+        tile.innerHTML = t.html;
+        grid.appendChild(tile);
+      });
+    }
+    return;
   }
+
+  heroEl.innerHTML = `
+    <div style="display:flex;flex-direction:column;align-items:center;gap:12px;padding:40px;text-align:center">
+      <div style="font-size:36px;opacity:0.5">⏸</div>
+      <div style="font-size:16px;font-weight:700;color:var(--text-secondary)">Нет активной генерации</div>
+      <div style="font-size:13px;color:var(--text-tertiary);line-height:1.6">Перейдите в Настройки и нажмите<br>«Запустить генерацию»</div>
+      <button class="btn btn-secondary" style="margin-top:8px;font-size:12px;padding:6px 16px" id="btn-idle-settings">← Перейти в настройки</button>
+    </div>`;
+  container.querySelector('#btn-idle-settings')?.addEventListener('click', () => navigate('settings'));
 }
 
 export default {
   id: 'progress',
   async mount(c) {
     container = c;
+
+    // If a new generation is requested, reset all previous-run context BEFORE first render
+    if (state.generationRequested && !isRunning) {
+      lastRunSnapshot = null;
+      lastPct = 0;
+      isStopping = false;
+      lastState = {
+        pct: 0,
+        primary: 'Генерация изображений',
+        detail: 'Ожидание запуска…',
+        detailColor: '',
+        logEntries: [],
+        liveTiles: [],
+        agedCounts: { done: 0, failed: 0 },
+        agedSlots: new Map(),
+        promptCur: 0,
+        promptTotal: 0,
+        savedSlotsPerPrompt: {},
+      };
+    }
+
     render();
     cleanupProgress = api.generate.onProgress(updateProgress);
 

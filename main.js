@@ -8,25 +8,38 @@ const fs = require('fs');
 
 // ── FORENSIC LOGGER ──────────────────────────────────────────
 // Captures ALL console output with millisecond timestamps to a file.
-const LOG_FILE = '/tmp/higgsfield-forensic.log';
-try {
-  // Clear log on startup
-  fs.writeFileSync(LOG_FILE, `\n${'═'.repeat(80)}\n[FORENSIC LOG STARTED] ${new Date().toISOString()}\n${'═'.repeat(80)}\n`, 'utf-8');
-} catch(e) {}
-
-const _origLog = console.log.bind(console);
-const _origErr = console.error.bind(console);
-const _origWarn = console.warn.bind(console);
+// Uses app.getPath('logs') — works correctly in packaged builds and sandboxed environments.
+// /tmp is unreliable in Hardened Runtime / macOS Sandbox.
+let LOG_FILE = null; // resolved lazily after app.whenReady()
 
 function _forensicLog(level, args) {
+  if (!LOG_FILE) return; // not yet initialized — skip silently
   const ts = new Date().toISOString().replace('T', ' ').replace('Z', '');
   const line = `${ts} [${level}] ${args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ')}\n`;
   try { fs.appendFileSync(LOG_FILE, line, 'utf-8'); } catch(e) {}
 }
 
+const _origLog = console.log.bind(console);
+const _origErr = console.error.bind(console);
+const _origWarn = console.warn.bind(console);
+
 console.log = (...args) => { _origLog(...args); _forensicLog('LOG', args); };
 console.error = (...args) => { _origErr(...args); _forensicLog('ERR', args); };
 console.warn = (...args) => { _origWarn(...args); _forensicLog('WRN', args); };
+
+// Called after app.whenReady() to initialize the log file path
+function initForensicLog() {
+  try {
+    const { app } = require('electron');
+    const logsDir = app.getPath('logs');
+    if (!fs.existsSync(logsDir)) fs.mkdirSync(logsDir, { recursive: true });
+    LOG_FILE = path.join(logsDir, 'mews-forensic.log');
+    fs.writeFileSync(LOG_FILE, `\n${'═'.repeat(80)}\n[FORENSIC LOG STARTED] ${new Date().toISOString()}\n${'═'.repeat(80)}\n`, 'utf-8');
+    _origLog(`[main] Forensic log: ${LOG_FILE}`);
+  } catch(e) {
+    _origWarn('[main] Forensic log init failed:', e.message);
+  }
+}
 // ─────────────────────────────────────────────────────────────
 
 // ── Modules ──────────────────────────────────────────────────
@@ -95,6 +108,9 @@ function createWindow() {
 
 // ── App Lifecycle ────────────────────────────────────────────
 app.whenReady().then(() => {
+  // Initialize forensic log FIRST (needs app.getPath which requires app ready)
+  initForensicLog();
+
   // Set macOS dock icon
   if (process.platform === 'darwin' && app.dock) {
     app.dock.setIcon(path.join(__dirname, 'icon.png'));
@@ -156,6 +172,15 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', async () => {
+  // Save session before disconnecting — so auth cookies survive restart
+  try {
+    const saveResult = await chrome.saveSession();
+    if (saveResult.success) {
+      console.log(`[main] 💾 Session saved on quit (${saveResult.cookieCount} cookies)`);
+    }
+  } catch (e) {
+    console.warn('[main] Session save on quit failed:', e.message);
+  }
   await chrome.cleanup();
 });
 
@@ -267,13 +292,27 @@ ipcMain.handle('generate:start', async (event, { prompts, settings, projectId })
     }
   }
 
-  // Check Chrome connection
+  // Check Chrome connection — must be connected AND have an active Higgsfield page
   const status = await chrome.getStatus();
   if (!status.cdpConnected) {
+    // Try auto-connect (Chrome may already be running from a previous session)
+    console.log('[main] generate:start — not connected, attempting auto-connect...');
     const connectResult = await chrome.connectCDP();
     if (!connectResult.success) {
-      return { success: false, error: 'Chrome не подключён. Запустите Chrome и подключитесь.' };
+      return {
+        success: false,
+        error: 'Chrome не подключён. Перейдите в раздел Подключение и нажмите «Подключиться».',
+      };
     }
+  }
+
+  // Also check that we have an active page (not just CDP connection)
+  const activePage = chrome.getActivePage();
+  if (!activePage) {
+    return {
+      success: false,
+      error: 'Страница Higgsfield не открыта. Нажмите «Открыть Higgsfield» в разделе Подключение.',
+    };
   }
 
   // ── Auth preflight: verify actual Higgsfield sign-in ──
@@ -561,8 +600,8 @@ ipcMain.handle('generate:start', async (event, { prompts, settings, projectId })
               await new Promise(r => setTimeout(r, 3000));
             }
 
-            // Fresh boundary snapshot after resync
-            crossPromptExcludeFingerprints = await engine.snapshotFeedFingerprints(page, 20);
+            // Fresh boundary snapshot after resync — ALL images to avoid ambiguity
+            crossPromptExcludeFingerprints = await engine.snapshotFeedFingerprints(page, 999);
             console.log(`[main] ✅ Ресинк завершён: ${crossPromptExcludeFingerprints.length} UUID зафиксировано для следующего промпта`);
 
             // Push result with saved data (no break — continue to next prompt)
@@ -576,8 +615,8 @@ ipcMain.handle('generate:start', async (event, { prompts, settings, projectId })
             continue; // ← KEY: continue loop instead of break
           }
 
-          // Use wider snapshot (20) for exclude fingerprints — more conservative for next prompt
-          crossPromptExcludeFingerprints = await engine.snapshotFeedFingerprints(page, 20);
+          // Use FULL snapshot for exclude fingerprints — prevents ambiguity on next prompt
+          crossPromptExcludeFingerprints = await engine.snapshotFeedFingerprints(page, 999);
           console.log(`[main] ✅ Барьер: зафиксировано ${crossPromptExcludeFingerprints.length} UUID для исключения (стабильно=${stabilityResult.stable})`);
         }
       }

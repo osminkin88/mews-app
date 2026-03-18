@@ -77,6 +77,10 @@ function clearSelection() {
   render();
 }
 
+// promptExpanded removed — full prompt shown via modal now
+let promptModalOpen = false;
+let activeModalCleanup = null; // cleanup handle for unmount safety
+
 function render() {
   const prompt = prompts[currentIndex];
   const selected = selections[currentIndex];
@@ -189,6 +193,14 @@ function render() {
       </div>`;
   }
 
+  // Prompt text handling: truncate for preview
+  const rawPromptText = prompt?.prompt || prompt?.text || '—';
+  const isLongPrompt = rawPromptText.length > 120;
+
+  // Preserve queue scroll position before DOM rebuild
+  const queueEl = container.querySelector('.decision-queue');
+  const savedScrollTop = queueEl ? queueEl.scrollTop : 0;
+
   container.innerHTML = `
     <div style="display:grid;grid-template-columns:1fr 280px;overflow:hidden;flex:1">
       <!-- Hero zone -->
@@ -205,8 +217,14 @@ function render() {
           <div style="display:flex;justify-content:space-between;margin-top:4px;font-size:11px;color:var(--text-tertiary)"><span>${doneCount} промпт. отобрано</span><span>${totalCount - doneCount} осталось</span></div>
         </div>
         <div class="decision-prompt">
-          <div class="section-label" style="margin-bottom:4px">Промпт #${currentIndex + 1}</div>
-          <div style="font-size:13px;line-height:1.6;color:var(--text-secondary)">${prompt?.prompt || prompt?.text || '—'}</div>
+          <div class="section-label" style="margin-bottom:4px;display:flex;align-items:center;justify-content:space-between">
+            <span>Промпт #${currentIndex + 1}</span>
+            ${isLongPrompt ? `<button id="btn-prompt-read" class="prompt-toggle-btn">Читать полностью</button>` : ''}
+          </div>
+          <div style="position:relative">
+            <div class="decision-prompt-text" style="font-size:13px;line-height:1.6;color:var(--text-secondary)">${rawPromptText}</div>
+            ${isLongPrompt ? '<div class="prompt-fade-mask"></div>' : ''}
+          </div>
         </div>
         <div class="decision-queue">
           <div class="section-label" style="margin-bottom:8px">Очередь</div>
@@ -264,6 +282,11 @@ function render() {
   // Clear selection button
   container.querySelector('#btn-clear-sel')?.addEventListener('click', clearSelection);
 
+  // Full prompt modal
+  container.querySelector('#btn-prompt-read')?.addEventListener('click', () => {
+    openPromptModal(rawPromptText, currentIndex + 1);
+  });
+
   // Single-image: explicit select button
   container.querySelector('#btn-select-single')?.addEventListener('click', () => {
     selectVariant(0);
@@ -273,10 +296,24 @@ function render() {
   container.querySelectorAll('.queue-item').forEach(el => {
     el.addEventListener('click', async () => {
       currentIndex = parseInt(el.dataset.prompt);
+      // navigation resets view
       await loadPromptImages(currentIndex);
       render();
     });
   });
+
+  // Restore queue scroll position after DOM rebuild
+  const newQueueEl = container.querySelector('.decision-queue');
+  if (newQueueEl) {
+    if (savedScrollTop > 0) {
+      newQueueEl.scrollTop = savedScrollTop;
+    }
+    // Ensure current item is visible
+    const currentItem = newQueueEl.querySelector('.queue-item.current');
+    if (currentItem) {
+      currentItem.scrollIntoView({ block: 'nearest', behavior: 'instant' });
+    }
+  }
 
   // Main button: context-dependent
   container.querySelector('#btn-next')?.addEventListener('click', async () => {
@@ -458,6 +495,43 @@ function openZoom(src) {
   document.body.appendChild(overlay);
 }
 
+function openPromptModal(text, promptNum) {
+  promptModalOpen = true;
+  const overlay = document.createElement('div');
+  overlay.className = 'prompt-modal-overlay';
+  overlay.innerHTML = `
+    <div class="prompt-modal-card">
+      <div class="prompt-modal-header">
+        <span class="prompt-modal-title">Промпт #${promptNum}</span>
+        <button class="prompt-modal-close" title="Закрыть (Esc)">✕</button>
+      </div>
+      <div class="prompt-modal-body">${text}</div>
+    </div>
+  `;
+  const close = () => {
+    promptModalOpen = false;
+    activeModalCleanup = null;
+    overlay.style.opacity = '0';
+    overlay.style.transition = 'opacity 0.15s';
+    setTimeout(() => overlay.remove(), 150);
+    document.removeEventListener('keydown', modalKeyHandler, true);
+  };
+  activeModalCleanup = close;
+  const modalKeyHandler = (e) => {
+    // Block ALL keys from reaching selection hotkeys while modal is open
+    e.stopPropagation();
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      close();
+    }
+  };
+  overlay.querySelector('.prompt-modal-close').addEventListener('click', close);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  // Capture phase ensures this fires BEFORE the selection keydown handler
+  document.addEventListener('keydown', modalKeyHandler, true);
+  document.body.appendChild(overlay);
+}
+
 async function doFinish() {
   const project = state.currentProject;
   if (project && Object.keys(selections).length > 0) {
@@ -469,6 +543,8 @@ async function doFinish() {
 
 function handleKeyboard(e) {
   if (!container) return;
+  // Block all hotkeys while prompt modal is open
+  if (promptModalOpen) return;
   const maxKey = images.length;
 
   // Number keys: select variant
@@ -482,10 +558,12 @@ function handleKeyboard(e) {
   // Arrow keys: navigate prompts (with wrap-around)
   if (e.key === 'ArrowRight') {
     currentIndex = currentIndex < prompts.length - 1 ? currentIndex + 1 : 0;
+    // navigation resets view
     loadPromptImages(currentIndex).then(render);
   }
   if (e.key === 'ArrowLeft') {
     currentIndex = currentIndex > 0 ? currentIndex - 1 : prompts.length - 1;
+    // navigation resets view
     loadPromptImages(currentIndex).then(render);
   }
 
@@ -535,6 +613,10 @@ export default {
   },
   unmount() {
     persistSelections();
+    // Clean up modal if still open
+    if (activeModalCleanup) {
+      activeModalCleanup();
+    }
     document.removeEventListener('keydown', handleKeyboard);
     container = null;
   },

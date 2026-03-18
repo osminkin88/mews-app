@@ -115,7 +115,33 @@ function set(key, value) {
 
 /** Path to session.json (cookies) — always in APP_DATA */
 function getSessionPath() {
-  return path.join(getAppData(), 'session.json');
+  const newPath = path.join(getAppData(), 'session.json');
+
+  // ── MIGRATION: Copy session from old app name (higgsfield-studio) to new (Mews) ──
+  // This runs only once — after migration the file exists at newPath and we never re-check.
+  if (!fs.existsSync(newPath)) {
+    const oldPaths = [
+      // Old Electron userData dirs when the app had a different productName
+      path.join(path.dirname(getAppData()), 'higgsfield-studio', 'session.json'),
+      path.join(path.dirname(getAppData()), 'Higgsfield Studio', 'session.json'),
+      path.join(path.dirname(getAppData()), 'higgsfield', 'session.json'),
+    ];
+    for (const oldPath of oldPaths) {
+      if (fs.existsSync(oldPath)) {
+        try {
+          const dir = path.dirname(newPath);
+          if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+          fs.copyFileSync(oldPath, newPath);
+          console.log(`[config] ✅ Session migrated from ${oldPath} → ${newPath}`);
+          break;
+        } catch (e) {
+          console.warn(`[config] Session migration failed: ${e.message}`);
+        }
+      }
+    }
+  }
+
+  return newPath;
 }
 
 /** Path to Chrome profile dir — always in APP_DATA */

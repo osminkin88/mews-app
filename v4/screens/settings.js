@@ -348,6 +348,24 @@ async function render() {
       });
     }
 
+    // ── Guard: check connection status before navigating to progress ──
+    const connStatus = state.connectionStatus;
+    const READY_STATUSES = ['ready', 'page_not_ready']; // allow page_not_ready — engine will navigate itself
+    if (!connStatus || !READY_STATUSES.includes(connStatus)) {
+      let msg;
+      if (!connStatus || connStatus === 'no_chrome' || connStatus === 'chrome_stopped') {
+        msg = 'Сначала запустите Chrome и подключитесь';
+      } else if (connStatus === 'not_connected') {
+        msg = 'Нажмите «Подключиться» в разделе Подключение';
+      } else if (connStatus === 'not_logged_in') {
+        msg = 'Войдите в Higgsfield в Chrome, затем нажмите «Проверить»';
+      } else {
+        msg = 'Chrome не готов. Проверьте подключение.';
+      }
+      showToast(msg, 4000);
+      return;
+    }
+
     state.generationRequested = true;
     navigate('progress');
   });

@@ -19,6 +19,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     status: () => ipcRenderer.invoke('chrome:status'),
     checkAuth: () => ipcRenderer.invoke('chrome:check-auth'),
     checkInstalled: () => ipcRenderer.invoke('chrome:check-installed'),
+    openModelPage: () => ipcRenderer.invoke('chrome:open-model-page'),
   },
 
   // ── File Import ──

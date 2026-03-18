@@ -42,8 +42,8 @@ let appRoot = null;
 // ── State ──
 const state = {
   currentProject: null,
-  connectionStatus: 'unknown',  // 'connected' | 'no_auth' | 'chrome_running' | 'disconnected' | 'unknown'
-  connectionDetail: null,        // Full chrome:status object {chromeRunning, cdpConnected, hasSession, sessionAge, cookieCount, authenticated}
+  connectionStatus: 'unknown',  // 'no_chrome' | 'chrome_stopped' | 'chrome_running' | 'not_logged_in' | 'ready' | 'unknown'
+  connectionDetail: null,        // Raw data from checks
   selections: {},
   selectionCurrentPrompt: 0,
   generationRequested: false, // Set by settings launch, consumed by progress mount
@@ -185,7 +185,7 @@ function updateSidebarConnDot() {
   const dot = document.getElementById('sidebar-conn-dot');
   if (!dot) return;
   const s = state.connectionStatus;
-  dot.style.background = s === 'connected' ? 'var(--green)' : s === 'chrome_running' ? 'var(--orange)' : 'var(--red)';
+  dot.style.background = s === 'ready' ? 'var(--green)' : (s === 'chrome_running' || s === 'not_logged_in' || s === 'page_not_ready') ? 'var(--orange)' : 'var(--red)';
 }
 
 // ── Topbar ──
@@ -232,18 +232,20 @@ function updateTopbar(screenId) {
   }
 }
 
-// ── Canonical Connection State ──
-// Single function to update connection status everywhere.
-// Derives a richer status string from chrome:status detail.
+// ══════════════════════════════════════════════════════════════
+//  CONNECTION STATE MODEL — Linear guided flow
+//  no_chrome → chrome_stopped → chrome_running → not_logged_in → page_not_ready → ready
+// ══════════════════════════════════════════════════════════════
+
+// Derives the canonical readiness status.
 function deriveConnectionStatus(detail) {
   if (!detail) return 'unknown';
-  if (detail.cdpConnected) {
-    // CDP connected — but is user actually signed in?
-    if (detail.authenticated === false) return 'no_auth';
-    return 'connected';
-  }
-  if (detail.chromeRunning) return 'chrome_running';
-  return 'disconnected';
+  if (detail.chromeNotInstalled) return 'no_chrome';
+  if (!detail.chromeRunning) return 'chrome_stopped';
+  if (!detail.cdpConnected) return 'chrome_running';
+  if (!detail.authenticated) return 'not_logged_in';
+  if (!detail.pageReady) return 'page_not_ready';
+  return 'ready';
 }
 
 function setConnectionStatus(newStatus, detail = null) {
@@ -258,13 +260,21 @@ function setConnectionStatus(newStatus, detail = null) {
 }
 
 // ── Statusbar + Topbar connection pill ──
+const STATUS_PILL = {
+  no_chrome:       { color: 'var(--red)',    label: 'Нет Chrome',          title: 'Google Chrome не установлен' },
+  chrome_stopped:  { color: 'var(--red)',    label: 'Не подключено',       title: 'Chrome не запущен' },
+  chrome_running:  { color: 'var(--orange)', label: 'Подключение…',        title: 'Chrome запущен, подключаюсь…' },
+  not_logged_in:   { color: 'var(--orange)', label: 'Войдите в аккаунт',     title: 'Chrome подключён — войдите в Higgsfield' },
+  page_not_ready:  { color: 'var(--orange)', label: 'Откройте генерацию', title: 'Авторизован — откройте страницу генерации' },
+  ready:           { color: 'var(--green)',  label: 'Готово',              title: 'Higgsfield — готово к генерации' },
+  unknown:         { color: 'var(--text-tertiary)', label: 'Проверяю…',     title: 'Определяю состояние…' },
+};
+
 function updateStatusbar() {
   const status = state.connectionStatus;
-  const isOnline = status === 'connected';
-  const isNoAuth = status === 'no_auth';
-  const isWarning = status === 'chrome_running' || isNoAuth;
+  const cfg = STATUS_PILL[status] || STATUS_PILL.unknown;
 
-  // Bottom statusbar — show project context, NOT connection status (avoid duplication)
+  // Bottom statusbar — project context
   const textEl = document.getElementById('sb-status-text');
   const dotEl = document.getElementById('sb-status-dot');
   if (textEl && dotEl) {
@@ -277,7 +287,7 @@ function updateStatusbar() {
     }
   }
 
-  // Topbar connection pill — single canonical connection indicator
+  // Topbar connection pill
   let pill = document.getElementById('topbar-conn-pill');
   const actionsEl = document.getElementById('topbar-actions');
   if (actionsEl && !pill) {
@@ -288,11 +298,8 @@ function updateStatusbar() {
     actionsEl.prepend(pill);
   }
   if (pill) {
-    const dotColor = isOnline ? 'var(--green)' : isNoAuth ? 'var(--orange)' : isWarning ? 'var(--orange)' : 'var(--red)';
-    const label = isOnline ? 'Подключено' : isNoAuth ? 'Нет авторизации' : isWarning ? 'Chrome запущен' : 'Не подключено';
-    const title = isOnline ? 'Higgsfield — подключено' : isNoAuth ? 'Chrome подключён, но вы не вошли в Higgsfield' : isWarning ? 'Chrome запущен, но нет связи' : 'Нет соединения с Higgsfield';
-    pill.innerHTML = `<span class="topbar-pill-dot" style="background:${dotColor}"></span>${label}`;
-    pill.title = title;
+    pill.innerHTML = `<span class="topbar-pill-dot" style="background:${cfg.color}"></span>${cfg.label}`;
+    pill.title = cfg.title;
   }
 }
 
@@ -311,30 +318,48 @@ function bindStatusbar() {
 }
 
 // ── Background connection poller ──
-// Single source of truth for connection state.
-// Stores FULL detail object + derived status string.
+// Checks: Chrome installed → Chrome running → CDP → Auth → Ready
 let _connPollTimer = null;
 async function pollConnectionNow() {
   try {
-    const detail = await api.chrome.status();
-
-    // If CDP is connected, also check real Higgsfield auth
-    if (detail.cdpConnected) {
-      try {
-        const auth = await api.chrome.checkAuth();
-        detail.authenticated = auth.authenticated;
-      } catch {
-        // Auth check failed — assume not authenticated to be safe
-        detail.authenticated = false;
-      }
-    } else {
-      detail.authenticated = false;
+    // Step 1: Is Chrome installed?
+    const installed = await api.chrome.checkInstalled();
+    if (!installed.installed) {
+      setConnectionStatus('no_chrome', { chromeNotInstalled: true, chromeRunning: false, cdpConnected: false, authenticated: false, pageReady: false });
+      return;
     }
 
-    const newStatus = deriveConnectionStatus(detail);
-    setConnectionStatus(newStatus, detail);
+    // Step 2: Chrome + CDP status
+    const detail = await api.chrome.status();
+    detail.chromeNotInstalled = false;
+
+    if (!detail.chromeRunning) {
+      detail.authenticated = false;
+      detail.pageReady = false;
+      setConnectionStatus(deriveConnectionStatus(detail), detail);
+      return;
+    }
+
+    if (!detail.cdpConnected) {
+      detail.authenticated = false;
+      detail.pageReady = false;
+      setConnectionStatus(deriveConnectionStatus(detail), detail);
+      return;
+    }
+
+    // Step 3: Auth + page readiness check
+    try {
+      const auth = await api.chrome.checkAuth();
+      detail.authenticated = !!auth.authenticated;
+      detail.pageReady = !!auth.pageReady;
+    } catch {
+      detail.authenticated = false;
+      detail.pageReady = false;
+    }
+
+    setConnectionStatus(deriveConnectionStatus(detail), detail);
   } catch {
-    setConnectionStatus('disconnected', { chromeRunning: false, cdpConnected: false, hasSession: false, sessionAge: null, cookieCount: 0, authenticated: false });
+    setConnectionStatus('unknown', { chromeNotInstalled: false, chromeRunning: false, cdpConnected: false, authenticated: false, pageReady: false });
   }
 }
 

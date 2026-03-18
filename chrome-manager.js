@@ -334,9 +334,9 @@ async function checkAuth() {
           new Promise(res => setTimeout(() => res(false), 5000)),
         ]);
 
-        if (hasPromptField) {
+     if (hasPromptField) {
           console.log('[chrome-manager] checkAuth: ✅ Level 0 — on model page with prompt field');
-          return { connected: true, authenticated: true, url };
+          return { connected: true, authenticated: true, pageReady: true, url };
         }
       } catch (e) {
         console.log('[chrome-manager] checkAuth Level 0 error:', e.message);
@@ -430,10 +430,10 @@ async function checkAuth() {
     }
 
     console.log(`[chrome-manager] checkAuth → authenticated=${authenticated}`);
-    return { connected: true, authenticated, url };
+    return { connected: true, authenticated, pageReady: false, url };
   } catch (err) {
     console.error('[chrome-manager] checkAuth fatal:', err.message);
-    return { connected: false, authenticated: false, error: err.message };
+    return { connected: false, authenticated: false, pageReady: false, error: err.message };
   }
 }
 
@@ -523,6 +523,61 @@ async function navigateToModel(modelId) {
   console.log(`[chrome-manager] ✅ Model page ready: ${modelId}`);
 }
 
+// ── Open Model Page (for onboarding) ──────────────────────────
+async function openModelPage() {
+  if (!browser) {
+    return { success: false, error: 'Chrome не подключён' };
+  }
+
+  // Default model slug used by engine
+  const defaultSlug = 'nano_banana_2';
+  const url = `${HIGGSFIELD_URL}/image/${defaultSlug}`;
+
+  try {
+    // If no active page or it's not on higgsfield, use first available
+    if (!activePage) {
+      const pages = await browser.pages();
+      activePage = pages[0] || null;
+    }
+    if (!activePage) {
+      return { success: false, error: 'Нет открытых вкладок в Chrome' };
+    }
+
+    console.log(`[chrome-manager] Opening model page: ${url}`);
+    await activePage.goto(url, { waitUntil: 'networkidle2', timeout: 30000 });
+
+    // Check for sign-in redirect
+    const landedUrl = activePage.url();
+    if (landedUrl.includes('sign-in') || landedUrl.includes('login')) {
+      return { success: false, error: 'Higgsfield требует войти в аккаунт. Войдите в Chrome.', needsAuth: true };
+    }
+
+    // Wait for prompt field (up to 10s)
+    let ready = false;
+    for (let i = 0; i < 10; i++) {
+      await sleep(1000);
+      try {
+        ready = await Promise.race([
+          activePage.evaluate(() => {
+            return ['div[id="hf:tour-image-prompt"]', 'div[role="textbox"][contenteditable="true"]'].some(s => {
+              const el = document.querySelector(s);
+              return el && el.offsetParent !== null;
+            });
+          }),
+          new Promise(r => setTimeout(() => r(false), 3000)),
+        ]);
+      } catch { ready = false; }
+      if (ready) break;
+    }
+
+    console.log(`[chrome-manager] openModelPage: ready=${ready}`);
+    return { success: true, ready, url: activePage.url() };
+  } catch (err) {
+    console.error('[chrome-manager] openModelPage error:', err.message);
+    return { success: false, error: err.message };
+  }
+}
+
 // ── Cleanup ───────────────────────────────────────────────────
 async function cleanup() {
   if (browser) {
@@ -550,6 +605,7 @@ module.exports = {
   getActivePage,
   getBrowser,
   navigateToModel,
+  openModelPage,
   cleanup,
   findChromePath,
   isCDPRunning,

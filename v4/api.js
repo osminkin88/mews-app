@@ -14,9 +14,10 @@ const STUBS = {
     launch: async () => ({ success: false, error: 'Stub: not in Electron' }),
     connect: async () => ({ success: false }),
     status: async () => ({ cdpConnected: false, chromeRunning: false }),
-    checkAuth: async () => ({ authenticated: false }),
+    checkAuth: async () => ({ authenticated: false, pageReady: false }),
     checkInstalled: async () => ({ installed: false }),
     saveSession: async () => ({ success: false }),
+    openModelPage: async () => ({ success: false }),
   },
   file: {
     select: async () => null,

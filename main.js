@@ -746,6 +746,10 @@ ipcMain.handle('chrome:check-installed', () => {
   };
 });
 
+ipcMain.handle('chrome:open-model-page', async () => {
+  return chrome.openModelPage();
+});
+
 // =============================================================
 //  IPC HANDLERS — Projects
 // =============================================================

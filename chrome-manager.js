@@ -166,9 +166,9 @@ async function connectCDP() {
         }
       }
     }
-
-    activePage = modelPage || hfPage || anyHfPage || (pages.length > 0 ? pages[0] : null);
-    console.log(`[chrome-manager] Selected tab: ${activePage ? activePage.url().substring(0, 80) : 'NONE'}`);
+    // Only use Higgsfield tabs — never hijack arbitrary user tabs
+    activePage = modelPage || hfPage || anyHfPage || null;
+    console.log(`[chrome-manager] Selected tab: ${activePage ? activePage.url().substring(0, 80) : 'NONE (will create new tab when needed)'}`);
 
     return { success: true };
   } catch (err) {
@@ -472,7 +472,12 @@ function getBrowser() {
 
 // ── Navigate to Model Page ────────────────────────────────────
 async function navigateToModel(modelId) {
-  if (!activePage) throw new Error('Нет активной страницы');
+  // If no managed page, create a new dedicated tab
+  if (!activePage && browser) {
+    activePage = await browser.newPage();
+    console.log('[chrome-manager] navigateToModel: created new dedicated tab');
+  }
+  if (!activePage) throw new Error('Нет активной страницы — Chrome не подключён');
 
   const url = `${HIGGSFIELD_URL}/image/${modelId}`;
   const currentUrl = activePage.url();
@@ -534,13 +539,19 @@ async function openModelPage() {
   const url = `${HIGGSFIELD_URL}/image/${defaultSlug}`;
 
   try {
-    // If no active page or it's not on higgsfield, use first available
+    // If no active page, find a Higgsfield tab or create a new dedicated one
     if (!activePage) {
       const pages = await browser.pages();
-      activePage = pages[0] || null;
-    }
-    if (!activePage) {
-      return { success: false, error: 'Нет открытых вкладок в Chrome' };
+      // Look for an existing Higgsfield tab first
+      const hfTab = pages.find(p => p.url().includes('higgsfield'));
+      if (hfTab) {
+        activePage = hfTab;
+        console.log(`[chrome-manager] openModelPage: reusing existing Higgsfield tab`);
+      } else {
+        // Create a NEW dedicated tab — never hijack user's existing tabs
+        activePage = await browser.newPage();
+        console.log(`[chrome-manager] openModelPage: created new dedicated tab`);
+      }
     }
 
     console.log(`[chrome-manager] Opening model page: ${url}`);

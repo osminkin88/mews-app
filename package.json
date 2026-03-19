@@ -98,6 +98,7 @@
     "vitest": "^4.1.0"
   },
   "dependencies": {
+    "archiver": "^7.0.1",
     "puppeteer-core": "^24.39.1",
     "xlsx": "^0.18.5"
   }

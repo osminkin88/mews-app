@@ -2167,6 +2167,11 @@ input:focus-visible {
   }
 }
 
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
 /* ── SET SWITCHER ── */
 .set-switcher {
   margin-top: 10px;
@@ -2629,6 +2634,58 @@ input:focus-visible {
   gap: 6px;
   font-size: 12px !important;
   padding: 7px 14px !important;
+}
+
+/* ── RESULTS: ZIP dropdown option hover ── */
+.zip-dropdown-opt {
+  display: block;
+  width: 100%;
+  padding: 11px 16px;
+  background: none;
+  border: none;
+  color: var(--text-primary, #fff);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  line-height: 1.4;
+  font-family: var(--font);
+  transition: background 0.12s ease;
+}
+
+.zip-dropdown-opt:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.zip-dropdown-opt:active {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+/* ── RESULTS: ZIP toggle arrow rotation ── */
+.zip-toggle-arrow {
+  display: block;
+  transition: transform 0.2s ease;
+  flex-shrink: 0;
+}
+
+.zip-toggle-open .zip-toggle-arrow {
+  transform: rotate(180deg);
+}
+
+/* ── RESULTS: Cleanup success status ── */
+@keyframes resStatusFadeIn {
+  from { opacity: 0; transform: translateY(3px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.res-cleanup-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(48, 209, 88, 0.8);
+  animation: resStatusFadeIn 0.2s ease forwards;
 }
 
 /* ── RESULTS: Grid ── */

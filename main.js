@@ -2265,6 +2265,91 @@ ipcMain.handle('projects:export-selected', async (event, { projectId }) => {
   }
 });
 
+// ── Export selected images as ZIP (scoped to active set) ──
+ipcMain.handle('projects:export-zip', async (event, { projectId, includePrompts }) => {
+  const projects = loadProjects();
+  const project = projects.find(p => p.id === projectId);
+  if (!project) return { success: false, error: 'Проект не найден' };
+
+  const activeSet = getActiveSet(project);
+  let selectedDir, promptsCsvPath;
+
+  if (activeSet) {
+    const sd = getSetDir(project, activeSet.id);
+    selectedDir = path.join(sd, 'selected');
+    promptsCsvPath = path.join(sd, 'prompts.csv');
+  } else {
+    const projectDir = path.join(config.ensureOutputDir(), project.folderName || projectId);
+    selectedDir = path.join(projectDir, 'selected');
+    promptsCsvPath = path.join(projectDir, 'prompts.csv');
+  }
+
+  if (!fs.existsSync(selectedDir)) {
+    return { success: false, error: 'Папка selected не найдена' };
+  }
+
+  const imageFiles = fs.readdirSync(selectedDir).filter(f => /\.(png|jpg|jpeg|webp)$/i.test(f)).sort();
+  if (imageFiles.length === 0) {
+    return { success: false, error: 'Нет изображений для экспорта' };
+  }
+
+  // ── Build default ZIP filename ──
+  const safeName = (s) => (s || '').replace(/[<>:"/\\|?*\s]+/g, '_').slice(0, 40);
+  const dateStr = new Date().toISOString().slice(0, 10); // 2026-03-20
+  const setName = activeSet?.name || 'set';
+  const defaultName = `${safeName(project.name)}_${safeName(setName)}_${dateStr}.zip`;
+
+  try {
+    const { dialog, BrowserWindow } = require('electron');
+    const mainWindow = BrowserWindow.getAllWindows()[0];
+    const saveResult = await dialog.showSaveDialog(mainWindow, {
+      title: 'Сохранить ZIP',
+      defaultPath: defaultName,
+      filters: [{ name: 'ZIP Archive', extensions: ['zip'] }],
+    });
+
+    if (saveResult.canceled || !saveResult.filePath) {
+      return { success: false, canceled: true };
+    }
+
+    const destPath = saveResult.filePath;
+
+    // ── Create ZIP with archiver ──
+    const archiver = require('archiver');
+    const output = fs.createWriteStream(destPath);
+
+    await new Promise((resolve, reject) => {
+      const archive = archiver('zip', { zlib: { level: 6 } });
+
+      output.on('close', resolve);
+      output.on('error', reject);
+      archive.on('error', reject);
+
+      archive.pipe(output);
+
+      // Add selected images (flat, preserving original names)
+      for (const f of imageFiles) {
+        archive.file(path.join(selectedDir, f), { name: f });
+      }
+
+      // Optionally add prompts.csv
+      if (includePrompts && fs.existsSync(promptsCsvPath)) {
+        archive.file(promptsCsvPath, { name: 'prompts.csv' });
+      }
+
+      archive.finalize();
+    });
+
+    const count = imageFiles.length + (includePrompts && fs.existsSync(promptsCsvPath) ? 1 : 0);
+    console.log(`[export-zip] ✅ Exported ZIP: ${imageFiles.length} images${includePrompts ? ' + prompts.csv' : ''} → ${destPath}`);
+    return { success: true, count: imageFiles.length, includePrompts: !!(includePrompts && fs.existsSync(promptsCsvPath)), dest: destPath };
+
+  } catch (err) {
+    console.error('[projects] export-zip error:', err);
+    return { success: false, error: err.message };
+  }
+});
+
 // ── Cleanup generated variants after selection (move to trash) ──
 /**
  * Count image files inside generated/<NNN>/ subdirs.

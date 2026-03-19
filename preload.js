@@ -49,6 +49,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('projects:get-selected-images', { projectId }),
     exportSelected: (projectId) =>
       ipcRenderer.invoke('projects:export-selected', { projectId }),
+    exportZip: (projectId, includePrompts) =>
+      ipcRenderer.invoke('projects:export-zip', { projectId, includePrompts }),
     switchSet: (projectId, setId) =>
       ipcRenderer.invoke('projects:switch-set', { projectId, setId }),
     renameSet: (projectId, setId, newName) =>

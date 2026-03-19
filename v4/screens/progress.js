@@ -8,7 +8,7 @@ let container = null;
 let cleanupProgress = null;
 let isRunning = false;
 let lastPct = 0;       // monotonic: bar never goes backwards
-let isStopping = false; // immediate stop feedback
+let uiPhase = 'generating'; // generating | pauseRequested | paused | cancelConfirm | cancelling
 let lastRunSnapshot = null; // {promptTotal, agedCounts, liveTileCount, primary, detail} — post-run context
 
 // Format raw seconds in messages: (102с) → (1м 42с)
@@ -30,7 +30,7 @@ let lastState = {
   detail: 'Ожидание запуска…',
   detailColor: '',
   logEntries: [],      // [{message, step, mode}]
-  liveTiles: [],       // [{key, html, promptIdx}] — recent tiles with full html
+  liveTiles: [],       // [{key, promptIdx, slotIdx, status, url, isBackfill}] — recent tiles data
   agedCounts: { done: 0, failed: 0 }, // aggregate counters for aged-out tiles
   agedSlots: new Map(),   // Map<promptIdx, bitmask> — bits 0-7: done slots, bits 8-15: failed slots
   promptCur: 0,
@@ -42,6 +42,10 @@ let lastState = {
 
 // ── Build a single log entry HTML based on step + mode ──
 function _buildLogEntryHTML(message, step, mode) {
+  if (step === 'debug') {
+    return `<span style="color:var(--text-tertiary);font-size:10px;font-family:monospace;flex:1;margin-left:14px;">🛠 ${message}</span>`;
+  }
+
   // Step-based priority (errors/retries) > mode-based colour
   const isFailed  = step === 'slot_failed' || step === 'boundary_desync';
   const isRetry   = step === 'retry';
@@ -71,11 +75,72 @@ function _buildLogEntryHTML(message, step, mode) {
   return `<span class="log-dot" style="${dotStyle}"></span><span style="color:${textColor};flex:1">${message}</span>`;
 }
 
+function _buildTileHTML(tile) {
+  const slotLabel = `${tile.promptIdx}.${tile.slotIdx}`;
+  
+  if (tile.status === 'failed') {
+    return `
+      <div style="width:100%;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px">
+        <span style="font-size:20px;opacity:0.5">✕</span>
+        <span style="font-size:10px;color:var(--red);font-weight:600">Слот ${tile.slotIdx}</span>
+        <span style="font-size:9px;color:var(--text-tertiary)">${tile.reason || 'ошибка'}</span>
+      </div>
+      <span style="position:absolute;bottom:6px;left:6px;font-size:10px;font-weight:700;background:rgba(0,0,0,0.6);color:var(--red);padding:2px 6px;border-radius:4px;">${slotLabel}</span>
+      <span style="position:absolute;top:6px;right:6px;width:8px;height:8px;border-radius:50%;background:var(--red);box-shadow:0 0 6px var(--red);"></span>
+    `;
+  }
+  
+  if (tile.status === 'placeholder') {
+    return `
+      <div style="width:100%;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px">
+        <span style="font-size:20px;color:var(--green)">✓</span>
+        <span style="font-size:10px;color:var(--text-secondary);font-weight:600">Сохранено</span>
+      </div>
+      <span style="position:absolute;bottom:6px;left:6px;font-size:10px;font-weight:700;background:rgba(0,0,0,0.6);color:#fff;padding:2px 6px;border-radius:4px;">${slotLabel}</span>
+      <span style="position:absolute;top:6px;right:6px;width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 6px var(--green);"></span>
+    `;
+  }
+  
+  // saved status (has url)
+  return `
+    ${tile.url ? `<img src="${tile.url}" style="width:100%;height:100%;object-fit:cover;display:block" />` : ''}
+    <span style="position:absolute;bottom:6px;left:6px;font-size:10px;font-weight:700;background:rgba(0,0,0,0.6);color:#fff;padding:2px 6px;border-radius:4px;backdrop-filter:blur(4px);">${slotLabel}</span>
+    ${tile.isBackfill ? `<span style="position:absolute;top:6px;left:6px;font-size:9px;font-weight:700;background:var(--accent);color:#fff;padding:2px 6px;border-radius:4px;box-shadow:0 0 6px var(--accent);backdrop-filter:blur(4px);">⟳ backfill</span>` : ''}
+    <span style="position:absolute;top:6px;right:6px;width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 6px var(--green);"></span>
+  `;
+}
+
+function _updateDOMTile(tile) {
+  if (!container) return;
+  const grid = document.getElementById('live-grid');
+  if (!grid) return;
+  
+  let node = grid.querySelector(`[data-key="${tile.key}"]`);
+  const htmlContent = _buildTileHTML(tile);
+  
+  if (!node) {
+    node = document.createElement('div');
+    node.className = 'live-tile';
+    node.dataset.key = tile.key;
+    if (tile.status !== 'failed') node.dataset.saved = 'true';
+    const extraStyle = tile.status === 'failed' ? 'border:1px solid rgba(255,59,48,0.2);' : '';
+    node.style.cssText = `position:relative;border-radius:10px;overflow:hidden;aspect-ratio:1;background:var(--bg-float);animation: liveTileFadeIn 0.35s ease;${extraStyle}`;
+    node.innerHTML = htmlContent;
+    grid.appendChild(node);
+    enforceDomCap();
+    return;
+  }
+  
+  if (node.innerHTML !== htmlContent) {
+    node.innerHTML = htmlContent;
+  }
+}
+
 function render() {
   // Only reset progress counters if NOT resuming an active generation
   if (!isRunning && !lastRunSnapshot) {
     lastPct = 0;
-    isStopping = false;
+    uiPhase = 'generating';
     lastState = {
       pct: 0,
       primary: 'Генерация изображений',
@@ -118,8 +183,21 @@ function render() {
             <div class="progress-bar-track"><div id="ph-bar" class="progress-bar-fill" style="width:${pct}%"></div></div>
             <div id="hero-session-chips" class="hero-session-chips"></div>
           </div>
-          <div>
-            <button id="btn-stop" class="btn btn-secondary" style="font-size:11px;padding:6px 12px;color:var(--red)" ${isStopping ? 'disabled' : ''}>${isStopping ? 'Останавливаю\u2026' : '⏸ Приостановить'}</button>
+          <div id="hero-actions-container">
+            <div id="hero-actions" style="display:${uiPhase === 'cancelConfirm' || uiPhase === 'cancelling' ? 'none' : 'flex'};align-items:center;gap:8px">
+              <button id="btn-pause" class="btn btn-secondary" style="font-size:11px;padding:6px 12px;color:var(--red)" ${uiPhase === 'pauseRequested' ? 'disabled' : ''}>
+                ${uiPhase === 'pauseRequested' ? 'Останавливаю…' : '⏸ Пауза'}
+              </button>
+              <button id="btn-cancel" class="btn-cancel-ghost" ${uiPhase === 'pauseRequested' ? 'style="display:none"' : ''}>✕ Отменить</button>
+            </div>
+            <div id="cancel-confirm-strip" class="cancel-confirm-strip" style="display:${uiPhase === 'cancelConfirm' ? 'flex' : 'none'}">
+              <span style="font-size:11px;margin-right:4px">Отменить генерацию?</span>
+              <button id="btn-cancel-confirm" class="btn btn-primary" style="background:var(--red);border:none;padding:4px 10px;font-size:11px">Да, отменить</button>
+              <button id="btn-cancel-dismiss" class="btn-cancel-ghost" style="padding:4px 8px;font-size:11px">Нет</button>
+            </div>
+            <div id="cancelling-strip" style="display:${uiPhase === 'cancelling' ? 'block' : 'none'};font-size:11px;color:var(--red);opacity:0.8;padding:6px 0">
+              Отменяю…
+            </div>
           </div>
         </div>
         <!-- Live grid -->
@@ -161,13 +239,7 @@ function render() {
     if (grid) {
       const startIdx = Math.max(0, lastState.liveTiles.length - MAX_VISIBLE_TILES);
       for (let i = startIdx; i < lastState.liveTiles.length; i++) {
-        const tile = lastState.liveTiles[i];
-        const el = document.createElement('div');
-        el.className = 'live-tile';
-        el.dataset.key = tile.key;
-        el.style.cssText = `position:relative;border-radius:10px;overflow:hidden;aspect-ratio:1;background:var(--bg-float);`;
-        el.innerHTML = tile.html;
-        grid.appendChild(el);
+        _updateDOMTile(lastState.liveTiles[i]);
       }
     }
   }
@@ -178,15 +250,23 @@ function render() {
   // Restore hero session chips on remount
   _renderHeroSessionChips();
 
-  container.querySelector('#btn-stop')?.addEventListener('click', async () => {
-    isStopping = true;
+  container.querySelector('#btn-pause')?.addEventListener('click', async () => {
+    uiPhase = 'pauseRequested';
+    
     // Immediate visual feedback
-    const btn = container?.querySelector('#btn-stop');
-    if (btn) {
-      btn.textContent = 'Останавливаю…';
-      btn.disabled = true;
-      btn.style.opacity = '0.6';
+    const btnPause = container.querySelector('#btn-pause');
+    const btnCancel = container.querySelector('#btn-cancel');
+    if (btnPause) {
+      btnPause.textContent = 'Останавливаю…';
+      btnPause.disabled = true;
+      btnPause.style.opacity = '0.6';
     }
+    if (btnCancel) btnCancel.style.display = 'none';
+
+    // Pulse progress bar
+    const bar = document.getElementById('ph-bar');
+    if (bar) bar.classList.add('pulsing');
+
     const detailEl = document.getElementById('ph-detail');
     if (detailEl) {
       detailEl.textContent = 'Останавливаю — дождитесь завершения текущего слота…';
@@ -194,7 +274,43 @@ function render() {
     }
     lastState.detail = 'Останавливаю — дождитесь завершения текущего слота…';
     lastState.detailColor = 'var(--orange)';
-    await api.generate.stop();
+    
+    await api.generate.pause();
+  });
+
+  container.querySelector('#btn-cancel')?.addEventListener('click', () => {
+    uiPhase = 'cancelConfirm';
+    const heroActions = container.querySelector('#hero-actions');
+    const confirmStrip = container.querySelector('#cancel-confirm-strip');
+    if (heroActions) heroActions.style.display = 'none';
+    if (confirmStrip) confirmStrip.style.display = 'flex';
+  });
+
+  container.querySelector('#btn-cancel-dismiss')?.addEventListener('click', () => {
+    uiPhase = 'generating';
+    const heroActions = container.querySelector('#hero-actions');
+    const confirmStrip = container.querySelector('#cancel-confirm-strip');
+    if (heroActions) heroActions.style.display = 'flex';
+    if (confirmStrip) confirmStrip.style.display = 'none';
+  });
+
+  container.querySelector('#btn-cancel-confirm')?.addEventListener('click', async () => {
+    uiPhase = 'cancelling';
+    
+    const confirmStrip = container.querySelector('#cancel-confirm-strip');
+    const cancellingStrip = container.querySelector('#cancelling-strip');
+    if (confirmStrip) confirmStrip.style.display = 'none';
+    if (cancellingStrip) cancellingStrip.style.display = 'block';
+
+    const detailEl = document.getElementById('ph-detail');
+    if (detailEl) {
+      detailEl.textContent = 'Прерываю процесс без сохранения текущего слота…';
+      detailEl.style.color = 'var(--red)';
+    }
+    lastState.detail = 'Отменено пользователем';
+    lastState.detailColor = 'var(--red)';
+
+    await api.generate.cancel();
   });
 }
 
@@ -238,7 +354,7 @@ function ageOutOldTiles() {
   while (lastState.liveTiles.length > MAX_STATE_WITH_PREVIEW) {
     const old = lastState.liveTiles.shift();
     // Aggregate into compact counters instead of keeping individual records
-    if (old.isFailed) {
+    if (old.status === 'failed') {
       lastState.agedCounts.failed++;
     } else {
       lastState.agedCounts.done++;
@@ -249,7 +365,7 @@ function ageOutOldTiles() {
     const slotMatch = old.key.match(/s(\d+)/);
     if (slotMatch) {
       const slotBit = parseInt(slotMatch[1]) - 1; // 0-based
-      const shift = old.isFailed ? slotBit + 8 : slotBit;
+      const shift = old.status === 'failed' ? slotBit + 8 : slotBit;
       const prev = lastState.agedSlots.get(promptIdx) || 0;
       lastState.agedSlots.set(promptIdx, prev | (1 << shift));
     }
@@ -283,6 +399,39 @@ function updateSummaryRow() {
   }
 }
 
+// ── syncDiskImages (Phase 1 hook) ──
+function syncDiskImages(promptIdx) {
+  const project = state.currentProject;
+  if (!project) return;
+  api.projects.getImages(project.id, promptIdx - 1).then(res => {
+    if (res && res.images) {
+      res.images.forEach(img => {
+        const match = img.name.match(/gen_(\d+)/);
+        if (match) {
+          const slot = parseInt(match[1]);
+          const key = `p${promptIdx}-s${slot}`;
+          const existingTile = lastState.liveTiles.find(t => t.key === key);
+          
+          if (existingTile) {
+            existingTile.url = img.dataUrl;
+            if (existingTile.status === 'placeholder') existingTile.status = 'saved';
+            _updateDOMTile(existingTile);
+          } else {
+            const mask = lastState.agedSlots.get(promptIdx) || 0;
+            const doneAged = (mask & (1 << (slot - 1))) !== 0;
+            if (!doneAged) {
+              const newTile = { key, promptIdx, slotIdx: slot, status: 'saved', url: img.dataUrl, isBackfill: true };
+              lastState.liveTiles.push(newTile);
+              ageOutOldTiles();
+              _updateDOMTile(newTile);
+            }
+          }
+        }
+      });
+    }
+  });
+}
+
 // ── Tile reconciliation ──
 // After a prompt is 'done', ensure all expected slots have tiles.
 // This catches any missed/late/reordered 'saved' events.
@@ -300,32 +449,10 @@ function reconcileTiles(promptIdx, slotCount) {
     const failAged = (mask & (1 << (slotBit + 8))) !== 0;
     if (!exists && !failExists && !doneAged && !failAged) {
       // Backfill placeholder tile
-      const slotLabel = `${promptIdx}.${s}`;
-      const tileHtml = `
-        <div style="width:100%;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px">
-          <span style="font-size:20px;color:var(--green)">✓</span>
-          <span style="font-size:10px;color:var(--text-secondary);font-weight:600">Сохранено</span>
-        </div>
-        <span style="position:absolute;bottom:6px;left:6px;font-size:10px;font-weight:700;background:rgba(0,0,0,0.6);color:#fff;padding:2px 6px;border-radius:4px;">${slotLabel}</span>
-        <span style="position:absolute;top:6px;right:6px;width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 6px var(--green);"></span>
-      `;
-      lastState.liveTiles.push({ key, html: tileHtml, promptIdx });
+      const newTile = { key, promptIdx, slotIdx: s, status: 'placeholder' };
+      lastState.liveTiles.push(newTile);
       ageOutOldTiles();
-
-      // Also add to DOM if mounted
-      if (container) {
-        const grid = document.getElementById('live-grid');
-        if (grid && !grid.querySelector(`[data-key="${key}"]`)) {
-          const tile = document.createElement('div');
-          tile.className = 'live-tile';
-          tile.dataset.key = key;
-          tile.dataset.saved = 'true';
-          tile.style.cssText = 'position:relative;border-radius:10px;overflow:hidden;aspect-ratio:1;background:var(--bg-float);animation: liveTileFadeIn 0.35s ease;';
-          tile.innerHTML = tileHtml;
-          grid.appendChild(tile);
-          enforceDomCap();
-        }
-      }
+      _updateDOMTile(newTile);
     }
   }
 }
@@ -339,7 +466,7 @@ function updateProgress(data) {
   // ── Terminal states ──
   if (data.status === 'complete' || data.status === 'fatal_error' || data.status === 'auth_error') {
     // ── FIX: Force completion state into persistent model BEFORE DOM check ──
-    if (data.status === 'complete' && !isStopping) {
+    if (data.status === 'complete' && uiPhase !== 'pauseRequested' && uiPhase !== 'cancelling') {
       lastPct = 100;
       lastState.pct = 100;
       lastState.primary = 'Генерация завершена';
@@ -354,23 +481,27 @@ function updateProgress(data) {
           reconcileTiles(runIdx, total);
         });
       }
-    } else if (data.status === 'complete' && isStopping) {
+    } else if (data.status === 'complete' && uiPhase === 'pauseRequested') {
       lastState.primary = 'Приостановлено';
       lastState.detail = 'Генерация приостановлена. Сохранённые изображения доступны.';
       lastState.detailColor = 'var(--orange)';
+    } else if (data.status === 'complete' && uiPhase === 'cancelling') {
+      lastState.primary = 'Отменено';
+      lastState.detail = 'Генерация отменена. Текущий слот потерян.';
+      lastState.detailColor = 'var(--red)';
     }
 
     // ── Snapshot AFTER reconciliation — accurate final counts ──
-    const liveDone = lastState.liveTiles.filter(t => !t.isFailed).length;
-    const liveFailed = lastState.liveTiles.filter(t => t.isFailed).length;
+    const liveDone = lastState.liveTiles.filter(t => t.status !== 'failed').length;
+    const liveFailed = lastState.liveTiles.filter(t => t.status === 'failed').length;
     lastRunSnapshot = {
       promptTotal: lastState.promptTotal,
       doneCount: lastState.agedCounts.done + liveDone,
       failedCount: lastState.agedCounts.failed + liveFailed,
       status: data.status,
-      isStopped: isStopping,
+      isStopped: uiPhase === 'pauseRequested',
       recentLogs: lastState.logEntries.slice(0, 5),
-      recentTiles: lastState.liveTiles.slice(-8).map(t => ({ key: t.key, html: t.html, isFailed: t.isFailed })),
+      recentTiles: lastState.liveTiles.slice(-8).map(t => ({ key: t.key, status: t.status, url: t.url, promptIdx: t.promptIdx, slotIdx: t.slotIdx, isBackfill: t.isBackfill })),
     };
 
     if (!container) return;
@@ -380,9 +511,18 @@ function updateProgress(data) {
       const primary = document.getElementById('ph-primary');
       const detail = document.getElementById('ph-detail');
       const bar = document.getElementById('ph-bar');
-      if (isStopping) {
+      if (uiPhase === 'pauseRequested') {
         // ── Paused: stay on Progress, show paused state in hero ──
+        uiPhase = 'paused';
         showPausedState();
+      } else if (uiPhase === 'cancelling' || uiPhase === 'cancelConfirm') {
+        // ── Cancelled: redirect without paused state
+        const savedCount = lastState.agedCounts.done + lastState.liveTiles.filter(t => t.status !== 'failed').length;
+        if (savedCount > 0) {
+          navigate('selection');
+        } else {
+          navigate('settings');
+        }
       } else {
         if (pctEl) pctEl.textContent = '100%';
         if (primary) primary.textContent = lastState.primary;
@@ -484,6 +624,10 @@ function updateProgress(data) {
     // 'done'            — prompt fully generated, reconcile tiles
     // 'partial_skipped' — prompt had partial results, skipped (Stage 2). Count as full step.
     combinedPct = (promptCur / promptTotal) * 100;
+    
+    // Sync actual disk images (Phase 1)
+    syncDiskImages(promptCur);
+
     if (data.step === 'done') {
       // ── RECONCILE: backfill any missing tiles for this prompt ──
       reconcileTiles(promptCur, ipp);
@@ -506,9 +650,10 @@ function updateProgress(data) {
 
   // Persist state (always, regardless of container mount state)
   if (!data._retryUpgrade) {
-    const primaryText = isStopping ? lastState.primary : `Промпт ${promptCur} из ${promptTotal}`;
-    const detailText = isStopping ? lastState.detail : formatTime(data.message || `Промпт ${promptCur} / ${promptTotal}`);
-    const detailCol = isStopping ? lastState.detailColor : '';
+    const isPausedUi = uiPhase === 'pauseRequested' || uiPhase === 'cancelling' || uiPhase === 'cancelConfirm';
+    const primaryText = isPausedUi ? lastState.primary : `Промпт ${promptCur} из ${promptTotal}`;
+    const detailText = isPausedUi ? lastState.detail : formatTime(data.message || `Промпт ${promptCur} / ${promptTotal}`);
+    const detailCol = isPausedUi ? lastState.detailColor : '';
     lastState.pct = pct;
     lastState.primary = primaryText;
     lastState.detail = detailText;
@@ -525,35 +670,20 @@ function updateProgress(data) {
 
   // Persist tile state (always) — saved tiles
   if (data.step === 'saved') {
-    const key = `p${data.promptIndex || promptCur}-s${data.slotIndex || data.savedSlot}`;
-    const existingTile = lastState.liveTiles.find(t => t.key === key);
-    const slotLabel = `${data.promptIndex || promptCur}.${data.slotIndex || data.savedSlot}`;
+    const promptIdx = data.promptIndex || promptCur;
+    const slotIdx = data.slotIndex || data.savedSlot;
+    const key = `p${promptIdx}-s${slotIdx}`;
+    let existingTile = lastState.liveTiles.find(t => t.key === key);
 
-    if (data.previewDataUrl && existingTile) {
-      // Upgrade persisted placeholder with real preview
-      existingTile.html = `
-        <img src="${data.previewDataUrl}" style="width:100%;height:100%;object-fit:cover;display:block" />
-        <span style="position:absolute;bottom:6px;left:6px;font-size:10px;font-weight:700;background:rgba(0,0,0,0.6);color:#fff;padding:2px 6px;border-radius:4px;backdrop-filter:blur(4px);">${slotLabel}</span>
-        <span style="position:absolute;top:6px;right:6px;width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 6px var(--green);"></span>
-      `;
-    } else if (!existingTile) {
-      // New tile
-      const tileHtml = data.previewDataUrl
-        ? `
-          <img src="${data.previewDataUrl}" style="width:100%;height:100%;object-fit:cover;display:block" />
-          <span style="position:absolute;bottom:6px;left:6px;font-size:10px;font-weight:700;background:rgba(0,0,0,0.6);color:#fff;padding:2px 6px;border-radius:4px;backdrop-filter:blur(4px);">${slotLabel}</span>
-          <span style="position:absolute;top:6px;right:6px;width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 6px var(--green);"></span>
-        `
-        : `
-          <div style="width:100%;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px">
-            <span style="font-size:20px;color:var(--green)">✓</span>
-            <span style="font-size:10px;color:var(--text-secondary);font-weight:600">Сохранено</span>
-          </div>
-          <span style="position:absolute;bottom:6px;left:6px;font-size:10px;font-weight:700;background:rgba(0,0,0,0.6);color:#fff;padding:2px 6px;border-radius:4px;">${slotLabel}</span>
-          <span style="position:absolute;top:6px;right:6px;width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 6px var(--green);"></span>
-        `;
-      lastState.liveTiles.push({ key, html: tileHtml, promptIdx: data.promptIndex || promptCur });
+    if (existingTile) {
+      existingTile.url = data.previewDataUrl || existingTile.url;
+      existingTile.status = 'saved';
+      _updateDOMTile(existingTile);
+    } else {
+      const newTile = { key, promptIdx, slotIdx, status: 'saved', url: data.previewDataUrl };
+      lastState.liveTiles.push(newTile);
       ageOutOldTiles();
+      _updateDOMTile(newTile);
     }
   }
 
@@ -561,17 +691,10 @@ function updateProgress(data) {
   if (data.step === 'slot_failed') {
     const key = `p${promptCur}-s${data.failedSlot}-fail`;
     if (!lastState.liveTiles.find(t => t.key === key)) {
-      const tileHtml = `
-        <div style="width:100%;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px">
-          <span style="font-size:20px;opacity:0.5">✕</span>
-          <span style="font-size:10px;color:var(--red);font-weight:600">Слот ${data.failedSlot}</span>
-          <span style="font-size:9px;color:var(--text-tertiary)">${data.failedReason || 'ошибка'}</span>
-        </div>
-        <span style="position:absolute;bottom:6px;left:6px;font-size:10px;font-weight:700;background:rgba(0,0,0,0.6);color:var(--red);padding:2px 6px;border-radius:4px;">${promptCur}.${data.failedSlot}</span>
-        <span style="position:absolute;top:6px;right:6px;width:8px;height:8px;border-radius:50%;background:var(--red);box-shadow:0 0 6px var(--red);"></span>
-      `;
-      lastState.liveTiles.push({ key, html: tileHtml, isFailed: true, promptIdx: promptCur });
+      const newTile = { key, promptIdx: promptCur, slotIdx: data.failedSlot, status: 'failed', reason: data.failedReason };
+      lastState.liveTiles.push(newTile);
       ageOutOldTiles();
+      _updateDOMTile(newTile);
     }
   }
 
@@ -591,8 +714,9 @@ function updateProgress(data) {
   if (barEl) barEl.style.width = pct + '%';
   if (countEl) countEl.textContent = `${promptCur} / ${promptTotal}`;
 
-  if (primaryEl && !isStopping) primaryEl.textContent = lastState.primary;
-  if (detailEl && !isStopping) {
+  const isPausedUi = uiPhase === 'pauseRequested' || uiPhase === 'cancelling' || uiPhase === 'cancelConfirm';
+  if (primaryEl && !isPausedUi) primaryEl.textContent = lastState.primary;
+  if (detailEl && !isPausedUi) {
     detailEl.textContent = lastState.detail;
     detailEl.style.color = lastState.detailColor;
   }
@@ -605,51 +729,6 @@ function updateProgress(data) {
       entry.className = 'log-entry';
       entry.innerHTML = _buildLogEntryHTML(formatTime(data.message), data.step, data._mode);
       logList.prepend(entry);
-    }
-  }
-
-  // ── Live tile DOM (sync with persisted state) ──
-  if (data.step === 'saved') {
-    const grid = document.getElementById('live-grid');
-    if (grid) {
-      const key = `p${data.promptIndex || promptCur}-s${data.slotIndex || data.savedSlot}`;
-      const existing = grid.querySelector(`[data-key="${key}"]`);
-      const tileData = lastState.liveTiles.find(t => t.key === key);
-
-      if (existing && data.previewDataUrl) {
-        // Upgrade DOM tile
-        existing.innerHTML = tileData?.html || existing.innerHTML;
-      } else if (!existing && tileData) {
-        // Create DOM tile from persisted state
-        const tile = document.createElement('div');
-        tile.className = 'live-tile';
-        tile.dataset.key = key;
-        tile.dataset.saved = 'true';
-        tile.style.cssText = `position:relative;border-radius:10px;overflow:hidden;aspect-ratio:1;background:var(--bg-float);animation: liveTileFadeIn 0.35s ease;`;
-        tile.innerHTML = tileData.html;
-        grid.appendChild(tile);
-        enforceDomCap();
-      }
-    }
-  }
-
-  // ── Failed slot tile DOM ──
-  if (data.step === 'slot_failed') {
-    const grid = document.getElementById('live-grid');
-    if (grid) {
-      const key = `p${promptCur}-s${data.failedSlot}-fail`;
-      if (!grid.querySelector(`[data-key="${key}"]`)) {
-        const tileData = lastState.liveTiles.find(t => t.key === key);
-        if (tileData) {
-          const tile = document.createElement('div');
-          tile.className = 'live-tile';
-          tile.dataset.key = key;
-          tile.style.cssText = `position:relative;border-radius:10px;overflow:hidden;aspect-ratio:1;background:var(--bg-float);border:1px solid rgba(255,59,48,0.2);animation: liveTileFadeIn 0.35s ease;`;
-          tile.innerHTML = tileData.html;
-          grid.appendChild(tile);
-          enforceDomCap();
-        }
-      }
     }
   }
 }
@@ -715,7 +794,7 @@ function showPausedState() {
       return;
     }
     // Reset paused state and re-trigger generation
-    isStopping = false;
+    uiPhase = 'generating';
     lastRunSnapshot = null;
     lastPct = 0;
     lastState = {
@@ -839,7 +918,7 @@ export default {
     if (state.generationRequested && !isRunning) {
       lastRunSnapshot = null;
       lastPct = 0;
-      isStopping = false;
+      uiPhase = 'generating';
       lastState = {
         pct: 0,
         primary: 'Генерация изображений',
@@ -859,6 +938,18 @@ export default {
 
     render();
     cleanupProgress = api.generate.onProgress(updateProgress);
+
+    // Sync disk images for active live tiles (Phase 1)
+    if (isRunning && state.currentProject) {
+      const activePromptIndices = [...new Set(lastState.liveTiles.map(t => t.promptIdx).filter(Boolean))];
+      activePromptIndices.forEach(pIdx => {
+        syncDiskImages(pIdx);
+      });
+      // Always sync current prompt too, just in case
+      if (lastState.promptCur && !activePromptIndices.includes(lastState.promptCur)) {
+        syncDiskImages(lastState.promptCur);
+      }
+    }
 
     // Guard: don't start a new generation if one is already running
     if (isRunning) return;

@@ -35,11 +35,13 @@ function withTimeout(promise, ms, label) {
 
 // ── State ─────────────────────────────────────────────────────
 let isGenerating = false;
-let shouldStop = false;
+let shouldPause  = false;  // soft pause: finish current slot, then stop
+let shouldCancel = false;  // hard cancel: abandon current slot immediately
 
 function getIsGenerating() { return isGenerating; }
-function getShouldStop() { return shouldStop; }
-function resetShouldStop() { shouldStop = false; }
+function getShouldPause()  { return shouldPause; }
+function getShouldCancel() { return shouldCancel; }
+function resetStopFlags()  { shouldPause = false; shouldCancel = false; }
 function _resetIsGenerating() { isGenerating = false; }
 
 // ══════════════════════════════════════════════════════════════
@@ -117,7 +119,7 @@ async function generatePrompt(prompt, options = {}) {
     const imageResults = [];
     let fatalError = null; // Set if a fatal error stops the entire batch
 
-    for (let i = 0; i < imagesCount && !shouldStop && !fatalError; i++) {
+    for (let i = 0; i < imagesCount && !shouldPause && !shouldCancel && !fatalError; i++) {
       const img = {
         index: i + 1,
         state: 'pending',
@@ -126,7 +128,7 @@ async function generatePrompt(prompt, options = {}) {
         size: 0,
         quality: null,
         error: null,
-        errorReason: null,   // site_failed | click_failed | timeout | download_failed | validation_failed | auth_error | credits_exhausted | stopped
+        errorReason: null,   // site_failed | click_failed | timeout | download_failed | validation_failed | auth_error | credits_exhausted | paused | cancelled
         attempts: 0,
       };
 
@@ -169,7 +171,7 @@ async function generatePrompt(prompt, options = {}) {
       // ── Per-slot retry loop: up to 2 attempts ──
       let slotSucceeded = false;
 
-      for (let attempt = 1; attempt <= 2 && !slotSucceeded && !shouldStop && !fatalError; attempt++) {
+      for (let attempt = 1; attempt <= 2 && !slotSucceeded && !shouldPause && !shouldCancel && !fatalError; attempt++) {
         img.attempts = attempt;
         img.state = 'in_progress';
 
@@ -317,7 +319,21 @@ async function generatePrompt(prompt, options = {}) {
 
           // ═══ WAIT FOR NEW IMAGE (fingerprint primary detection) ═══
           onProgress({ step: 'waiting', message: `Слот ${img.index}/${imagesCount}: жду результат...`, state: 'generating' });
-          const imageUrl = await waitForSingleImage(page, feedCountBefore, fingerprintsBefore, img.index, imagesCount, onProgress, excludeFingerprints);
+          let imageUrl = await waitForSingleImage(page, feedCountBefore, fingerprintsBefore, img.index, imagesCount, onProgress, excludeFingerprints);
+
+          // ═══ LAST-CHANCE RESCAN: image may have appeared at timeout edge ═══
+          if (!imageUrl && !shouldCancel) {
+            await chrome.sleep(3000);
+            const lcUrls = await scanGenerationImages(page, 10);
+            for (const lcUrl of lcUrls) {
+              const lcUUID = extractUUID(lcUrl);
+              if (lcUUID && !fingerprintsBefore.includes(lcUUID) && !excludeFingerprints.includes(lcUUID)) {
+                console.log(`[engine] 🆘 LAST-CHANCE RESCAN: image found post-timeout (uuid=${lcUUID}): ${(lcUrl || '').substring(0, 80)}...`);
+                imageUrl = lcUrl;
+                break;
+              }
+            }
+          }
 
           if (!imageUrl) {
             // Check if feed shows a site-side failure
@@ -515,9 +531,11 @@ async function generatePrompt(prompt, options = {}) {
         }
       } // end per-slot retry loop
 
-      if (shouldStop && !slotSucceeded && img.state !== 'failed') {
-        img.state = 'stopped';
-        img.errorReason = 'stopped';
+      if ((shouldPause || shouldCancel) && !slotSucceeded && img.state !== 'failed') {
+        img.state = shouldCancel ? 'cancelled' : 'paused';
+        img.errorReason = shouldCancel ? 'cancelled' : 'paused';
+        console.log(`[engine] ⚠️ Slot ${img.index} aborted due to flag. Assigning state: ${img.state}`);
+        onProgress({ step: 'debug', message: `🛑 Exit reason: ${img.state} (флаг активности)` });
       }
 
       imageResults.push(img);
@@ -536,7 +554,7 @@ async function generatePrompt(prompt, options = {}) {
 
     // ── Handle fatal error propagation ──
     if (fatalError) {
-      // Save remaining slots as stopped
+      // Save remaining slots as stopped (fatal errors always mark as 'stopped')
       for (let j = imageResults.length; j < imagesCount; j++) {
         imageResults.push({ index: j + 1, state: 'stopped', errorReason: 'stopped', url: null, file: null });
       }
@@ -548,32 +566,41 @@ async function generatePrompt(prompt, options = {}) {
       throw fatalErr;
     }
 
-    // ── Handle user stop ──
-    if (shouldStop) {
+    // ── Handle user pause / cancel ──
+    if (shouldPause || shouldCancel) {
+      const slotState = shouldCancel ? 'cancelled' : 'paused';
+      console.log(`[engine] ⚠️ Skip remaining slots, assigning state: ${slotState}`);
+      onProgress({ step: 'debug', message: `⏭ Пропуск оставшихся слотов (${slotState})` });
       for (let j = imageResults.length; j < imagesCount; j++) {
-        imageResults.push({ index: j + 1, state: 'stopped', errorReason: 'stopped', url: null, file: null });
+        imageResults.push({ index: j + 1, state: slotState, errorReason: slotState, url: null, file: null });
       }
     }
 
     // ── Final summary ──
     const savedCount = imageResults.filter(r => r.state === 'saved').length;
     const failedCount = imageResults.filter(r => r.state === 'failed').length;
-    const stoppedCount = imageResults.filter(r => r.state === 'stopped').length;
+    const pausedCount = imageResults.filter(r => r.state === 'paused').length;
+    const cancelledCount = imageResults.filter(r => r.state === 'cancelled').length;
+    const stoppedCount = pausedCount + cancelledCount; // backward compat for return value
 
     let promptStatus;
     if (savedCount === imagesCount) {
       promptStatus = 'done';
+    } else if (shouldCancel) {
+      promptStatus = savedCount > 0 ? 'cancelled' : 'cancelled'; // always 'cancelled' on hard cancel
+    } else if (shouldPause && savedCount > 0) {
+      promptStatus = 'paused';
+    } else if (shouldPause && savedCount === 0) {
+      promptStatus = 'paused';
     } else if (savedCount > 0) {
       promptStatus = 'partial';
-    } else if (stoppedCount > 0 && savedCount === 0) {
-      promptStatus = 'stopped';
     } else {
       promptStatus = 'error';
     }
 
-    console.log(`\n[engine] ═══ SUMMARY: ${savedCount} saved, ${failedCount} failed, ${stoppedCount} stopped out of ${imagesCount} → promptStatus=${promptStatus} ═══`);
+    console.log(`\n[engine] ═══ SUMMARY: ${savedCount} saved, ${failedCount} failed, ${pausedCount} paused, ${cancelledCount} cancelled out of ${imagesCount} → promptStatus=${promptStatus} ═══`);
 
-    if (savedCount === 0 && !shouldStop) {
+    if (savedCount === 0 && !shouldPause && !shouldCancel) {
       throw new Error(`Ни одного изображения не сохранено (${failedCount} failed)`);
     }
 
@@ -2020,6 +2047,8 @@ async function detectSiteError(page) {
         for (const el of els) {
           // Skip invisible or tiny elements (like nav items)
           if (el.offsetParent === null && !el.closest('[role="alert"]')) continue;
+          // Skip elements inside the feed — user/promo/warning content, not site errors
+          if (el.closest('#soul-feed-scroll')) continue;
           const text = (el.textContent || '').toLowerCase();
           if (text.length > 200) continue; // Skip large containers — not a toast
           if (
@@ -2326,39 +2355,43 @@ async function waitForSingleImage(page, feedCountBefore, fingerprintsBefore, ind
   // Набор всех запрещённых UUID: до клика + от прошлого промпта
   const forbiddenUUIDs = new Set([...fingerprintsBefore, ...excludeFingerprints]);
 
-  // ── SOFT PAUSE: grace period for in-flight slot ──
-  // When shouldStop is set, don't exit immediately — give the in-flight slot
-  // time to finish. Continue polling with a 90s grace deadline.
-  const GRACE_PERIOD_MS = 90_000;
-  let graceDeadline = null; // set on first shouldStop detection
+  // ── SOFT PAUSE: wait up to HARD_TIMEOUT for in-flight slot ──
+  let pauseLogged = false;
+  let zeroInFlightTicks = 0; // Debounce counter for in-flight == 0
 
   while (Date.now() < hardDeadline) {
-    // ── SOFT PAUSE: detect shouldStop and enter grace period ──
-    if (shouldStop && !graceDeadline) {
-      graceDeadline = Date.now() + GRACE_PERIOD_MS;
-      const graceSec = Math.round(GRACE_PERIOD_MS / 1000);
-      console.log(`[engine] ⏸ SOFT PAUSE: slot ${index} in-flight — grace period ${graceSec}s, ожидаю результат...`);
+    // ── HARD CANCEL: immediate break, no grace period ──
+    if (shouldCancel) {
+      console.log(`[engine] ✕ HARD CANCEL: slot ${index} abandoned immediately`);
+      onProgress({ step: 'debug', message: `🛑 Exit reason: cancelled (слот сброшен)` });
+      return null;
+    }
+
+    // ── SOFT PAUSE: detect shouldPause and enter wait mode ──
+    if (shouldPause && !shouldCancel) {
+      if (!pauseLogged) {
+        console.log(`[engine] ⏸ SOFT PAUSE: slot ${index} in-flight — продолжаю ожидание до ${Math.round(HARD_TIMEOUT/1000)}с (HARD_TIMEOUT)...`);
+        onProgress({ step: 'debug', message: `⏸ Вход в долгое ожидание: дожидаюсь конца слота ${index} (Pause)` });
+        pauseLogged = true;
+      }
       onProgress({
         step: 'waiting',
         message: `⏸ Приостановка — дожидаюсь текущего слота ${index}/${total}...`,
       });
     }
 
-    // ── SOFT PAUSE: check grace period expiry ──
-    if (graceDeadline && Date.now() > graceDeadline) {
-      const graceElapsed = Math.round((Date.now() - (graceDeadline - GRACE_PERIOD_MS)) / 1000);
-      console.log(`[engine] ⏸ GRACE PERIOD EXPIRED: slot ${index} — ${graceElapsed}s since pause, proceeding to reconciliation`);
-      break;
-    }
-
-    // ── SOFT PAUSE: early exit if in-flight cleared without result ──
-    if (graceDeadline) {
+    // ── SOFT PAUSE: early exit if in-flight cleared (WITH DEBOUNCE) ──
+    if (shouldPause && !shouldCancel) {
       const inFlightNow = await countInFlightItems(page);
       if (inFlightNow.total === 0 && queuedGone) {
-        // Site finished processing but no new image appeared — no point waiting longer
-        const graceElapsed = Math.round((Date.now() - (graceDeadline - GRACE_PERIOD_MS)) / 1000);
-        console.log(`[engine] ⏸ GRACE EXIT: in-flight cleared (${graceElapsed}s since pause), no result — proceeding to reconciliation`);
-        break;
+        zeroInFlightTicks++;
+        if (zeroInFlightTicks >= 2) { // Require 2 consecutive checks (with POLL_INTERVAL between)
+          console.log(`[engine] ⏸ GRACE EXIT: in-flight cleared (confirmed twice), proceed to reconciliation`);
+          onProgress({ step: 'debug', message: `🛑 Exit reason: inflight_zero_confirmed` });
+          break;
+        }
+      } else {
+        zeroInFlightTicks = 0; // Reset debounce if not zero
       }
     }
 
@@ -2366,14 +2399,15 @@ async function waitForSingleImage(page, feedCountBefore, fingerprintsBefore, ind
     const elapsed = Math.round((Date.now() - startTime) / 1000);
     const pastSoft = Date.now() > softDeadline;
 
-    // ── Soft timeout: warn but keep waiting if in-flight ──
-    if (pastSoft && !softTimeoutLogged) {
+    // ── Soft timeout: warn but keep waiting if in-flight (DISABLE IF PAUSED to wait fully) ──
+    if (pastSoft && !softTimeoutLogged && !shouldPause) {
       const inFlight = await countInFlightItems(page);
       if (inFlight.total > 0) {
         console.log(`[engine] ⏳ SOFT TIMEOUT (${Math.round(SOFT_TIMEOUT/1000)}s): slot ${index} — still in-flight (Q=${inFlight.queued} G=${inFlight.generating}), continuing to hard timeout...`);
         softTimeoutLogged = true;
       } else {
         console.log(`[engine] ⏳ SOFT TIMEOUT (${Math.round(SOFT_TIMEOUT/1000)}s): slot ${index} — no in-flight, proceeding to reconciliation`);
+        onProgress({ step: 'debug', message: `🛑 Exit reason: hard_timeout (no in-flight after soft_timeout)` });
         break; // Exit loop → reconciliation
       }
     }
@@ -2402,7 +2436,7 @@ async function waitForSingleImage(page, feedCountBefore, fingerprintsBefore, ind
       const topForeUrl = await getFirstFeedImgUrl(page);
       const topForeUUID = extractUUID(topForeUrl);
       const isForbidden = topForeUUID ? forbiddenUUIDs.has(topForeUUID) : null;
-      console.log(`[engine] 🔍 POLL[${elapsed}s] img=${index}: queued=${queued}, feed=${feedCountNow}/${feedCountBefore}, topUUID=${topForeUUID || 'none'}, forbidden=${isForbidden}, genDetected=${generationDetected}, queuedGone=${queuedGone}${graceDeadline ? ', ⏸ GRACE' : ''}`);
+      console.log(`[engine] 🔍 POLL[${elapsed}s] img=${index}: queued=${queued}, feed=${feedCountNow}/${feedCountBefore}, topUUID=${topForeUUID || 'none'}, forbidden=${isForbidden}, genDetected=${generationDetected}, queuedGone=${queuedGone}${(shouldPause && !shouldCancel) ? ', ⏸ PAUSED' : ''}`);
     }
 
     const shouldCheckUUID = queuedGone || feedCountNow > feedCountBefore || elapsed > 10;
@@ -2414,9 +2448,10 @@ async function waitForSingleImage(page, feedCountBefore, fingerprintsBefore, ind
 
       if (topUUID && !forbiddenUUIDs.has(topUUID)) {
         // Genuinely new image — not in pre-click snapshot and not from prior prompt!
-        const graceNote = graceDeadline ? ' (during grace period — saving before pause!)' : '';
+        const graceNote = (shouldPause && !shouldCancel) ? ' (saved during pause wait!)' : '';
         console.log(`[engine] ✅ Image ${index} ready via UUID detection (${elapsed}s, feedCount: ${feedCountBefore}→${feedCountNow}, queued=${queued}, uuid=${topUUID})${graceNote}: ${(topUrl || '').substring(0, 80)}...`);
         // Небольшое ожидание для полной загрузки, но URL уже зафиксирован
+        onProgress({ step: 'debug', message: `✅ Exit reason: uuid_detected (top url)` });
         await chrome.sleep(800);
         return topUrl;
       }
@@ -2437,8 +2472,9 @@ async function waitForSingleImage(page, feedCountBefore, fingerprintsBefore, ind
           }
 
           if (foundUrl) {
-            const graceNote = graceDeadline ? ' (during grace period — saving before pause!)' : '';
+            const graceNote = (shouldPause && !shouldCancel) ? ' (saved during pause wait!)' : '';
             console.log(`[engine] ✅ Image ${index} ready via deep UUID scan (${elapsed}s, queued=${queued}, newUUIDs=${newFingerprints.length})${graceNote}: ${foundUrl.substring(0, 80)}...`);
+            onProgress({ step: 'debug', message: `✅ Exit reason: uuid_detected (deep scan)` });
             await chrome.sleep(800);
             return foundUrl;
           }
@@ -2447,7 +2483,7 @@ async function waitForSingleImage(page, feedCountBefore, fingerprintsBefore, ind
     }
 
     // Status update
-    const statusText = graceDeadline
+    const statusText = (shouldPause && !shouldCancel)
       ? `⏸ дожидаюсь результата...`
       : (queuedGone ? 'обработка...' : queued > 0 ? 'генерация...' : 'ожидание...');
     onProgress({
@@ -2455,12 +2491,13 @@ async function waitForSingleImage(page, feedCountBefore, fingerprintsBefore, ind
       message: `Изображение ${index}/${total}: ${statusText} (${elapsed}с)`,
     });
 
-    // Debug log every 15 seconds
-    if (elapsed % 15 === 0 && elapsed > 0) {
+    // Debug log every 30 seconds
+    if (elapsed % 30 === 0 && elapsed > 0) {
       const topUrl = await getFirstFeedImgUrl(page);
       const topUUID = extractUUID(topUrl);
       const isKnown = topUUID ? forbiddenUUIDs.has(topUUID) : 'N/A';
-      console.log(`[engine] DEBUG: queued=${queued}, queuedGone=${queuedGone}, feedCount=${feedCountNow}/${feedCountBefore}, topUUID=${topUUID || 'none'}, isForbidden=${isKnown}, elapsed=${elapsed}s${graceDeadline ? ', ⏸ GRACE' : ''}`);
+      console.log(`[engine] DEBUG: queued=${queued}, queuedGone=${queuedGone}, feedCount=${feedCountNow}/${feedCountBefore}, topUUID=${topUUID || 'none'}, isForbidden=${isKnown}, elapsed=${elapsed}s${(shouldPause && !shouldCancel) ? ', ⏸ PAUSED' : ''}`);
+      onProgress({ step: 'debug', message: `💓 Heartbeat (${elapsed}с): inFlight=${queued > 0 ? queued : (queuedGone ? 1 : 0)}, top UUID=${topUUID ? topUUID.split('-')[0]+'...' : 'none'}` });
     }
 
     // Past soft timeout: log extended wait status every 30s and break when in-flight clears
@@ -2468,6 +2505,7 @@ async function waitForSingleImage(page, feedCountBefore, fingerprintsBefore, ind
       const inFlight = await countInFlightItems(page);
       if (inFlight.total === 0) {
         console.log(`[engine] ✅ In-flight cleared at ${elapsed}s (past soft timeout) — proceeding to reconciliation`);
+        onProgress({ step: 'debug', message: `🛑 Exit reason: inflight_zero_confirmed (past timeout)` });
         break;
       }
       console.log(`[engine] ⏳ EXTENDED WAIT: slot ${index}, ${elapsed}s, still in-flight (Q=${inFlight.queued} G=${inFlight.generating}), hard limit=${Math.round(HARD_TIMEOUT/1000)}s`);
@@ -2535,6 +2573,7 @@ async function waitForSingleImage(page, feedCountBefore, fingerprintsBefore, ind
     const bestUrl = reconCandidates.find(c => extractUUID(c.url) === best.uuid)?.url;
     if (bestUrl) {
       console.log(`[engine] 🆘 RESCUE: Image ${index} found via reconciliation (${elapsedTotal}s, uuid=${best.uuid}): ${bestUrl.substring(0, 80)}...`);
+      onProgress({ step: 'debug', message: `🚑 Exit reason: reconciliation_rescue (слот восстановился)` });
       await chrome.sleep(800);
       return bestUrl;
     }
@@ -2551,6 +2590,7 @@ async function waitForSingleImage(page, feedCountBefore, fingerprintsBefore, ind
 
   // True zero-candidate timeout
   console.log(`[engine] ⚠️ TIMEOUT: Image ${index} — no valid candidate found after reconciliation (${elapsedTotal}s)`);
+  onProgress({ step: 'debug', message: `🛑 Exit reason: hard_timeout (пусто после сканирования)` });
   return null;
 }
 
@@ -2565,7 +2605,7 @@ async function waitForNewImages(page, beforeCount, expected, onProgress) {
   // Take snapshot of existing URLs to filter out later
   const beforeUrls = new Set(await getFeedImageUrls(page));
 
-  while (Date.now() < deadline && !shouldStop) {
+  while (Date.now() < deadline && !shouldPause && !shouldCancel) {
     await chrome.sleep(POLL_INTERVAL);
 
     const elapsed = Math.round((Date.now() - startTime) / 1000);
@@ -2610,7 +2650,7 @@ async function waitForNewImages(page, beforeCount, expected, onProgress) {
     await dismissOverlays(page);
   }
 
-  if (shouldStop) {
+  if (shouldPause || shouldCancel) {
     const currentUrls = await getFeedImageUrls(page);
     return dedupeUrls(currentUrls.filter(u => !beforeUrls.has(u))).slice(0, expected);
   }
@@ -3100,8 +3140,20 @@ function dedupeUrls(urls) {
 //  STOP / STATE
 // ══════════════════════════════════════════════════════════════
 
+function pauseGeneration() {
+  shouldPause = true;
+  console.log('[engine] ⏸ pauseGeneration() called — soft pause requested');
+}
+
+function cancelGeneration() {
+  shouldCancel = true;
+  shouldPause = true; // cancel implies pause (stops new slots from starting)
+  console.log('[engine] ✕ cancelGeneration() called — hard cancel requested');
+}
+
+// Backward compat alias
 function stopGeneration() {
-  shouldStop = true;
+  pauseGeneration();
 }
 
 // Removed inline function getIsGenerating here since it was duplicated at the top
@@ -3116,10 +3168,13 @@ module.exports = {
   validateDownload,
   browserFetch,
   buildDownloadCandidates,
-  stopGeneration,
+  stopGeneration,      // backward compat alias → pauseGeneration
+  pauseGeneration,
+  cancelGeneration,
   getIsGenerating,
-  getShouldStop,
-  resetShouldStop,
+  getShouldPause,
+  getShouldCancel,
+  resetStopFlags,
   _resetIsGenerating,
   dedupeUrls,
   isUnlimitedOn,

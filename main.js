@@ -375,7 +375,7 @@ ipcMain.handle('generate:start', async (event, { prompts, settings, projectId })
       const s = meta.status;
 
       if (s === 'done') return 'skip';
-      if (s === 'partial' || s === 'partial_desync') return 'backfill'; // ← Stage 2: backfill missing slots
+      if (s === 'partial' || s === 'partial_desync' || s === 'paused') return 'backfill';
 
       // ── BACKFILL CRASH DETECTION ──
       // Case 1: main.js wrote 'backfilling' marker, then crashed before saveIntermediateMeta
@@ -390,7 +390,7 @@ ipcMain.handle('generate:start', async (event, { prompts, settings, projectId })
         return 'run'; // ← normal in_progress (crash during regular run)
       }
 
-      // preparing / generating / error / unknown → re-run
+      // preparing / generating / error / cancelled / unknown → re-run
       return 'run';
     } catch {
       return 'run'; // damaged meta → treat as not done
@@ -443,9 +443,9 @@ ipcMain.handle('generate:start', async (event, { prompts, settings, projectId })
     });
   }
 
-  // Reset stop flag for this entire batch
-  if (typeof engine.resetShouldStop === 'function') {
-    engine.resetShouldStop();
+  // Reset stop flags for this entire batch
+  if (typeof engine.resetStopFlags === 'function') {
+    engine.resetStopFlags();
   } else {
     engine.isGenerating = true; // Fallback for older versions if needed
   }
@@ -453,9 +453,10 @@ ipcMain.handle('generate:start', async (event, { prompts, settings, projectId })
   const results = [];
   let crossPromptExcludeFingerprints = []; // Барьер: UUID от предыдущего промпта
   for (let i = 0; i < effectivePrompts.length; i++) {
-    // Check if stopped by user (only via explicit stop button)
-    if (engine.getShouldStop()) {
-      console.log(`[main] ─── User pressed STOP before prompt ${i + 1}. Breaking. ───`);
+    // Check if paused/cancelled by user
+    if (engine.getShouldPause() || engine.getShouldCancel()) {
+      const reason = engine.getShouldCancel() ? 'CANCEL' : 'PAUSE';
+      console.log(`[main] ─── User pressed ${reason} before prompt ${i + 1}. Breaking. ───`);
       break;
     }
 
@@ -872,7 +873,7 @@ ipcMain.handle('generate:start', async (event, { prompts, settings, projectId })
 
       // ── МЕЖПРОМПТОВЫЙ БАРЬЕР (RC-3, RC-6, RC-DESYNC) ──
       // Ждём стабилизации ленты и фиксируем ТЕКУЩИЕ UUID для защиты следующего промпта
-      if (i < effectivePrompts.length - 1 && !engine.getShouldStop()) {
+      if (i < effectivePrompts.length - 1 && !engine.getShouldPause() && !engine.getShouldCancel()) {
         console.log(`[main] ⏳ После промпта ${uiRunIndex}: ждём стабилизации ленты...`);
         const page = require('./chrome-manager').getActivePage();
         if (page) {
@@ -1061,27 +1062,36 @@ ipcMain.handle('generate:start', async (event, { prompts, settings, projectId })
       }
     }
 
-    // Check if stopped by user (only via explicit stop button)
-    if (engine.getShouldStop()) {
-      console.log(`[main] ─── User pressed STOP after prompt ${i + 1}. Breaking. ───`);
+    // Check if paused/cancelled by user
+    if (engine.getShouldPause() || engine.getShouldCancel()) {
+      const wasCancelled = engine.getShouldCancel();
+      const reason = wasCancelled ? 'CANCEL' : 'PAUSE';
+      console.log(`[main] ─── User pressed ${reason} after prompt ${i + 1}. Breaking. ───`);
 
-      // ── SAVE STOP MARKER: informational only (resume is now meta.json-based) ──
-      // generationState no longer drives which prompts to skip — meta.json does.
-      // We only save it so the banner in settings.js can show "stopped" info.
       if (projectId) {
         try {
           const resumeProjects = loadProjects();
           const resumeProj = resumeProjects.find(p => p.id === projectId);
           const resumeSet = resumeProj ? getActiveSet(resumeProj) : null;
           if (resumeSet) {
-            resumeSet.generationState = {
-              stoppedAt: new Date().toISOString(),
-              totalPrompts: prompts.length,
-              settings: { model, aspect, quality, imagesCount },
-            };
-            resumeSet.status = 'paused';
-            saveProject(resumeProj);
-            console.log(`[main] 💾 Stop marker saved for banner (meta.json drives actual resume)`);
+            if (wasCancelled) {
+              // CANCEL: clear generationState → no resume banner, clean state
+              delete resumeSet.generationState;
+              resumeSet.status = 'cancelled';
+              saveProject(resumeProj);
+              console.log(`[main] ✕ Cancel: generationState cleared — no resume banner`);
+            } else {
+              // PAUSE: save generationState → resume banner in settings.js
+              resumeSet.generationState = {
+                stoppedAt: new Date().toISOString(),
+                reason: 'paused',
+                totalPrompts: prompts.length,
+                settings: { model, aspect, quality, imagesCount },
+              };
+              resumeSet.status = 'paused';
+              saveProject(resumeProj);
+              console.log(`[main] ⏸ Pause marker saved for resume banner`);
+            }
           }
         } catch (saveErr) {
           console.warn('[main] Could not save stop marker:', saveErr.message);
@@ -1093,24 +1103,24 @@ ipcMain.handle('generate:start', async (event, { prompts, settings, projectId })
   }
 
   // Reset engine state after the entire batch completes
-  try { engine.resetShouldStop(); } catch {}
+  try { engine.resetStopFlags(); } catch {}
   // isGenerating was left true by generatePrompt — reset it now
   if (typeof engine.getIsGenerating === 'function') {
     // Direct module-level reset
     engine._resetIsGenerating && engine._resetIsGenerating();
   }
 
-  // ── CLEAR RESUME STATE on full completion (not stopped) ──
-  // If the batch ran to the end naturally (no stop), wipe generationState
+  // ── CLEAR RESUME STATE on full completion (not paused/cancelled) ──
+  // If the batch ran to the end naturally, wipe generationState
   // so next launch starts fresh.
-  if (!engine.getShouldStop() && projectId) {
+  if (!engine.getShouldPause() && !engine.getShouldCancel() && projectId) {
     try {
       const doneProjects = loadProjects();
       const doneProj = doneProjects.find(p => p.id === projectId);
       const doneSet = doneProj ? getActiveSet(doneProj) : null;
       if (doneSet && doneSet.generationState) {
         delete doneSet.generationState;
-        if (doneSet.status === 'paused') doneSet.status = 'completed';
+        if (doneSet.status === 'paused' || doneSet.status === 'cancelled') doneSet.status = 'completed';
         saveProject(doneProj);
         console.log('[main] ✅ Resume state cleared — batch completed fully');
       }
@@ -1142,8 +1152,25 @@ function saveMeta(dir, meta) {
 }
 
 
+ipcMain.handle('generate:pause', () => {
+  console.log('[main] 🛑 ACTION RECEIVED: PAUSE (soft timeout) for current slot');
+  sendToRenderer('generate:progress', { step: 'debug', message: '🛑 PAUSE REQUESTED: дожидаюсь текущего слота' });
+  engine.pauseGeneration();
+  return { success: true };
+});
+
+ipcMain.handle('generate:cancel', () => {
+  console.log('[main] ✕ ACTION RECEIVED: CANCEL (hard timeout) for current slot');
+  sendToRenderer('generate:progress', { step: 'debug', message: '✕ CANCEL REQUESTED: сбрасываю текущий слот' });
+  engine.cancelGeneration();
+  return { success: true };
+});
+
+// Backward compat alias: stop → pause
 ipcMain.handle('generate:stop', () => {
-  engine.stopGeneration();
+  console.log('[main] 🛑 ACTION RECEIVED: STOP (alias for pause)');
+  sendToRenderer('generate:progress', { step: 'debug', message: '🛑 STOP REQUESTED: дожидаюсь текущего слота' });
+  engine.pauseGeneration();
   return { success: true };
 });
 

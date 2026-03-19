@@ -57,7 +57,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   generate: {
     start: (prompts, settings, projectId) =>
       ipcRenderer.invoke('generate:start', { prompts, settings, projectId }),
-    stop: () => ipcRenderer.invoke('generate:stop'),
+    pause:  () => ipcRenderer.invoke('generate:pause'),
+    cancel: () => ipcRenderer.invoke('generate:cancel'),
+    stop:   () => ipcRenderer.invoke('generate:stop'),   // backward compat alias → pause
     onProgress: (callback) => {
       const handler = (event, data) => callback(data);
       ipcRenderer.on('generate:progress', handler);

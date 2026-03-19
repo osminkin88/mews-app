@@ -165,6 +165,11 @@ app.whenReady().then(() => {
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
+
+  // Cleanup old trash on startup (non-blocking)
+  setTimeout(() => {
+    try { cleanupOldTrash(); } catch (e) { console.warn('[trash] cleanup error:', e.message); }
+  }, 5000); // 5s delay to not block startup
 });
 
 app.on('window-all-closed', () => {
@@ -191,6 +196,96 @@ function sendToRenderer(channel, data) {
     const snap = { status: data.status, step: data.step, current: data.current, total: data.total, message: (data.message || '').substring(0,60) };
     console.log(`[main] →renderer [${channel}]: ${JSON.stringify(snap)}`);
     mainWindow.webContents.send(channel, data);
+  }
+}
+
+// =============================================================
+//  TRASH — Safe soft-delete (move to _trash/, not rmSync)
+// =============================================================
+
+/**
+ * Returns the _trash root directory: <outputDir>/_trash/
+ * Created on first use.
+ */
+function getTrashDir() {
+  const trashDir = path.join(config.ensureOutputDir(), '_trash');
+  if (!fs.existsSync(trashDir)) fs.mkdirSync(trashDir, { recursive: true });
+  return trashDir;
+}
+
+/**
+ * Move sourcePath to _trash/<humanReadableLabel>/
+ * Label format: YYYY-MM-DD_HH-MM_<label> — so Finder shows it in chronological order.
+ * Returns the trash destination path.
+ */
+function moveToTrash(sourcePath, label) {
+  if (!fs.existsSync(sourcePath)) {
+    console.warn(`[trash] Source not found, nothing to move: ${sourcePath}`);
+    return null;
+  }
+
+  const trashDir = getTrashDir();
+  const now = new Date();
+  const datePart = now.toISOString().replace('T', '_').substring(0, 16).replace(/:/g, '-'); // YYYY-MM-DD_HH-MM
+  const safeName = (label || path.basename(sourcePath))
+    .replace(/[<>:"/\\|?*]/g, '-')
+    .replace(/\s+/g, '_')
+    .slice(0, 60);
+  const trashName = `${datePart}_${safeName}`;
+  const trashDest = path.join(trashDir, trashName);
+
+  try {
+    // Prefer rename (atomic, instant) — fails across filesystems
+    fs.renameSync(sourcePath, trashDest);
+    console.log(`[trash] ✅ Moved to trash: ${path.basename(sourcePath)} → _trash/${trashName}`);
+    return trashDest;
+  } catch (renameErr) {
+    // Cross-filesystem fallback: copy then delete
+    console.warn(`[trash] rename failed (${renameErr.message}), falling back to copy+delete`);
+    try {
+      fs.cpSync(sourcePath, trashDest, { recursive: true });
+      fs.rmSync(sourcePath, { recursive: true, force: true });
+      console.log(`[trash] ✅ Copied+deleted to trash: _trash/${trashName}`);
+      return trashDest;
+    } catch (copyErr) {
+      console.error(`[trash] ❌ Failed to move to trash: ${copyErr.message}`);
+      return null;
+    }
+  }
+}
+
+/**
+ * Delete _trash entries older than 30 days.
+ * Called once at app startup (non-blocking, 5s delay).
+ */
+function cleanupOldTrash() {
+  const trashDir = path.join(config.getOutputDir(), '_trash');
+  if (!fs.existsSync(trashDir)) return;
+
+  const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
+  const cutoff = Date.now() - THIRTY_DAYS_MS;
+  let cleaned = 0;
+
+  try {
+    const entries = fs.readdirSync(trashDir);
+    for (const entry of entries) {
+      const entryPath = path.join(trashDir, entry);
+      try {
+        const stat = fs.statSync(entryPath);
+        if (stat.mtimeMs < cutoff) {
+          fs.rmSync(entryPath, { recursive: true, force: true });
+          cleaned++;
+          console.log(`[trash] 🗑 Auto-cleaned old entry: ${entry}`);
+        }
+      } catch (e) {
+        console.warn(`[trash] skip cleanup for ${entry}: ${e.message}`);
+      }
+    }
+    if (cleaned > 0) {
+      console.log(`[trash] cleanup done: ${cleaned} entries removed (>30 days old)`);
+    }
+  } catch (e) {
+    console.warn('[trash] cleanup scan failed:', e.message);
   }
 }
 
@@ -1632,22 +1727,33 @@ function sanitizeFolderName(name, existingProjects) {
 }
 
 ipcMain.handle('projects:delete', (event, { id }) => {
-  let projects = loadProjects();
+  const projects = loadProjects();
   const project = projects.find(p => p.id === id);
+  if (!project) return { success: false, error: 'Project not found' };
 
-  // Delete project folder from disk
-  if (project) {
-    const folder = project.folderName || id;
-    const projectDir = path.join(config.ensureOutputDir(), folder);
-    try {
-      if (fs.existsSync(projectDir)) {
-        fs.rmSync(projectDir, { recursive: true, force: true });
-      }
-    } catch (err) {
-      console.error('[projects] Failed to delete folder:', err);
-    }
+  // ── GUARD: block if any set is in_progress ──
+  const inProgressSet = (project.promptSets || []).find(s => s.status === 'in_progress');
+  if (inProgressSet) {
+    return {
+      success: false,
+      error: `Генерация активна (набор «${inProgressSet.name}»). Остановите генерацию перед удалением проекта.`,
+      reason: 'in_progress',
+    };
   }
-  return { success: true };
+
+  // ── SAFE DELETE: move to trash instead of rmSync ──
+  const folder = project.folderName || id;
+  const projectDir = path.join(config.ensureOutputDir(), folder);
+  const trashPath = moveToTrash(projectDir, project.name || folder);
+
+  if (!trashPath && fs.existsSync(projectDir)) {
+    // Should not happen, but log clearly if trash move failed
+    console.error('[projects] trash move failed for project:', projectDir);
+    return { success: false, error: 'Не удалось переместить в корзину. Проект не удалён.' };
+  }
+
+  console.log(`[projects] Project "${project.name}" moved to trash: ${trashPath || '(was missing)'}`);
+  return { success: true, trashPath };
 });
 
 ipcMain.handle('projects:update', (event, { id, updates }) => {
@@ -1785,39 +1891,51 @@ ipcMain.handle('projects:delete-set', (event, { projectId, setId }) => {
 
   const targetSet = project.promptSets[setIdx];
 
-  // Block deletion of actively generating set
+  // ── GUARD: block deletion of actively generating set ──
   if (targetSet.status === 'in_progress') {
-    return { success: false, error: 'Набор сейчас генерируется. Остановите генерацию перед удалением.' };
+    return {
+      success: false,
+      error: 'Набор сейчас генерируется. Остановите генерацию перед удалением.',
+      reason: 'in_progress',
+    };
   }
 
-  // Physical deletion is temporarily disabled per request
-  // const setDir = getSetDir(project, setId);
-  // if (fs.existsSync(setDir)) {
-  //   try {
-  //     fs.rmSync(setDir, { recursive: true, force: true });
-  //     console.log(`[projects] Deleted set folder: ${setDir}`);
-  //   } catch (e) {
-  //     console.error('[projects] Failed to delete set folder:', e.message);
-  //   }
-  // }
+  // ── SAFE DELETE: move set folder to trash ──
+  const setDir = getSetDir(project, setId);
+  let trashPath = null;
+  if (fs.existsSync(setDir)) {
+    trashPath = moveToTrash(setDir, `${project.name} — ${targetSet.name}`);
+    if (!trashPath) {
+      console.error('[projects] trash move failed for set:', setDir);
+      return { success: false, error: 'Не удалось переместить набор в корзину. Удаление отменено.' };
+    }
+  }
+
+  // ── Determine which set becomes active after deletion ──
+  let nextActiveSet = null;
+  const wasActive = project.activePromptSetId === setId;
 
   project.promptSets.splice(setIdx, 1);
 
-  // Handle active set switching
-  if (project.activePromptSetId === setId) {
+  if (wasActive) {
     if (project.promptSets.length > 0) {
-      // Switch to last remaining set
-      project.activePromptSetId = project.promptSets[project.promptSets.length - 1].id;
+      // Switch to last remaining set (descending recency)
+      nextActiveSet = project.promptSets[project.promptSets.length - 1];
+      project.activePromptSetId = nextActiveSet.id;
     } else {
-      // No sets left — project returns to empty state
       project.activePromptSetId = null;
       project.status = 'draft';
     }
   }
 
   saveProject(project);
-  console.log(`[projects] Deleted prompt set: "${targetSet.name}" (${setId})`);
-  return { success: true, remainingSets: project.promptSets.length };
+  console.log(`[projects] Moved set "${targetSet.name}" (${setId}) to trash: ${trashPath || '(folder was missing)'}`);
+  return {
+    success: true,
+    remainingSets: project.promptSets.length,
+    trashPath,
+    nextActiveSet: nextActiveSet ? { id: nextActiveSet.id, name: nextActiveSet.name } : null,
+  };
 });
 
 // ── Duplicate Set as Active (Restart Generation from Zero) ──

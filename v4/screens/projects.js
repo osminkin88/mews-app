@@ -72,8 +72,7 @@ async function render() {
         : projects.map(p => renderProjectCard(p)).join('')
       }</div>
     </div>
-    <!-- Context menu (hidden) -->
-    <div id="ctx-menu" class="ctx-menu" style="display:none">
+    <div class="ctx-menu" id="ctx-menu" style="display:none">
       <button class="ctx-item" data-action="open-folder">
         <svg viewBox="0 0 24 24"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
         Открыть папку
@@ -96,9 +95,9 @@ async function render() {
         Дублировать
       </button>
       <div class="ctx-divider"></div>
-      <button class="ctx-item ctx-danger" data-action="delete">
+      <button class="ctx-item ctx-danger" data-action="delete" id="ctx-item-delete">
         <svg viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-        Удалить
+        Удалить проект
       </button>
     </div>
   `;
@@ -139,6 +138,10 @@ function renderProjectCard(p) {
         ${primaryAction.icon}
         <span>${primaryAction.label}</span>
       </button>
+      <div class="pc-qa-sep"></div>
+      <button class="pc-more" data-id="${p.id}" title="Действия" aria-label="Действия с проектом">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/></svg>
+      </button>
     </div>
   `;
 
@@ -157,13 +160,12 @@ function renderProjectCard(p) {
         </div>
       </div>
       <div class="pc-right">
-        ${renderBadge(p.status)}
-        <span class="pc-date">${date}</span>
+        <div class="pc-status-wrap">
+          ${renderBadge(p.status)}
+          <span class="pc-date">${date}</span>
+        </div>
+        ${qaHtml}
       </div>
-      ${qaHtml}
-      <button class="pc-more" data-id="${p.id}" title="Действия" aria-label="Действия с проектом">
-        <svg viewBox="0 0 24 24"><circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/></svg>
-      </button>
     </div>
   `;
 }
@@ -340,11 +342,23 @@ function showContextMenu(projectId, anchorEl, x, y) {
 
   menu.style.display = 'block';
 
+  // Update delete button state based on in_progress status
+  const project = projects.find(p => p.id === projectId);
+  const deleteBtn = menu.querySelector('#ctx-item-delete');
+  if (deleteBtn && project) {
+    const hasInProgress = (project.promptSets || []).some(s => s.status === 'in_progress');
+    deleteBtn.disabled = hasInProgress;
+    deleteBtn.title = hasInProgress ? 'Генерация активна — остановите перед удалением' : '';
+    deleteBtn.style.opacity = hasInProgress ? '0.4' : '';
+    deleteBtn.style.cursor = hasInProgress ? 'not-allowed' : '';
+  }
+
   menu.querySelectorAll('.ctx-item').forEach(item => {
     const clone = item.cloneNode(true);
     item.replaceWith(clone);
     clone.addEventListener('click', (e) => {
       e.stopPropagation();
+      if (clone.disabled) return;
       handleAction(clone.dataset.action, projectId);
       hideContextMenu();
     });
@@ -428,18 +442,156 @@ async function handleAction(action, projectId) {
     }
 
     case 'delete': {
-      const confirmed = confirm(`Удалить проект «${project.name}»?\nВсе промпты и настройки будут потеряны.`);
-      if (confirmed) {
-        await api.projects.delete(project.id);
-        if (state.currentProject?.id === project.id) {
-          state.currentProject = null;
-          updateStatusbar();
-        }
-        render();
-      }
+      showDeleteProjectModal(project);
       break;
     }
   }
+}
+
+// ════════════════════════════════════════════════
+// Delete Project Modal (Фаза 2)
+// ════════════════════════════════════════════════
+function showDeleteProjectModal(project) {
+  const setsCount = (project.promptSets || []).length;
+  const hasInProgress = (project.promptSets || []).some(s => s.status === 'in_progress');
+
+  // Backend guard kicks in too, but show clear UI message
+  if (hasInProgress) {
+    showToast('⛔ Остановите генерацию перед удалением проекта');
+    return;
+  }
+
+  const setsLabel = setsCount === 0
+    ? 'Пустой проект'
+    : setsCount === 1
+      ? '1 набор промптов'
+      : `${setsCount} набора промптов`;
+
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `
+    <div class="modal-card delete-confirm-modal" style="width:420px">
+      <div class="delete-modal-icon">
+        <svg viewBox="0 0 24 24" style="width:28px;height:28px"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+      </div>
+      <div class="modal-header" style="padding-top:0">Удалить проект?</div>
+      <div class="delete-modal-body">
+        <div class="delete-modal-target">«${project.name}»</div>
+        <div class="delete-modal-meta">${setsLabel} · все файлы</div>
+        <div class="delete-modal-note">
+          <svg viewBox="0 0 24 24" style="width:13px;height:13px;flex-shrink:0"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+          Данные будут перемещены в корзину Mews.<br>Вы сможете восстановить их в течение 30 дней.
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button id="del-proj-cancel" class="btn btn-secondary">Отмена</button>
+        <button id="del-proj-confirm" class="btn btn-danger">Удалить проект</button>
+      </div>
+    </div>
+  `;
+
+  container.appendChild(overlay);
+
+  const doDelete = async () => {
+    overlay.remove();
+    const result = await api.projects.delete(project.id);
+    if (!result?.success) {
+      showToast(`⛔ ${result?.error || 'Не удалось удалить проект'}`);
+      return;
+    }
+    if (state.currentProject?.id === project.id) {
+      state.currentProject = null;
+      updateStatusbar();
+    }
+    showToast(`🗑 Проект «${project.name}» перемещён в корзину`);
+    render();
+  };
+
+  overlay.querySelector('#del-proj-confirm').addEventListener('click', doDelete);
+  overlay.querySelector('#del-proj-cancel').addEventListener('click', () => overlay.remove());
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+  overlay.addEventListener('keydown', (e) => { if (e.key === 'Escape') overlay.remove(); });
+  requestAnimationFrame(() => overlay.querySelector('#del-proj-confirm')?.focus());
+}
+
+// ════════════════════════════════════════════════
+// Delete Set Modal (Фаза 2)
+// Вызывается из settings.js через showDeleteSetConfirm()
+// ════════════════════════════════════════════════
+export function showDeleteSetConfirm(project, setToDelete, onSuccess) {
+  if (!project || !setToDelete) return;
+
+  const isActive = project.activePromptSetId === setToDelete.id;
+  const isLastSet = (project.promptSets || []).length === 1;
+
+  // UI guard
+  if (setToDelete.status === 'in_progress') {
+    showToast('⛔ Остановите генерацию перед удалением набора');
+    return;
+  }
+
+  // Determine which set will become active
+  const remainingSets = (project.promptSets || []).filter(s => s.id !== setToDelete.id);
+  const nextSet = remainingSets.length > 0 ? remainingSets[remainingSets.length - 1] : null;
+
+  const nextSetHtml = isActive
+    ? nextSet
+      ? `<div class="delete-modal-note" style="margin-top:8px">
+           <svg viewBox="0 0 24 24" style="width:13px;height:13px;flex-shrink:0"><polyline points="9 18 15 12 9 6"/></svg>
+           После удаления активным станет: <strong>«${nextSet.name}»</strong>
+         </div>`
+      : `<div class="delete-modal-note delete-modal-note--warn" style="margin-top:8px">
+           <svg viewBox="0 0 24 24" style="width:13px;height:13px;flex-shrink:0"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+           Это последний набор — проект станет пустым
+         </div>`
+    : '';
+
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `
+    <div class="modal-card delete-confirm-modal" style="width:420px">
+      <div class="delete-modal-icon">
+        <svg viewBox="0 0 24 24" style="width:28px;height:28px"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+      </div>
+      <div class="modal-header" style="padding-top:0">Удалить набор промптов?</div>
+      <div class="delete-modal-body">
+        <div class="delete-modal-target">«${setToDelete.name}»</div>
+        <div class="delete-modal-meta">${setToDelete.promptCount || 0} промптов · все изображения${isActive ? ' · <span style="color:var(--accent)">активный</span>' : ''}</div>
+            <div class="delete-modal-note">
+              <svg viewBox="0 0 24 24" style="width:13px;height:13px;flex-shrink:0"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+              Набор будет перемещён в корзину Mews.<br>Вы сможете восстановить его в течение 30 дней.
+            </div>
+        ${nextSetHtml}
+      </div>
+      <div class="modal-footer">
+        <button id="del-set-cancel" class="btn btn-secondary">Отмена</button>
+        <button id="del-set-confirm" class="btn btn-danger">Удалить набор</button>
+      </div>
+    </div>
+  `;
+
+  // Append to body so it works from any screen
+  document.body.appendChild(overlay);
+
+  const doDelete = async () => {
+    overlay.remove();
+    const result = await api.projects.deleteSet(project.id, setToDelete.id);
+    if (!result?.success) {
+      showToast(`⛔ ${result?.error || 'Не удалось удалить набор'}`);
+      return;
+    }
+    const toastMsg = result.nextActiveSet
+      ? `🗑 Набор удалён. Активный: «${result.nextActiveSet.name}»`
+      : '🗑 Набор удалён';
+    showToast(toastMsg);
+    if (onSuccess) onSuccess(result);
+  };
+
+  overlay.querySelector('#del-set-confirm').addEventListener('click', doDelete);
+  overlay.querySelector('#del-set-cancel').addEventListener('click', () => overlay.remove());
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+  overlay.addEventListener('keydown', (e) => { if (e.key === 'Escape') overlay.remove(); });
+  requestAnimationFrame(() => overlay.querySelector('#del-set-confirm')?.focus());
 }
 
 export default {

@@ -1,8 +1,7 @@
 /* ── Progress Screen ── */
 import { api, navigate, state } from '../app.js';
 
-const MAX_VISIBLE_TILES = 16;  // DOM cap: only most recent N tile nodes mounted
-const MAX_STATE_WITH_PREVIEW = 24; // state cap: beyond this, strip data URLs from old tiles
+const MAX_STATE_WITH_PREVIEW = 200; // state cap: beyond this, age out old tiles
 
 let container = null;
 let cleanupProgress = null;
@@ -10,6 +9,7 @@ let isRunning = false;
 let lastPct = 0;       // monotonic: bar never goes backwards
 let uiPhase = 'generating'; // generating | pauseRequested | paused | cancelConfirm | cancelling
 let lastRunSnapshot = null; // {promptTotal, agedCounts, liveTileCount, primary, detail} — post-run context
+let persistentGrid = null;  // DETACH-REATTACH: live-grid DOM node сохраняется между unmount/remount
 
 // Format raw seconds in messages: (102с) → (1м 42с)
 function formatTime(msg) {
@@ -119,7 +119,6 @@ function _updateDOMTile(tile) {
   if (!grid) return;
   
   let node = grid.querySelector(`[data-key="${tile.key}"]`);
-  const htmlContent = _buildTileHTML(tile);
   
   if (!node) {
     node = document.createElement('div');
@@ -128,11 +127,20 @@ function _updateDOMTile(tile) {
     if (tile.status !== 'failed') node.dataset.saved = 'true';
     const extraStyle = tile.status === 'failed' ? 'border:1px solid rgba(255,59,48,0.2);' : '';
     node.style.cssText = `position:relative;border-radius:10px;overflow:hidden;aspect-ratio:1;background:var(--bg-float);animation: liveTileFadeIn 0.35s ease;${extraStyle}`;
-    node.innerHTML = htmlContent;
+    node.innerHTML = _buildTileHTML(tile);
     grid.appendChild(node);
     return;
   }
-  
+
+  // FIX A: для saved-плиток с url — не трогать img если src не изменился
+  if (tile.status === 'saved' && tile.url) {
+    const existingImg = node.querySelector('img');
+    if (existingImg && existingImg.getAttribute('src') === tile.url) {
+      return; // img уже правильный — нет смысла пересоздавать, нет flash
+    }
+  }
+
+  const htmlContent = _buildTileHTML(tile);
   if (node.innerHTML !== htmlContent) {
     node.innerHTML = htmlContent;
   }
@@ -178,9 +186,123 @@ function upsertTile(tileData) {
       const node = grid.querySelector(`[data-key="${t.key}"]`);
       if (node) grid.appendChild(node);
     });
-    // DOM cap after ordering so we safely truncate the oldest items from the top
-    enforceDomCap();
+    updateSummaryRow();
   }
+}
+
+// FIX B: патч только hero-элементов без полного rebuild при remount
+function _patchHero() {
+  const pct = isRunning ? lastState.pct : 0;
+  const pctEl     = document.getElementById('ph-percent');
+  const barEl     = document.getElementById('ph-bar');
+  const primaryEl = document.getElementById('ph-primary');
+  const detailEl  = document.getElementById('ph-detail');
+  const countEl   = document.getElementById('log-count');
+  if (pctEl)     pctEl.textContent = pct + '%';
+  if (barEl)     barEl.style.width = pct + '%';
+  if (primaryEl) primaryEl.textContent = isRunning ? lastState.primary : 'Генерация изображений';
+  if (detailEl) {
+    detailEl.textContent = isRunning ? lastState.detail : 'Ожидание запуска…';
+    detailEl.style.color = isRunning ? (lastState.detailColor || 'var(--text-tertiary)') : 'var(--text-tertiary)';
+  }
+  if (countEl) countEl.textContent = isRunning ? `${lastState.promptCur} / ${lastState.promptTotal}` : '0 / 0';
+}
+
+// FIX B: обновить состояние кнопок pause/cancel без rebuild
+function _patchButtonStates() {
+  const heroActions    = document.getElementById('hero-actions');
+  const confirmStrip   = document.getElementById('cancel-confirm-strip');
+  const cancellingStrip = document.getElementById('cancelling-strip');
+  const btnPause       = document.getElementById('btn-pause');
+  const btnCancel      = document.getElementById('btn-cancel');
+
+  if (uiPhase === 'cancelConfirm') {
+    if (heroActions)      heroActions.style.display = 'none';
+    if (confirmStrip)     confirmStrip.style.display = 'flex';
+    if (cancellingStrip)  cancellingStrip.style.display = 'none';
+  } else if (uiPhase === 'cancelling') {
+    if (heroActions)      heroActions.style.display = 'none';
+    if (confirmStrip)     confirmStrip.style.display = 'none';
+    if (cancellingStrip)  cancellingStrip.style.display = 'block';
+  } else {
+    if (heroActions)      heroActions.style.display = 'flex';
+    if (confirmStrip)     confirmStrip.style.display = 'none';
+    if (cancellingStrip)  cancellingStrip.style.display = 'none';
+  }
+
+  if (btnPause) {
+    if (uiPhase === 'pauseRequested') {
+      btnPause.textContent = 'Останавливаю…';
+      btnPause.disabled = true;
+      btnPause.style.opacity = '0.6';
+    } else {
+      btnPause.textContent = '⏸ Пауза';
+      btnPause.disabled = false;
+      btnPause.style.opacity = '';
+    }
+  }
+  if (btnCancel) {
+    btnCancel.style.display = uiPhase === 'pauseRequested' ? 'none' : '';
+  }
+}
+
+// FIX B: перепривязать обработчики кнопок после patch-mode remount
+function _reattachEventListeners() {
+  const btnPause   = document.getElementById('btn-pause');
+  const btnCancel  = document.getElementById('btn-cancel');
+  const btnConfirm = document.getElementById('btn-cancel-confirm');
+  const btnDismiss = document.getElementById('btn-cancel-dismiss');
+
+  // Клонируем узлы чтобы снять старые listeners (безопасно — мы не трогали grid)
+  const replaceBtn = (el) => {
+    if (!el) return null;
+    const clone = el.cloneNode(true);
+    el.parentNode.replaceChild(clone, el);
+    return clone;
+  };
+
+  const newPause   = replaceBtn(btnPause);
+  const newCancel  = replaceBtn(btnCancel);
+  const newConfirm = replaceBtn(btnConfirm);
+  const newDismiss = replaceBtn(btnDismiss);
+
+  newPause?.addEventListener('click', async () => {
+    uiPhase = 'pauseRequested';
+    _patchButtonStates();
+    const bar = document.getElementById('ph-bar');
+    if (bar) bar.classList.add('pulsing');
+    const detailEl = document.getElementById('ph-detail');
+    if (detailEl) {
+      detailEl.textContent = 'Останавливаю — дождитесь завершения текущего слота…';
+      detailEl.style.color = 'var(--orange)';
+    }
+    lastState.detail = 'Останавливаю — дождитесь завершения текущего слота…';
+    lastState.detailColor = 'var(--orange)';
+    await api.generate.pause();
+  });
+
+  newCancel?.addEventListener('click', () => {
+    uiPhase = 'cancelConfirm';
+    _patchButtonStates();
+  });
+
+  newDismiss?.addEventListener('click', () => {
+    uiPhase = 'generating';
+    _patchButtonStates();
+  });
+
+  newConfirm?.addEventListener('click', async () => {
+    uiPhase = 'cancelling';
+    _patchButtonStates();
+    const detailEl = document.getElementById('ph-detail');
+    if (detailEl) {
+      detailEl.textContent = 'Прерываю процесс без сохранения текущего слота…';
+      detailEl.style.color = 'var(--red)';
+    }
+    lastState.detail = 'Отменено пользователем';
+    lastState.detailColor = 'var(--red)';
+    await api.generate.cancel();
+  });
 }
 
 function render() {
@@ -208,6 +330,18 @@ function render() {
     };
   }
 
+  // FIX B: PATCH MODE при remount во время активной генерации
+  // Если grid уже присутствует в DOM — обновляем только hero, не трогаем плитки
+  const isForeign = activeRunProjectId && state.currentProject && state.currentProject.id !== activeRunProjectId;
+  if (isRunning && !isForeign && document.getElementById('live-grid')) {
+    _patchHero();
+    _patchButtonStates();
+    updateSummaryRow();
+    _renderHeroSessionChips();
+    _reattachEventListeners();
+    return;
+  }
+
   const pct = isRunning ? lastState.pct : 0;
   const primary = isRunning ? lastState.primary : 'Генерация изображений';
   const detail = isRunning ? lastState.detail : 'Ожидание запуска…';
@@ -217,8 +351,6 @@ function render() {
   // Compute summary counts
   const agedTotal = lastState.agedCounts.done + lastState.agedCounts.failed;
   const totalGenerated = lastState.liveTiles.length + agedTotal;
-
-  const isForeign = activeRunProjectId && state.currentProject && state.currentProject.id !== activeRunProjectId;
 
   container.innerHTML = `
     <div style="display:grid;grid-template-columns:1fr 280px;overflow:hidden;flex:1">
@@ -286,7 +418,7 @@ function render() {
     </div>
   `;
 
-  // Restore log entries on remount
+  // Restore log entries on remount (всегда — log не персистируется в DOM)
   if (isRunning && lastState.logEntries.length > 0) {
     const logList = document.getElementById('log-list');
     if (logList) {
@@ -299,22 +431,38 @@ function render() {
     }
   }
 
-  // Restore live tiles on remount (only most recent MAX_VISIBLE_TILES)
-  if (isRunning && lastState.liveTiles.length > 0) {
-    const grid = document.getElementById('live-grid');
-    if (grid) {
-      const startIdx = Math.max(0, lastState.liveTiles.length - MAX_VISIBLE_TILES);
-      for (let i = startIdx; i < lastState.liveTiles.length; i++) {
-        _updateDOMTile(lastState.liveTiles[i]);
+  // DETACH-REATTACH: если сохранён persistentGrid — подставляем его вместо пустого live-grid
+  // Это исключает flash: плитки и img уже в живом DOM, не пересоздаются
+  if (persistentGrid && isRunning && !isForeign) {
+    const emptyGrid = document.getElementById('live-grid');
+    if (emptyGrid && emptyGrid.parentNode) {
+      // Перед reattach гарантируем отсутствие дублирующей summary-row:
+      // persistentGrid уже содержит актуальную summary-row из прошлого mount
+      emptyGrid.parentNode.replaceChild(persistentGrid, emptyGrid);
+    }
+    persistentGrid = null; // освобождаем — grid теперь живёт в DOM
+    // Patch summary-row на актуальные данные (без дублирования — updateSummaryRow проверяет наличие)
+    updateSummaryRow();
+  } else {
+    // Обычный путь: первый mount или после завершения генерации
+    // Restore all live tiles через _updateDOMTile
+    if (isRunning && lastState.liveTiles.length > 0) {
+      const grid = document.getElementById('live-grid');
+      if (grid) {
+        for (let i = 0; i < lastState.liveTiles.length; i++) {
+          _updateDOMTile(lastState.liveTiles[i]);
+        }
       }
     }
+    // Update summary row
+    updateSummaryRow();
   }
-
-  // Update summary row
-  updateSummaryRow();
 
   // Restore hero session chips on remount
   _renderHeroSessionChips();
+
+  // Restore button states (pause/cancel strip visibility)
+  _patchButtonStates();
 
   container.querySelector('#btn-switch-active')?.addEventListener('click', async () => {
     const list = await api.projects.list();
@@ -411,19 +559,6 @@ function showError(message) {
     btn.addEventListener('click', () => navigate('settings'));
     heroEl.appendChild(btn);
   }
-}
-
-// ── DOM cap: enforce maximum mounted tile count ──
-function enforceDomCap() {
-  const grid = document.getElementById('live-grid');
-  if (!grid) return;
-  const tiles = grid.querySelectorAll('.live-tile');
-  if (tiles.length <= MAX_VISIBLE_TILES) return;
-  const excess = tiles.length - MAX_VISIBLE_TILES;
-  for (let i = 0; i < excess; i++) {
-    tiles[i].remove();
-  }
-  updateSummaryRow();
 }
 
 // ── State cap: age out old tiles to free memory ──
@@ -1092,6 +1227,19 @@ export default {
   unmount() {
     if (cleanupProgress) cleanupProgress();
     cleanupProgress = null;
+
+    // DETACH-REATTACH: вырываем live-grid из DOM до того, как router сделает container.innerHTML = ''
+    // Применяем только для нормального isRunning-сценария, не для foreign-project
+    const isForeign = activeRunProjectId && state.currentProject && state.currentProject.id !== activeRunProjectId;
+    if (isRunning && !isForeign) {
+      const grid = container ? container.querySelector('#live-grid') : document.getElementById('live-grid');
+      if (grid && grid.parentNode) {
+        persistentGrid = grid.parentNode.removeChild(grid); // детач — router не уничтожит
+      }
+    } else {
+      persistentGrid = null; // чистим если не running — избегаем утечки старого grid
+    }
+
     container = null;
     // Note: isRunning is intentionally NOT reset here
     // so re-mounting won't restart a generation that's still going

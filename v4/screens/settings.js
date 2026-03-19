@@ -280,32 +280,60 @@ async function render() {
     });
   });
 
-  // Delete Set
+  // Delete Set — trash-based, with in_progress guard and nextActiveSet notification
   container.querySelectorAll('.history-btn-del').forEach(btn => {
     btn.addEventListener('click', async (e) => {
       e.stopPropagation();
       const delId = btn.dataset.id;
       const delName = btn.dataset.name;
-      // Need prompt count so just search the array:
-      const delCount = promptSets.find(s => s.id === delId)?.promptCount || 0;
+      const delSet = promptSets.find(s => s.id === delId);
+      const delCount = delSet?.promptCount || 0;
+      const isActive = delId === activeSetId;
+
+      // UI guard: in_progress
+      if (delSet?.status === 'in_progress') {
+        showToast('⛔ Остановите генерацию перед удалением набора');
+        return;
+      }
+
+      // Determine which set becomes active after deletion
+      const remainingSets = promptSets.filter(s => s.id !== delId);
+      const nextSet = remainingSets.length > 0 ? remainingSets[remainingSets.length - 1] : null;
+
+      const nextSetNote = isActive
+        ? nextSet
+          ? `<div style="margin-top:8px;display:flex;align-items:flex-start;gap:6px;padding:8px 12px;background:rgba(255,255,255,0.04);border:1px solid var(--border);border-radius:8px;font-size:11px;color:var(--text-secondary);text-align:left;line-height:1.5">
+               <svg viewBox="0 0 24 24" style="width:12px;height:12px;stroke:var(--text-tertiary);fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0;margin-top:1px"><polyline points="9 18 15 12 9 6"/></svg>
+               После удаления активным станет: <strong>&nbsp;«${nextSet.name}»</strong>
+             </div>`
+          : `<div style="margin-top:8px;display:flex;align-items:flex-start;gap:6px;padding:8px 12px;background:rgba(255,159,10,0.08);border:1px solid rgba(255,159,10,0.25);border-radius:8px;font-size:11px;color:var(--orange);text-align:left;line-height:1.5">
+               <svg viewBox="0 0 24 24" style="width:12px;height:12px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0;margin-top:1px"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+               Это последний набор — проект станет пустым
+             </div>`
+        : '';
 
       // Confirmation modal
       const overlay = document.createElement('div');
       overlay.className = 'modal-overlay';
       overlay.innerHTML = `
-        <div class="modal-card" style="width:360px">
-          <div class="modal-header">Удалить набор?</div>
-          <div class="modal-body">
-            <div style="font-size:13px;margin-bottom:8px">
-              <strong>${delName}</strong> &mdash; ${delCount} промптов
+        <div class="modal-card delete-confirm-modal" style="width:380px">
+          <div class="delete-modal-icon">
+            <svg viewBox="0 0 24 24" style="width:28px;height:28px"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+          </div>
+          <div class="modal-header" style="padding-top:0">Удалить набор?</div>
+          <div class="delete-modal-body">
+            <div class="delete-modal-target">«${delName}»</div>
+            <div class="delete-modal-meta">${delCount} промптов · все изображения${isActive ? ' · <span style="color:var(--accent)">активный</span>' : ''}</div>
+            <div class="delete-modal-note">
+              <svg viewBox="0 0 24 24" style="width:13px;height:13px;flex-shrink:0"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+              Набор будет перемещён в корзину Mews.<br>Вы сможете восстановить его в течение 30 дней.
             </div>
-            <div style="font-size:12px;color:var(--text-tertiary);line-height:1.5">
-              Все сгенерированные и отобранные файлы этого набора будут удалены.
-            </div>
+
+            ${nextSetNote}
           </div>
           <div class="modal-footer">
             <button id="del-cancel" class="btn btn-secondary">Отмена</button>
-            <button id="del-confirm" class="btn" style="background:var(--red);color:#fff">Удалить</button>
+            <button id="del-confirm" class="btn btn-danger">Удалить набор</button>
           </div>
         </div>
       `;
@@ -313,14 +341,19 @@ async function render() {
 
       overlay.querySelector('#del-cancel').addEventListener('click', () => overlay.remove());
       overlay.addEventListener('click', (ev) => { if (ev.target === overlay) overlay.remove(); });
+      overlay.addEventListener('keydown', (ev) => { if (ev.key === 'Escape') overlay.remove(); });
 
       overlay.querySelector('#del-confirm').addEventListener('click', async () => {
         overlay.remove();
         const result = await api.projects.deleteSet(project.id, delId);
         if (!result.success) {
-          showToast(result.error || 'Не удалось удалить');
+          showToast(`⛔ ${result.error || 'Не удалось удалить набор'}`);
           return;
         }
+        const toastMsg = result.nextActiveSet
+          ? `🗑 Набор удалён. Активный: «${result.nextActiveSet.name}»`
+          : '🗑 Набор удалён';
+        showToast(toastMsg);
         // Reset selection state
         state.selections = {};
         state.selectionCurrentPrompt = 0;

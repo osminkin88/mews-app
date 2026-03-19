@@ -1263,6 +1263,12 @@ input:focus-visible {
 
 .pc-right {
   display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.pc-status-wrap {
+  display: flex;
   flex-direction: column;
   align-items: flex-end;
   gap: 6px;
@@ -1329,32 +1335,23 @@ input:focus-visible {
   position: relative;
 }
 
-.project-card:hover {
-  padding-right: 190px;
-}
-
 .project-card:hover .pc-date {
-  opacity: 0.5;
+  opacity: 0.3;
 }
 
 .pc-quick-actions {
-  position: absolute;
-  right: 48px;
-  top: 50%;
-  transform: translateY(-50%) translateX(10px);
   display: flex;
   align-items: center;
   gap: 6px;
+  max-width: 0;
   opacity: 0;
-  pointer-events: none;
-  transition: all 0.2s ease;
-  z-index: 10;
+  overflow: hidden;
+  transition: max-width 0.25s ease, opacity 0.2s ease;
 }
 
 .project-card:hover .pc-quick-actions {
+  max-width: 250px;
   opacity: 1;
-  transform: translateY(-50%) translateX(0);
-  pointer-events: auto;
 }
 
 .pc-qa-btn {
@@ -1367,6 +1364,7 @@ input:focus-visible {
   color: var(--text-secondary);
   cursor: pointer;
   transition: all 0.15s ease;
+  flex-shrink: 0;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15);
 }
 
@@ -1387,14 +1385,15 @@ input:focus-visible {
   font-family: var(--font);
   font-size: 11px;
   font-weight: 600;
-  color: var(--bg);
-  background: var(--text-primary);
-  border: none;
+  background: var(--accent-soft);
+  color: var(--accent);
+  border: 1px solid rgba(10, 132, 255, 0.2);
 }
 
 .pc-qa-primary:hover {
-  background: white;
-  color: var(--bg);
+  background: var(--accent);
+  color: white;
+  border-color: var(--accent);
 }
 
 .pc-qa-primary svg {
@@ -1419,16 +1418,20 @@ input:focus-visible {
   stroke-width: 2;
 }
 
+.pc-qa-sep {
+  width: 1px;
+  height: 16px;
+  background: var(--border-2);
+  margin: 0 2px;
+  flex-shrink: 0;
+}
+
 .pc-info {
   flex: 1;
   min-width: 0;
 }
 
 .pc-more {
-  position: absolute;
-  right: 10px;
-  top: 50%;
-  transform: translateY(-50%);
   width: 28px;
   height: 28px;
   display: flex;
@@ -1438,9 +1441,9 @@ input:focus-visible {
   border: none;
   border-radius: 6px;
   cursor: pointer;
-  opacity: 0;
-  transition: opacity 0.2s ease, background 0.15s ease;
+  transition: background 0.15s ease;
   color: var(--text-tertiary);
+  flex-shrink: 0;
 }
 
 .pc-more svg {
@@ -1449,10 +1452,6 @@ input:focus-visible {
   stroke: currentColor;
   fill: currentColor;
   stroke-width: 0;
-}
-
-.project-card:hover .pc-more {
-  opacity: 1;
 }
 
 .pc-more:hover {
@@ -3068,4 +3067,133 @@ input:focus-visible {
   color: var(--accent);
   opacity: 0.6;
   margin-left: auto;
+}
+
+/* ══════════════════════════════════════════════════
+   BTN-DANGER — Destructive action button
+   ══════════════════════════════════════════════════ */
+.btn-danger {
+  background: rgba(255, 59, 48, 0.12);
+  color: var(--red, #FF3B30);
+  border: 1px solid rgba(255, 59, 48, 0.25);
+}
+
+.btn-danger:hover {
+  background: var(--red, #FF3B30);
+  color: #fff;
+  border-color: var(--red, #FF3B30);
+  box-shadow: 0 2px 12px rgba(255, 59, 48, 0.35);
+}
+
+.btn-danger:active {
+  transform: scale(0.97);
+  filter: brightness(0.92);
+}
+
+/* ══════════════════════════════════════════════════
+   DELETE CONFIRM MODAL — Trash-based deletion UI
+   ══════════════════════════════════════════════════ */
+.delete-confirm-modal {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 28px 28px 20px;
+  gap: 0;
+}
+
+.delete-modal-icon {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: rgba(255, 59, 48, 0.1);
+  border: 1px solid rgba(255, 59, 48, 0.2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 16px;
+  color: var(--red, #FF3B30);
+}
+
+.delete-modal-icon svg {
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.delete-confirm-modal .modal-header {
+  padding: 0 0 4px;
+  font-size: 17px;
+}
+
+.delete-modal-body {
+  width: 100%;
+  margin: 12px 0 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.delete-modal-target {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: -0.2px;
+}
+
+.delete-modal-meta {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  margin-top: 2px;
+}
+
+.delete-modal-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin-top: 12px;
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  text-align: left;
+  line-height: 1.5;
+  width: 100%;
+}
+
+.delete-modal-note svg {
+  stroke: var(--text-tertiary);
+  fill: none;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  margin-top: 1px;
+  flex-shrink: 0;
+}
+
+.delete-modal-note--warn {
+  background: rgba(255, 159, 10, 0.08);
+  border-color: rgba(255, 159, 10, 0.25);
+  color: var(--orange, #FF9F0A);
+}
+
+.delete-modal-note--warn svg {
+  stroke: var(--orange, #FF9F0A);
+}
+
+.delete-confirm-modal .modal-footer {
+  padding: 0;
+  width: 100%;
+  justify-content: center;
+  gap: 10px;
+}
+
+.delete-confirm-modal .btn {
+  flex: 1;
+  max-width: 160px;
 }

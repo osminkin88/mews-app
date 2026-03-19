@@ -36,6 +36,12 @@ const STUBS = {
     getProjectPath: async () => ({ success: false, path: null }),
     getSelectedImages: async () => ({ success: true, images: [] }),
     exportSelected: async () => ({ success: true, count: 0 }),
+    switchSet: async () => ({ success: true }),
+    renameSet: async () => ({ success: true }),
+    deleteSet: async () => ({ success: true }),
+    duplicateSetAsActive: async () => ({ success: true }),
+    archiveSet: async () => ({ success: true, wasActive: false, nextActiveSet: null }),
+    unarchiveSet: async () => ({ success: true }),
   },
   generate: {
     start: async () => ({ success: false }),

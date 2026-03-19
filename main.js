@@ -1842,6 +1842,8 @@ ipcMain.handle('projects:load-prompts', (event, { projectId }) => {
     promptSets: (project.promptSets || []).map(s => ({
       id: s.id, name: s.name, promptCount: s.promptCount,
       status: s.status, createdAt: s.createdAt,
+      archived: s.archived || false,
+      archivedAt: s.archivedAt || null,
     })),
     activePromptSetId: project.activePromptSetId,
     sourceMeta: activeSet?.sourceMeta || null,
@@ -1858,6 +1860,11 @@ ipcMain.handle('projects:switch-set', (event, { projectId, setId }) => {
 
   const targetSet = (project.promptSets || []).find(s => s.id === setId);
   if (!targetSet) return { success: false, error: 'Set not found' };
+
+  // ── GUARD: block switching to an archived set ──
+  if (targetSet.archived) {
+    return { success: false, error: 'Нельзя переключиться на заархивированный набор. Сначала восстановите его из архива.', reason: 'archived' };
+  }
 
   project.activePromptSetId = setId;
   saveProject(project);
@@ -1877,6 +1884,84 @@ ipcMain.handle('projects:rename-set', (event, { projectId, setId, newName }) => 
   targetSet.name = newName;
   saveProject(project);
   console.log(`[projects] Renamed set to "${newName}" (${setId})`);
+  return { success: true };
+});
+
+// ── Archive a prompt set (hide from main list, files untouched) ──
+ipcMain.handle('projects:archive-set', (event, { projectId, setId }) => {
+  const projects = loadProjects();
+  const project = projects.find(p => p.id === projectId);
+  if (!project) return { success: false, error: 'Project not found' };
+
+  const targetSet = (project.promptSets || []).find(s => s.id === setId);
+  if (!targetSet) return { success: false, error: 'Set not found' };
+
+  // ── GUARD: block archiving of actively generating set ──
+  if (targetSet.status === 'in_progress') {
+    return {
+      success: false,
+      error: 'Набор сейчас генерируется. Остановите генерацию перед архивированием.',
+      reason: 'in_progress',
+    };
+  }
+
+  // Already archived — idempotent
+  if (targetSet.archived) {
+    return { success: true, wasActive: false, nextActiveSet: null };
+  }
+
+  // Mark as archived
+  targetSet.archived = true;
+  targetSet.archivedAt = new Date().toISOString();
+  targetSet.updatedAt = new Date().toISOString();
+
+  // ── If this was the active set, switch to next non-archived set ──
+  const wasActive = project.activePromptSetId === setId;
+  let nextActiveSet = null;
+
+  if (wasActive) {
+    const remaining = (project.promptSets || []).filter(s => s.id !== setId && !s.archived);
+    if (remaining.length > 0) {
+      // Pick the most recent non-archived set
+      nextActiveSet = remaining[remaining.length - 1];
+      project.activePromptSetId = nextActiveSet.id;
+    } else {
+      project.activePromptSetId = null;
+      project.status = 'draft';
+    }
+  }
+
+  saveProject(project);
+  console.log(`[projects] Archived set "${targetSet.name}" (${setId})${wasActive ? `, switched active to: ${nextActiveSet?.name || 'none'}` : ''}`);
+  return {
+    success: true,
+    wasActive,
+    nextActiveSet: nextActiveSet ? { id: nextActiveSet.id, name: nextActiveSet.name } : null,
+  };
+});
+
+// ── Unarchive a prompt set (restore to main list, does NOT auto-switch active) ──
+ipcMain.handle('projects:unarchive-set', (event, { projectId, setId }) => {
+  const projects = loadProjects();
+  const project = projects.find(p => p.id === projectId);
+  if (!project) return { success: false, error: 'Project not found' };
+
+  const targetSet = (project.promptSets || []).find(s => s.id === setId);
+  if (!targetSet) return { success: false, error: 'Set not found' };
+
+  // Already not archived — idempotent
+  if (!targetSet.archived) {
+    return { success: true };
+  }
+
+  // Restore: remove archive flags
+  targetSet.archived = false;
+  delete targetSet.archivedAt;
+  targetSet.updatedAt = new Date().toISOString();
+
+  // Note: restore does NOT auto-switch active set — user does that manually
+  saveProject(project);
+  console.log(`[projects] Unarchived set "${targetSet.name}" (${setId})`);
   return { success: true };
 });
 

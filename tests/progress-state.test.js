@@ -169,20 +169,45 @@ describe('UI State Machine — progress.js', () => {
     // Simulate engine finishing the cancel abort and returning 'complete'
     updateProgressMock({ status: 'complete' });
 
-    // ANTI-REGRESSION: Check that the paused screen is NOT rendered
+    // NEW BEHAVIOUR: _showCancelledFinalState() renders inline cancelled UI
+    // The hero reuses .progress-paused class for the cancelled layout
     const heroEl = container.querySelector('.progress-hero');
-    expect(heroEl).not.toBeNull(); // Ensure element still exists
-    expect(heroEl.classList.contains('progress-paused')).toBe(false); // NO paused layout!
-    
-    const pausedTitle = container.querySelector('.paused-title');
-    expect(pausedTitle).toBeNull(); // Absolute assurance it wasn't mounted
-    
-    const resumeBtn = container.querySelector('#btn-paused-resume');
-    expect(resumeBtn).toBeNull(); // Resume button is absent
+    expect(heroEl).not.toBeNull();
+    expect(heroEl.classList.contains('progress-paused')).toBe(true);
 
-    // Ensure we are redirecting away instead. 
-    // Defaults to settings for 0 saved frames.
-    expect(navigate).toHaveBeenCalledWith('settings');
+    // Cancelled title is shown
+    const cancelledTitle = container.querySelector('.paused-title');
+    expect(cancelledTitle).not.toBeNull();
+    expect(cancelledTitle.textContent).toBe('Генерация отменена');
+    expect(cancelledTitle.style.color).toBe('var(--red)');
+
+    // "В настройки" link is always present
+    const settingsLink = container.querySelector('#link-cancelled-settings');
+    expect(settingsLink).not.toBeNull();
+
+    // Resume button must NOT be present (cancelled, not paused)
+    const resumeBtn = container.querySelector('#btn-paused-resume');
+    expect(resumeBtn).toBeNull();
+
+    // navigate must NOT be called — we stay on the Progress screen
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it('7. Late complete after watchdog — guard prevents double navigation', async () => {
+    // Go through cancelling → first 'complete' shows cancelled state inline
+    await container.querySelector('#btn-cancel').click();
+    await container.querySelector('#btn-cancel-confirm').click();
+
+    // First complete: uiPhase → 'cancelled', no navigate
+    updateProgressMock({ status: 'complete' });
+    expect(navigate).not.toHaveBeenCalled();
+
+    // Second 'complete' (late / race condition): must be silently ignored
+    vi.clearAllMocks();
+    updateProgressMock({ status: 'complete' });
+
+    // Guard kept navigate from being called
+    expect(navigate).not.toHaveBeenCalled();
   });
 
 });

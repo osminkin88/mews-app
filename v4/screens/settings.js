@@ -40,21 +40,37 @@ async function render() {
   // Build Iteration History HTML
   let setChipsHTML = '';
   if (promptSets.length > 0) {
-    const rows = promptSets.map(s => {
+    const activeSets   = promptSets.filter(s => !s.archived);
+    const archivedSets = promptSets.filter(s => s.archived);
+
+    // ── Render one history row for active (non-archived) sets ──
+    const renderActiveRow = (s) => {
       const isActive = s.id === activeSetId;
-      const mapStateText = { draft: 'Черновик', in_progress: 'В процессе', completed: 'Завершён' };
+      const mapStateText  = { draft: 'Черновик', in_progress: 'В процессе', completed: 'Завершён' };
       const mapStateColor = { draft: 'var(--text-tertiary)', in_progress: 'var(--orange)', completed: 'var(--green)' };
-      const statusText = mapStateText[s.status] || s.status;
+      const statusText  = mapStateText[s.status] || s.status;
       const statusColor = mapStateColor[s.status] || 'var(--text-tertiary)';
       const selCount = s.selections ? Object.keys(s.selections).length : 0;
       const selectionsCount = selCount > 0 ? ` &nbsp;·&nbsp; <span style="color:var(--text-secondary);font-weight:500">${selCount}</span> отобрано` : '';
-      
-      const activeBadge = isActive ? '<span style="font-size:10px;background:var(--accent);color:#fff;padding:2px 6px;border-radius:4px;font-weight:700;letter-spacing:0.3px">АКТИВНАЯ</span>' : '';
+
+      const activeBadge = isActive
+        ? '<span style="font-size:10px;background:var(--accent);color:#fff;padding:2px 6px;border-radius:4px;font-weight:700;letter-spacing:0.3px">АКТИВНАЯ</span>'
+        : '';
       const statusBadge = `<div style="display:flex;align-items:center;gap:4px;font-size:10px;font-weight:600;color:${statusColor};text-transform:uppercase;letter-spacing:0.3px;"><div style="width:6px;height:6px;border-radius:50%;background:${statusColor}"></div>${statusText}</div>`;
-      
-      const btnSwitch = !isActive ? `<button class="btn btn-ghost history-btn-switch" data-id="${s.id}" style="font-size:11px;padding:4px 12px;border-radius:100px;border:1px solid var(--border);margin-right:4px">Перейти</button>` : '';
+
+      const btnSwitch = !isActive
+        ? `<button class="btn btn-ghost history-btn-switch" data-id="${s.id}" style="font-size:11px;padding:4px 12px;border-radius:100px;border:1px solid var(--border);margin-right:4px">Перейти</button>`
+        : '';
       const btnRename = `<button class="history-btn-rename" data-id="${s.id}" data-name="${s.name}" title="Переименовать" style="padding:6px;color:var(--text-tertiary);background:transparent;border:none;cursor:pointer;border-radius:4px;transition:0.15s;display:flex" onmouseover="this.style.color='var(--text-primary)';this.style.background='var(--bg-float)'" onmouseout="this.style.color='var(--text-tertiary)';this.style.background='transparent'"><svg viewBox="0 0 24 24" style="width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg></button>`;
-      const btnDel = !isActive ? `<button class="history-btn-del" data-id="${s.id}" data-name="${s.name}" title="Удалить" style="padding:6px;color:var(--text-tertiary);background:transparent;border:none;cursor:pointer;border-radius:4px;transition:0.15s;display:flex" onmouseover="this.style.color='var(--red)';this.style.background='var(--red-soft)'" onmouseout="this.style.color='var(--text-tertiary)';this.style.background='transparent'"><svg viewBox="0 0 24 24" style="width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg></button>` : '';
+
+      // Archive button — disabled for in_progress sets
+      const isInProgress = s.status === 'in_progress';
+      const archiveTitle = isInProgress ? 'В процессе генерации — архивировать нельзя' : 'В архив';
+      const btnArchive = `<button class="history-btn-archive" data-id="${s.id}" data-name="${s.name}" data-is-active="${isActive}" title="${archiveTitle}" ${isInProgress ? 'disabled' : ''} style="padding:6px;color:var(--text-tertiary);background:transparent;border:none;cursor:${isInProgress ? 'not-allowed' : 'pointer'};border-radius:4px;transition:0.15s;display:flex;opacity:${isInProgress ? '0.35' : '1'}" onmouseover="if(!this.disabled){this.style.color='var(--accent)';this.style.background='rgba(99,102,241,0.1)'}" onmouseout="this.style.color='var(--text-tertiary)';this.style.background='transparent'"><svg viewBox="0 0 24 24" style="width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round"><polyline points="21 8 21 21 3 21 3 8"></polyline><rect x="1" y="3" width="22" height="5"></rect><line x1="10" y1="12" x2="14" y2="12"></line></svg></button>`;
+
+      const btnDel = !isActive
+        ? `<button class="history-btn-del" data-id="${s.id}" data-name="${s.name}" title="Удалить" style="padding:6px;color:var(--text-tertiary);background:transparent;border:none;cursor:pointer;border-radius:4px;transition:0.15s;display:flex" onmouseover="this.style.color='var(--red)';this.style.background='var(--red-soft)'" onmouseout="this.style.color='var(--text-tertiary)';this.style.background='transparent'"><svg viewBox="0 0 24 24" style="width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg></button>`
+        : '';
 
       return `
       <div class="history-set-row ${isActive ? 'active' : ''}" data-set-id="${s.id}" style="display:flex;align-items:center;background:var(--bg-float);padding:12px 14px;border-radius:10px;border:1px solid ${isActive ? 'var(--accent)' : 'var(--border-2)'};cursor:default;">
@@ -68,25 +84,75 @@ async function render() {
             ${selectionsCount}
           </div>
         </div>
-        
         <div style="display:flex;align-items:center;gap:2px;flex-shrink:0;">
           ${btnSwitch}
           ${btnRename}
+          ${btnArchive}
           ${btnDel}
         </div>
       </div>
       `;
-    }).join('');
+    };
 
+    // ── Render one row for archived sets ──
+    const renderArchivedRow = (s) => {
+      const mapStateText  = { draft: 'Черновик', in_progress: 'В процессе', completed: 'Завершён' };
+      const mapStateColor = { draft: 'var(--text-tertiary)', in_progress: 'var(--orange)', completed: 'var(--green)' };
+      const statusText  = mapStateText[s.status] || s.status;
+      const statusColor = mapStateColor[s.status] || 'var(--text-tertiary)';
+      const archivedDate = s.archivedAt ? new Date(s.archivedAt).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' }) : '';
+
+      const btnRestore = `<button class="history-btn-restore" data-id="${s.id}" data-name="${s.name}" title="Восстановить из архива" style="font-size:11px;padding:4px 12px;border-radius:100px;border:1px solid var(--border);background:transparent;color:var(--text-secondary);cursor:pointer;transition:0.15s;margin-right:4px" onmouseover="this.style.borderColor='var(--accent)';this.style.color='var(--accent)'" onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--text-secondary)'">Восстановить</button>`;
+      const btnDel = `<button class="history-btn-del" data-id="${s.id}" data-name="${s.name}" title="Удалить" style="padding:6px;color:var(--text-tertiary);background:transparent;border:none;cursor:pointer;border-radius:4px;transition:0.15s;display:flex" onmouseover="this.style.color='var(--red)';this.style.background='var(--red-soft)'" onmouseout="this.style.color='var(--text-tertiary)';this.style.background='transparent'"><svg viewBox="0 0 24 24" style="width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg></button>`;
+
+      return `
+      <div class="history-set-row" data-set-id="${s.id}" style="display:flex;align-items:center;background:var(--bg-float);padding:12px 14px;border-radius:10px;border:1px solid var(--border);cursor:default;opacity:0.75;">
+        <div style="flex:1;min-width:0;">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+            <span style="font-weight:600;font-size:13px;color:var(--text-tertiary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:220px;" title="${s.name}">${s.name}</span>
+            <div style="display:flex;align-items:center;gap:4px;font-size:10px;font-weight:600;color:${statusColor};text-transform:uppercase;letter-spacing:0.3px;"><div style="width:6px;height:6px;border-radius:50%;background:${statusColor}"></div>${statusText}</div>
+          </div>
+          <div style="font-size:11px;color:var(--text-tertiary);">
+            <span style="color:var(--text-tertiary);font-weight:500">${s.promptCount}</span> промптов
+            ${archivedDate ? ` &nbsp;·&nbsp; архив ${archivedDate}` : ''}
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:2px;flex-shrink:0;">
+          ${btnRestore}
+          ${btnDel}
+        </div>
+      </div>
+      `;
+    };
+
+    const activeRows   = activeSets.map(renderActiveRow).join('');
+    const archivedRows = archivedSets.map(renderArchivedRow).join('');
+
+    // ── Archive collapsed section ──
+    const archiveSection = archivedSets.length > 0 ? `
+      <div class="history-archive-section" style="margin-top:10px;">
+        <button class="history-archive-toggle" id="archive-toggle" style="display:flex;align-items:center;gap:6px;background:transparent;border:none;cursor:pointer;padding:6px 2px;color:var(--text-tertiary);font-size:12px;font-weight:600;width:100%;text-align:left;transition:0.15s;" onmouseover="this.style.color='var(--text-secondary)'" onmouseout="this.style.color='var(--text-tertiary)'">
+          <svg id="archive-toggle-icon" viewBox="0 0 24 24" style="width:13px;height:13px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;transition:transform 0.2s"><polyline points="9 18 15 12 9 6"></polyline></svg>
+          Архив
+          <span style="font-size:11px;font-weight:400;color:inherit;margin-left:2px">${archivedSets.length}</span>
+        </button>
+        <div id="archive-rows" style="display:none;flex-direction:column;gap:8px;margin-top:6px;">
+          ${archivedRows}
+        </div>
+      </div>
+    ` : '';
+
+    const totalSets = promptSets.length;
     setChipsHTML = `
       <div class="history-block" style="margin-top:36px;border-top:1px solid var(--border);padding-top:24px;">
         <div class="field-label" style="margin-bottom:14px;font-size:14px;display:flex;align-items:baseline">
           <span style="color:var(--text-primary)">История итераций</span>
-          <span style="font-size:12px;color:var(--text-tertiary);margin-left:8px;font-weight:400">${promptSets.length} запусков</span>
+          <span style="font-size:12px;color:var(--text-tertiary);margin-left:8px;font-weight:400">${totalSets} запусков</span>
         </div>
         <div style="display:flex;flex-direction:column;gap:10px;">
-          ${rows}
+          ${activeRows}
         </div>
+        ${archiveSection}
       </div>
     `;
   }
@@ -118,14 +184,24 @@ async function render() {
               </div>
               ${setChipsHTML}
             ` : `
-              <div id="drop-zone" class="drop-zone">
-                <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-                <div style="font-size:13px;font-weight:600">Загрузить промпты</div>
-                <div style="font-size:11px;color:var(--text-tertiary);margin-top:2px">CSV или XLSX</div>
+              <div class="settings-onboarding-hint">
+                <span class="soh-step soh-step-done">✓ Проект создан</span>
+                <span class="soh-arrow">→</span>
+                <span class="soh-step soh-step-current">Загрузите промпты</span>
+                <span class="soh-arrow">→</span>
+                <span class="soh-step soh-step-next">Настройте</span>
+                <span class="soh-arrow">→</span>
+                <span class="soh-step soh-step-next">Запустите</span>
               </div>
-              <div class="template-hint">
+              <div id="drop-zone" class="drop-zone drop-zone-onboarding">
+                <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                <div style="font-size:13px;font-weight:600">Загрузите промпты</div>
+                <div style="font-size:11px;color:var(--text-tertiary);margin-top:2px">CSV или XLSX — кликните или перетащите</div>
+              </div>
+              <div class="template-hint-inline">
                 <span>Нет файла?</span>
                 <a id="btn-download-template" class="template-link">Скачайте шаблон</a>
+                <span style="color:var(--text-tertiary)">&nbsp;— заполните и загрузите</span>
               </div>
             `}
           </div>
@@ -188,6 +264,24 @@ async function render() {
             <div class="summary-col"><div class="summary-value">×${imagesCount}</div><div class="summary-label">вариантов</div></div>
             <div class="summary-col"><div class="summary-value" style="color:var(--accent)">${totalImages}</div><div class="summary-label">всего</div></div>
           </div>
+          ${(() => {
+            const s = (typeof state !== 'undefined' ? state.connectionStatus : null) || 'unknown';
+            const bad = !['ready', 'page_not_ready'].includes(s);
+            if (!bad) return '';
+            const msgs = {
+              no_chrome: 'Установите Google Chrome для запуска',
+              chrome_stopped: 'Запустите Chrome и подключитесь',
+              chrome_running: 'Подключаюсь к Chrome…',
+              not_logged_in: 'Войдите в Higgsfield в Chrome',
+              unknown: 'Проверяю соединение…',
+            };
+            const msg = msgs[s] || 'Проверьте подключение к Chrome';
+            return `<div class="settings-conn-hint" data-nav="connection">
+              <span class="sch-dot"></span>
+              <span class="sch-msg">${msg}</span>
+              <span class="sch-link">Подключить →</span>
+            </div>`;
+          })()}
           ${activeSetHasProgress ? `
             <div style="display:flex;gap:12px;width:100%">
               <button id="btn-launch" class="btn-launch" style="flex:1" ${promptCount === 0 ? 'disabled' : ''}>
@@ -233,6 +327,11 @@ async function render() {
   dropZone?.addEventListener('click', importFile);
   replaceBtn?.addEventListener('click', importFile);
 
+  // Connection hint → navigate to connection screen
+  container.querySelector('.settings-conn-hint')?.addEventListener('click', () => {
+    navigate('connection');
+  });
+
   // Download template
   const downloadTemplate = async () => {
     const result = await api.file.downloadTemplate();
@@ -277,6 +376,72 @@ async function render() {
           render();
         });
       }
+    });
+  });
+
+  // ── Archive Toggle (expand/collapse archive section) ──
+  const archiveToggleBtn = container.querySelector('#archive-toggle');
+  if (archiveToggleBtn) {
+    archiveToggleBtn.addEventListener('click', () => {
+      const archiveRows = container.querySelector('#archive-rows');
+      const toggleIcon  = container.querySelector('#archive-toggle-icon');
+      if (!archiveRows) return;
+      const isOpen = archiveRows.style.display !== 'none';
+      archiveRows.style.display = isOpen ? 'none' : 'flex';
+      if (toggleIcon) toggleIcon.style.transform = isOpen ? '' : 'rotate(90deg)';
+    });
+  }
+
+  // ── Archive Set handler ──
+  container.querySelectorAll('.history-btn-archive').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      if (btn.disabled) return;
+
+      const archId     = btn.dataset.id;
+      const archName   = btn.dataset.name;
+      const isActive   = btn.dataset.isActive === 'true';
+      const archSet    = promptSets.find(s => s.id === archId);
+
+      if (archSet?.status === 'in_progress') {
+        showToast('⛔ Остановите генерацию перед архивированием');
+        return;
+      }
+
+      // Determine next active set info for the confirm modal
+      const remainingActive = promptSets.filter(s => s.id !== archId && !s.archived);
+      const nextSet = remainingActive.length > 0 ? remainingActive[remainingActive.length - 1] : null;
+
+      if (isActive) {
+        // Needs explicit confirm modal for active set
+        await showArchiveActiveSetModal(archId, archName, project, nextSet);
+      } else {
+        // Non-active set: archive directly
+        await doArchiveSet(archId, archName, project, false);
+      }
+    });
+  });
+
+  // ── Restore (unarchive) handler ──
+  container.querySelectorAll('.history-btn-restore').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const restoreId   = btn.dataset.id;
+      const restoreName = btn.dataset.name;
+
+      const result = await api.projects.unarchiveSet(project.id, restoreId);
+      if (!result?.success) {
+        showToast(`⛔ ${result?.error || 'Не удалось восстановить набор'}`);
+        return;
+      }
+
+      showToast(`📦 «${restoreName}» восстановлен из архива`);
+
+      // Reload and re-render
+      const projects = await api.projects.list();
+      const updatedProject = projects.find(p => p.id === project.id);
+      if (updatedProject) state.currentProject = updatedProject;
+      render();
     });
   });
 
@@ -584,6 +749,91 @@ function _showResumeBanner(resume, project) {
     state.generationRequested = true;
     const { navigate } = await import('../app.js');
     navigate('progress');
+  });
+}
+
+
+// ── doArchiveSet: execute archive + reload ──
+async function doArchiveSet(setId, setName, project, wasActiveSet) {
+  const result = await api.projects.archiveSet(project.id, setId);
+  if (!result?.success) {
+    showToast(`⛔ ${result?.error || 'Не удалось архивировать набор'}`);
+    return;
+  }
+
+  let toastMsg = `📦 «${setName}» перемещён в архив`;
+  if (wasActiveSet && result.nextActiveSet) {
+    toastMsg += `. Активный: «${result.nextActiveSet.name}»`;
+  } else if (wasActiveSet && !result.nextActiveSet) {
+    toastMsg += '. Активных наборов не осталось';
+  }
+  showToast(toastMsg);
+
+  // Reset selection state if active set changed
+  if (wasActiveSet) {
+    state.selections = {};
+    state.selectionCurrentPrompt = 0;
+  }
+
+  // Reload project
+  const projects = await api.projects.list();
+  const updatedProject = projects.find(p => p.id === project.id);
+  if (updatedProject) state.currentProject = updatedProject;
+  render();
+}
+
+// ── showArchiveActiveSetModal: confirm dialog before archiving the ACTIVE set ──
+function showArchiveActiveSetModal(setId, setName, project, nextSet) {
+  return new Promise((resolve) => {
+    const nextSetNote = nextSet
+      ? `<div style="margin-top:8px;display:flex;align-items:flex-start;gap:6px;padding:8px 12px;background:rgba(255,255,255,0.04);border:1px solid var(--border);border-radius:8px;font-size:11px;color:var(--text-secondary);text-align:left;line-height:1.5">
+           <svg viewBox="0 0 24 24" style="width:12px;height:12px;stroke:var(--accent);fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0;margin-top:1px"><polyline points="9 18 15 12 9 6"/></svg>
+           После архивирования активным станет:&nbsp;<strong>«${nextSet.name}»</strong>
+         </div>`
+      : `<div style="margin-top:8px;display:flex;align-items:flex-start;gap:6px;padding:8px 12px;background:rgba(255,159,10,0.08);border:1px solid rgba(255,159,10,0.25);border-radius:8px;font-size:11px;color:var(--orange);text-align:left;line-height:1.5">
+           <svg viewBox="0 0 24 24" style="width:12px;height:12px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0;margin-top:1px"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+           Это единственный активный набор — проект останется без активного набора
+         </div>`;
+
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.innerHTML = `
+      <div class="modal-card delete-confirm-modal" style="width:400px">
+        <div class="delete-modal-icon" style="background:rgba(99,102,241,0.12);border-color:rgba(99,102,241,0.25)">
+          <svg viewBox="0 0 24 24" style="width:26px;height:26px;stroke:var(--accent)"><polyline points="21 8 21 21 3 21 3 8"></polyline><rect x="1" y="3" width="22" height="5"></rect><line x1="10" y1="12" x2="14" y2="12"></line></svg>
+        </div>
+        <div class="modal-header" style="padding-top:0">Архивировать активный набор?</div>
+        <div class="delete-modal-body">
+          <div class="delete-modal-target">«${setName}»</div>
+          <div class="delete-modal-meta">Активный набор · файлы сохранятся</div>
+          <div class="delete-modal-note">
+            <svg viewBox="0 0 24 24" style="width:13px;height:13px;flex-shrink:0"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+            Набор скроется из списка, но файлы не удалятся.<br>Восстановить можно в любое время.
+          </div>
+          ${nextSetNote}
+        </div>
+        <div class="modal-footer">
+          <button id="arch-cancel" class="btn btn-secondary">Отмена</button>
+          <button id="arch-confirm" class="btn btn-primary" style="background:var(--accent);border-color:var(--accent)">В архив</button>
+        </div>
+      </div>
+    `;
+
+    container.appendChild(overlay);
+    requestAnimationFrame(() => overlay.querySelector('#arch-confirm')?.focus());
+
+    const cleanup = (confirmed) => {
+      overlay.remove();
+      resolve(confirmed);
+    };
+
+    overlay.querySelector('#arch-cancel').addEventListener('click', () => cleanup(false));
+    overlay.querySelector('#arch-confirm').addEventListener('click', async () => {
+      cleanup(true);
+      await doArchiveSet(setId, setName, project, true);
+    });
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) cleanup(false); });
+    overlay.addEventListener('keydown', (e) => { if (e.key === 'Escape') cleanup(false); });
   });
 }
 

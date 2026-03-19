@@ -3197,3 +3197,243 @@ input:focus-visible {
   flex: 1;
   max-width: 160px;
 }
+
+/* ══════════════════════════════════════════
+   ONBOARDING — Welcome Screen (empty projects)
+   ══════════════════════════════════════════ */
+
+.projects-welcome {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 60px 24px 48px;
+  text-align: center;
+  animation: liveTileFadeIn 0.35s ease both;
+}
+
+.projects-welcome-icon {
+  width: 56px;
+  height: 56px;
+  margin-bottom: 20px;
+}
+
+.projects-welcome-icon svg {
+  width: 56px;
+  height: 56px;
+}
+
+.projects-welcome-title {
+  font-size: 18px;
+  font-weight: 800;
+  letter-spacing: -0.4px;
+  color: var(--text-primary);
+  margin-bottom: 8px;
+}
+
+.projects-welcome-desc {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  max-width: 320px;
+  margin-bottom: 28px;
+}
+
+.projects-welcome-actions {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 28px;
+}
+
+.projects-welcome-pipeline {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+.pwp-step {
+  font-weight: 500;
+  color: var(--text-tertiary);
+}
+
+.pwp-step-last {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.pwp-arrow {
+  color: var(--border-2);
+  font-size: 12px;
+}
+
+/* ══════════════════════════════════════════
+   ONBOARDING — CSV hint in create modal
+   ══════════════════════════════════════════ */
+
+.modal-csv-hint {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 16px;
+  padding: 10px 12px;
+  background: rgba(10, 132, 255, 0.06);
+  border: 1px solid rgba(10, 132, 255, 0.15);
+  border-radius: var(--r-sm);
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.modal-csv-hint svg {
+  width: 14px;
+  height: 14px;
+  stroke: var(--accent);
+  fill: none;
+  stroke-width: 1.8;
+  flex-shrink: 0;
+}
+
+.modal-csv-hint span {
+  flex: 1;
+}
+
+.modal-csv-hint-link {
+  background: none;
+  border: 1px solid rgba(10, 132, 255, 0.3);
+  border-radius: 5px;
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 8px;
+  cursor: pointer;
+  transition: all 0.12s;
+  white-space: nowrap;
+  font-family: var(--font);
+}
+
+.modal-csv-hint-link:hover {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+
+/* ══════════════════════════════════════════
+   ONBOARDING — Settings contextual hint
+   ══════════════════════════════════════════ */
+
+.settings-onboarding-hint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 14px;
+  font-size: 11px;
+  flex-wrap: wrap;
+}
+
+.soh-step {
+  font-weight: 500;
+  color: var(--text-tertiary);
+}
+
+.soh-step-done {
+  color: var(--green);
+  font-weight: 600;
+}
+
+.soh-step-current {
+  color: var(--text-primary);
+  font-weight: 700;
+  background: rgba(255, 255, 255, 0.06);
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.soh-step-next {
+  color: var(--text-tertiary);
+}
+
+.soh-arrow {
+  color: var(--border-2);
+  font-size: 12px;
+}
+
+/* Drop-zone with extra emphasis for onboarding */
+.drop-zone-onboarding {
+  padding: 36px 20px;
+  border-color: rgba(10, 132, 255, 0.2);
+}
+
+.drop-zone-onboarding:hover {
+  border-color: var(--accent);
+  background: rgba(10, 132, 255, 0.06);
+}
+
+/* Inline template hint (for onboarding state) */
+.template-hint-inline {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  margin-top: -12px;
+  margin-bottom: 20px;
+}
+
+.template-hint-inline .template-link {
+  font-weight: 600;
+}
+
+/* ══════════════════════════════════════════
+   ONBOARDING — Connection warning (Settings)
+   ══════════════════════════════════════════ */
+
+.settings-conn-hint {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border-2);
+  border-radius: var(--r-sm);
+  margin-bottom: 10px;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+  font-size: 12px;
+}
+
+.settings-conn-hint:hover {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.18);
+}
+
+.sch-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--orange);
+  flex-shrink: 0;
+  animation: connDotPulse 2.5s ease-in-out infinite;
+}
+
+@keyframes connDotPulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.4; }
+}
+
+.sch-msg {
+  flex: 1;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.sch-link {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+  transition: color 0.12s;
+}
+
+.settings-conn-hint:hover .sch-link {
+  color: var(--text-secondary);
+}

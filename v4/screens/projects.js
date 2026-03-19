@@ -56,8 +56,43 @@ function renderBadge(status) {
 async function render() {
   projects = await api.projects.list();
 
+  const emptyStateHtml = `
+    <div class="projects-welcome">
+      <div class="projects-welcome-icon">
+        <svg viewBox="0 0 56 56" fill="none">
+          <rect width="56" height="56" rx="16" fill="rgba(10,132,255,0.1)"/>
+          <path d="M14 28 L22 20 L28 26 L34 18 L42 28" stroke="#0A84FF" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+          <circle cx="28" cy="36" r="6" stroke="#5E5CE6" stroke-width="2" fill="none"/>
+          <path d="M26 36 L27.5 37.5 L30.5 34.5" stroke="#5E5CE6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </div>
+      <div class="projects-welcome-title">Начните с нового проекта</div>
+      <div class="projects-welcome-desc">Загрузите CSV с промптами и запустите массовую генерацию изображений через Higgsfield</div>
+      <div class="projects-welcome-actions">
+        <button id="btn-new-project" class="btn btn-primary" style="font-size:13px;padding:9px 20px">
+          <svg viewBox="0 0 24 24" style="width:14px;height:14px"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          Новый проект
+        </button>
+        <button id="btn-welcome-template" class="btn btn-secondary" style="font-size:13px;padding:9px 20px">
+          <svg viewBox="0 0 24 24" style="width:14px;height:14px"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Скачать шаблон
+        </button>
+      </div>
+      <div class="projects-welcome-pipeline">
+        <span class="pwp-step">Создать проект</span>
+        <span class="pwp-arrow">→</span>
+        <span class="pwp-step">Загрузить CSV</span>
+        <span class="pwp-arrow">→</span>
+        <span class="pwp-step">Настроить</span>
+        <span class="pwp-arrow">→</span>
+        <span class="pwp-step pwp-step-last">Запустить</span>
+      </div>
+    </div>
+  `;
+
   container.innerHTML = `
     <div style="overflow-y:auto;padding:24px 32px 80px;flex:1">
+      ${projects.length > 0 ? `
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:16px">
         <span class="section-label">Проекты</span>
         <span style="font-size:11px;color:var(--text-tertiary)">${projects.length}</span>
@@ -66,9 +101,9 @@ async function render() {
           <svg viewBox="0 0 24 24" style="width:13px;height:13px"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
           Новый проект
         </button>
-      </div>
+      </div>` : ''}
       <div id="project-list">${projects.length === 0
-        ? '<div class="empty-state">Нет проектов. Создайте первый →</div>'
+        ? emptyStateHtml
         : projects.map(p => renderProjectCard(p)).join('')
       }</div>
     </div>
@@ -194,6 +229,13 @@ function showCreateModal() {
             </button>
           `).join('')}
         </div>
+
+        <!-- CSV hint -->
+        <div class="modal-csv-hint">
+          <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+          <span>Понадобится CSV с промптами</span>
+          <button id="modal-hint-template" class="modal-csv-hint-link">Скачать шаблон</button>
+        </div>
       </div>
       <div class="modal-footer">
         <button id="modal-cancel" class="btn btn-secondary">Отмена</button>
@@ -207,6 +249,19 @@ function showCreateModal() {
   // Focus the name input
   const nameInput = overlay.querySelector('#new-name');
   requestAnimationFrame(() => nameInput?.focus());
+
+  // Download template from modal
+  overlay.querySelector('#modal-hint-template')?.addEventListener('click', async (e) => {
+    e.preventDefault();
+    const result = await api.file.downloadTemplate();
+    if (result.success) {
+      const { showToast } = await import('../app.js');
+      showToast('Шаблон сохранён');
+    } else if (!result.canceled) {
+      const { showToast } = await import('../app.js');
+      showToast(result.error || 'Не удалось сохранить шаблон');
+    }
+  });
 
   let selectedIcon = ICON_KEYS[0]; // default: 🎬
 
@@ -253,6 +308,13 @@ function bindEvents() {
   // New project → open modal instead of instant create
   container.querySelector('#btn-new-project').addEventListener('click', () => {
     showCreateModal();
+  });
+
+  // Welcome screen: download template
+  container.querySelector('#btn-welcome-template')?.addEventListener('click', async () => {
+    const result = await api.file.downloadTemplate();
+    if (result.success) showToast('Шаблон сохранён');
+    else if (!result.canceled) showToast(result.error || 'Не удалось сохранить шаблон');
   });
 
   // Click to open project

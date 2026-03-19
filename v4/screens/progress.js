@@ -7,9 +7,17 @@ let container = null;
 let cleanupProgress = null;
 let isRunning = false;
 let lastPct = 0;       // monotonic: bar never goes backwards
-let uiPhase = 'generating'; // generating | pauseRequested | paused | cancelConfirm | cancelling
+let uiPhase = 'generating'; // generating | pauseRequested | paused | cancelConfirm | cancelling | cancelled
+let cancelWatchdog = null;          // 20s safety timer after cancel — shows terminal state if 'complete' never arrives
+let cancelCountdownInterval = null; // live elapsed-seconds ticker shown in the hero detail text
+
+// ── Clear cancel watchdog + countdown ticker (safe to call multiple times) ──
+function _clearCancelWatchdog() {
+  if (cancelWatchdog)          { clearTimeout(cancelWatchdog);    cancelWatchdog          = null; }
+  if (cancelCountdownInterval) { clearInterval(cancelCountdownInterval); cancelCountdownInterval = null; }
+}
 let lastRunSnapshot = null; // {promptTotal, agedCounts, liveTileCount, primary, detail} — post-run context
-let persistentGrid = null;  // DETACH-REATTACH: live-grid DOM node сохраняется между unmount/remount
+// persistentGrid REMOVED: DOM is rebuilt from state on every mount (browser img cache prevents flash)
 
 // Format raw seconds in messages: (102с) → (1м 42с)
 function formatTime(msg) {
@@ -299,9 +307,24 @@ function _reattachEventListeners() {
       detailEl.textContent = 'Прерываю процесс без сохранения текущего слота…';
       detailEl.style.color = 'var(--red)';
     }
-    lastState.detail = 'Отменено пользователем';
+    lastState.detail = 'Прерываю процесс без сохранения текущего слота…';
     lastState.detailColor = 'var(--red)';
+
+    // ── Live countdown: update detail text every 3s so screen looks alive ──
+    _clearCancelWatchdog();
+    let countSec = 0;
+    cancelCountdownInterval = setInterval(() => {
+      countSec += 3;
+      const el = document.getElementById('ph-detail');
+      if (el && uiPhase === 'cancelling') el.textContent = `Завершаю текущий слот… (${countSec}с)`;
+    }, 3000);
+
     await api.generate.cancel();
+
+    // ── Watchdog: if 'complete' doesn't arrive in 20s → show terminal state inline ──
+    cancelWatchdog = setTimeout(() => {
+      if (uiPhase === 'cancelling') _showCancelledFinalState();
+    }, 20000);
   });
 }
 
@@ -431,32 +454,18 @@ function render() {
     }
   }
 
-  // DETACH-REATTACH: если сохранён persistentGrid — подставляем его вместо пустого live-grid
-  // Это исключает flash: плитки и img уже в живом DOM, не пересоздаются
-  if (persistentGrid && isRunning && !isForeign) {
-    const emptyGrid = document.getElementById('live-grid');
-    if (emptyGrid && emptyGrid.parentNode) {
-      // Перед reattach гарантируем отсутствие дублирующей summary-row:
-      // persistentGrid уже содержит актуальную summary-row из прошлого mount
-      emptyGrid.parentNode.replaceChild(persistentGrid, emptyGrid);
-    }
-    persistentGrid = null; // освобождаем — grid теперь живёт в DOM
-    // Patch summary-row на актуальные данные (без дублирования — updateSummaryRow проверяет наличие)
-    updateSummaryRow();
-  } else {
-    // Обычный путь: первый mount или после завершения генерации
-    // Restore all live tiles через _updateDOMTile
-    if (isRunning && lastState.liveTiles.length > 0) {
-      const grid = document.getElementById('live-grid');
-      if (grid) {
-        for (let i = 0; i < lastState.liveTiles.length; i++) {
-          _updateDOMTile(lastState.liveTiles[i]);
-        }
+  // ATOMIC REBUILD: всегда строим grid из lastState.liveTiles
+  // Browser кеширует img по src → повторная вставка того же dataUrl не даёт flash
+  if (isRunning && lastState.liveTiles.length > 0) {
+    const grid = document.getElementById('live-grid');
+    if (grid) {
+      for (let i = 0; i < lastState.liveTiles.length; i++) {
+        _updateDOMTile(lastState.liveTiles[i]);
       }
     }
-    // Update summary row
-    updateSummaryRow();
   }
+  // Update summary row
+  updateSummaryRow();
 
   // Restore hero session chips on remount
   _renderHeroSessionChips();
@@ -521,7 +530,7 @@ function render() {
 
   container.querySelector('#btn-cancel-confirm')?.addEventListener('click', async () => {
     uiPhase = 'cancelling';
-    
+
     const confirmStrip = container.querySelector('#cancel-confirm-strip');
     const cancellingStrip = container.querySelector('#cancelling-strip');
     if (confirmStrip) confirmStrip.style.display = 'none';
@@ -532,10 +541,24 @@ function render() {
       detailEl.textContent = 'Прерываю процесс без сохранения текущего слота…';
       detailEl.style.color = 'var(--red)';
     }
-    lastState.detail = 'Отменено пользователем';
+    lastState.detail = 'Прерываю процесс без сохранения текущего слота…';
     lastState.detailColor = 'var(--red)';
 
+    // ── Live countdown ──
+    _clearCancelWatchdog();
+    let countSec = 0;
+    cancelCountdownInterval = setInterval(() => {
+      countSec += 3;
+      const el = document.getElementById('ph-detail');
+      if (el && uiPhase === 'cancelling') el.textContent = `Завершаю текущий слот… (${countSec}с)`;
+    }, 3000);
+
     await api.generate.cancel();
+
+    // ── 20s watchdog ──
+    cancelWatchdog = setTimeout(() => {
+      if (uiPhase === 'cancelling') _showCancelledFinalState();
+    }, 20000);
   });
 }
 
@@ -662,6 +685,7 @@ function updateProgress(data) {
   // ── Terminal states ──
   if (data.status === 'complete' || data.status === 'fatal_error' || data.status === 'auth_error') {
     isRunning = false;
+    _clearCancelWatchdog(); // always disarm watchdog on any terminal event
   }
 
   // ── Terminal states ──
@@ -724,6 +748,9 @@ function updateProgress(data) {
     }
 
     if (data.status === 'complete') {
+      // ── Guard: watchdog already showed terminal cancelled state — ignore late 'complete' ──
+      if (uiPhase === 'cancelled') return;
+
       const pctEl = document.getElementById('ph-percent');
       const primary = document.getElementById('ph-primary');
       const detail = document.getElementById('ph-detail');
@@ -733,13 +760,8 @@ function updateProgress(data) {
         uiPhase = 'paused';
         showPausedState();
       } else if (uiPhase === 'cancelling' || uiPhase === 'cancelConfirm') {
-        // ── Cancelled: redirect without paused state
-        const savedCount = lastState.agedCounts.done + lastState.liveTiles.filter(t => t.status !== 'failed').length;
-        if (savedCount > 0) {
-          navigate('selection');
-        } else {
-          navigate('settings');
-        }
+        // ── Cancelled (engine finished before watchdog) — show inline terminal state ──
+        _showCancelledFinalState();
       } else {
         if (pctEl) pctEl.textContent = '100%';
         if (primary) primary.textContent = lastState.primary;
@@ -1021,6 +1043,60 @@ function showPausedState() {
   heroEl.querySelector('#link-paused-settings')?.addEventListener('click', () => navigate('settings'));
 }
 
+// ── Cancelled terminal state: shown inline on Progress screen (keeps gallery visible) ──
+// Called either by the 20s watchdog OR by status:'complete' while uiPhase==='cancelling'
+function _showCancelledFinalState() {
+  _clearCancelWatchdog();
+  isRunning = false;
+  uiPhase = 'cancelled';
+
+  if (!container) return;
+  const heroEl = container.querySelector('.progress-hero');
+  if (!heroEl) return;
+
+  const savedCount  = lastState.agedCounts.done   + lastState.liveTiles.filter(t => t.status !== 'failed').length;
+  const failedCount = lastState.agedCounts.failed + lastState.liveTiles.filter(t => t.status === 'failed').length;
+
+  const statParts = [];
+  if (savedCount  > 0) statParts.push(`<strong>${savedCount}</strong> сохранено`);
+  if (failedCount > 0) statParts.push(`<span style="color:var(--red)"><strong>${failedCount}</strong> ошибок</span>`);
+
+  // Build snapshot so any subsequent navigation has accurate data
+  lastRunSnapshot = {
+    promptTotal:  lastState.promptTotal,
+    doneCount:    savedCount,
+    failedCount:  failedCount,
+    status:       'complete',
+    isStopped:    false,
+    recentLogs:   lastState.logEntries.slice(0, 5),
+    recentTiles:  lastState.liveTiles.slice(-8).map(t => ({
+      key: t.key, status: t.status, url: t.url,
+      promptIdx: t.promptIdx, slotIdx: t.slotIdx, isBackfill: t.isBackfill,
+    })),
+  };
+
+  heroEl.className = 'progress-hero progress-paused';
+  heroEl.innerHTML = `
+    <div class="paused-layout">
+      <div class="paused-icon">✕</div>
+      <div class="paused-body">
+        <div class="paused-title" style="color:var(--red)">Генерация отменена</div>
+        ${statParts.length > 0
+          ? `<div class="paused-stats">${statParts.join(' · ')}</div>`
+          : `<div class="paused-stats" style="color:var(--text-tertiary)">Изображения не были сохранены</div>`
+        }
+        <div class="paused-links" style="margin-top:12px">
+          ${savedCount > 0 ? `<a id="link-cancelled-selection" class="paused-link">Перейти к отбору</a><span class="paused-link-sep">·</span>` : ''}
+          <a id="link-cancelled-settings" class="paused-link">В настройки</a>
+        </div>
+      </div>
+    </div>
+  `;
+
+  heroEl.querySelector('#link-cancelled-selection')?.addEventListener('click', () => navigate('selection'));
+  heroEl.querySelector('#link-cancelled-settings')?.addEventListener('click', () => navigate('settings'));
+}
+
 function showIdleState() {
   if (!container) return;
   const heroEl = container.querySelector('.progress-hero');
@@ -1227,19 +1303,9 @@ export default {
   unmount() {
     if (cleanupProgress) cleanupProgress();
     cleanupProgress = null;
-
-    // DETACH-REATTACH: вырываем live-grid из DOM до того, как router сделает container.innerHTML = ''
-    // Применяем только для нормального isRunning-сценария, не для foreign-project
-    const isForeign = activeRunProjectId && state.currentProject && state.currentProject.id !== activeRunProjectId;
-    if (isRunning && !isForeign) {
-      const grid = container ? container.querySelector('#live-grid') : document.getElementById('live-grid');
-      if (grid && grid.parentNode) {
-        persistentGrid = grid.parentNode.removeChild(grid); // детач — router не уничтожит
-      }
-    } else {
-      persistentGrid = null; // чистим если не running — избегаем утечки старого grid
-    }
-
+    _clearCancelWatchdog(); // disarm watchdog when user navigates away
+    // DOM is discarded on unmount — state in lastState.liveTiles is the source of truth
+    // On next mount, render() rebuilds grid atomically from state (no detach/reattach needed)
     container = null;
     // Note: isRunning is intentionally NOT reset here
     // so re-mounting won't restart a generation that's still going

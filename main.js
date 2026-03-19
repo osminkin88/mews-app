@@ -355,16 +355,93 @@ ipcMain.handle('generate:start', async (event, { prompts, settings, projectId })
     }
   }
 
+  // ── META-BASED CLASSIFY: determine what to do with each prompt ──
+  // Source of truth = meta.json in each prompt's folder on disk.
+  // This replaces the old resumeFromIndex-based slice.
+  //
+  // Actions per prompt:
+  //   'skip'    — status === 'done': all slots saved, do not regenerate
+  //   'partial' — status === 'partial' | 'partial_desync': some slots missing,
+  //               DO NOT auto-regen (Stage 1). Log + skip. Stage 2 will add skipSlots.
+  //   'run'     — no meta.json, or status in: preparing/generating/error/unknown → generate
+  //
+  // originalIndex on each prompt guarantees correct folder mapping (001, 002...)
+  // regardless of which prompts are skipped.
+  function classifyPrompt(promptFolderPath) {
+    const metaPath = path.join(promptFolderPath, 'meta.json');
+    if (!fs.existsSync(metaPath)) return 'run';
+    try {
+      const meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+      const s = meta.status;
+
+      if (s === 'done') return 'skip';
+      if (s === 'partial' || s === 'partial_desync') return 'backfill'; // ← Stage 2: backfill missing slots
+
+      // ── BACKFILL CRASH DETECTION ──
+      // Case 1: main.js wrote 'backfilling' marker, then crashed before saveIntermediateMeta
+      if (s === 'backfilling') return 'backfill';
+
+      // Case 2: saveIntermediateMeta overwrote meta during backfill (format: {images[], status:'in_progress'})
+      // Detect by checking if any image in images[] has _backfillSkipped=true
+      if (s === 'in_progress') {
+        const images = meta.images || [];
+        const hasBackfillSkipped = images.some(r => r._backfillSkipped === true);
+        if (hasBackfillSkipped) return 'backfill'; // ← backfill crashed mid-session
+        return 'run'; // ← normal in_progress (crash during regular run)
+      }
+
+      // preparing / generating / error / unknown → re-run
+      return 'run';
+    } catch {
+      return 'run'; // damaged meta → treat as not done
+    }
+  }
+
+  // Annotate every prompt with its _action before the loop.
+  // All prompts are kept (no slice) so originalIndex stays absolute.
+  const effectivePrompts = prompts.map((p, i) => {
+    const absIdx = p.originalIndex !== undefined ? p.originalIndex : i;
+    const folderPath = path.join(baseOutputDir, String(absIdx + 1).padStart(3, '0'));
+    const action = classifyPrompt(folderPath);
+    return { ...p, _action: action, _absIdx: absIdx };
+  });
+
+  const skipCount     = effectivePrompts.filter(p => p._action === 'skip').length;
+  const backfillCount = effectivePrompts.filter(p => p._action === 'backfill').length;
+  const runCount      = effectivePrompts.filter(p => p._action === 'run').length;
+  console.log(`[main] ▶️ Meta-classify results: skip=${skipCount}, backfill=${backfillCount}, run=${runCount} (total=${prompts.length})`);
+
   // Process each prompt sequentially
   console.log(`[main] ═══ GENERATE:START received ═══`);
-  console.log(`[main] Prompts to process: ${prompts.length}`);
+  console.log(`[main] Prompts in full batch: ${prompts.length}, effective (to process now): ${effectivePrompts.length}`);
   console.log(`[main] projectId: ${projectId || 'NONE'}`);
   console.log(`[main] baseOutputDir: ${baseOutputDir}`);
   console.log(`[main] imagesPerPrompt: ${imagesCount || 4}`);
-  prompts.forEach((p, i) => {
+  effectivePrompts.forEach((p, i) => {
     const absIdx = p.originalIndex !== undefined ? p.originalIndex : i;
     console.log(`[main]   #${i + 1}: id=${p.id}, absIndex=${absIdx}, folder=${String(absIdx + 1).padStart(3, '0')}, text="${(p.prompt || 'EMPTY!').substring(0, 80)}"`);
   });
+
+  // ── SESSION START: send summary to UI before any prompts are processed ──
+  {
+    const sessionMode = (runCount > 0 && backfillCount === 0 && skipCount === 0) ? 'normal'
+      : (runCount === 0 && backfillCount === 0 && skipCount > 0) ? 'resume'
+      : 'mixed';
+    const parts = [];
+    if (runCount > 0)      parts.push(`${runCount} ${runCount === 1 ? 'новый' : 'новых'}`);
+    if (backfillCount > 0) parts.push(`${backfillCount} дозаполн${backfillCount === 1 ? 'ение' : 'ения'}`);
+    if (skipCount > 0)     parts.push(`${skipCount} уже ${skipCount === 1 ? 'готов' : 'готовы'}`);
+    const sessionStartMsg = `▶ Запуск: ${parts.join(' · ')}  (всего ${prompts.length})`;
+    sendToRenderer('generate:progress', {
+      step: 'session_start',
+      sessionMode,
+      runCount,
+      backfillCount,
+      skipCount,
+      promptTotal: prompts.length,
+      message: sessionStartMsg,
+    });
+  }
 
   // Reset stop flag for this entire batch
   if (typeof engine.resetShouldStop === 'function') {
@@ -375,20 +452,24 @@ ipcMain.handle('generate:start', async (event, { prompts, settings, projectId })
 
   const results = [];
   let crossPromptExcludeFingerprints = []; // Барьер: UUID от предыдущего промпта
-  for (let i = 0; i < prompts.length; i++) {
+  for (let i = 0; i < effectivePrompts.length; i++) {
     // Check if stopped by user (only via explicit stop button)
     if (engine.getShouldStop()) {
       console.log(`[main] ─── User pressed STOP before prompt ${i + 1}. Breaking. ───`);
       break;
     }
 
-    const prompt = prompts[i];
+    const prompt = effectivePrompts[i];
     const runIndex = i + 1; // Index in the current generation batch (1-based) for UI sync
+    // promptTotal shown in UI = full batch size so user sees "21 of 30", not "1 of 10"
+    const uiPromptTotal = prompts.length;
     const folderIndex = prompt.originalIndex !== undefined ? prompt.originalIndex + 1 : runIndex; // Absolute index for folder mapping
     const targetCount = imagesCount || 4;
     
     const promptDir = path.join(baseOutputDir, String(folderIndex).padStart(3, '0'));
-    console.log(`\n[main] ┌── PROMPT ${runIndex}/${prompts.length} ──────────────────────────────`);
+    // UI runIndex for display: if resuming, offset so user sees absolute position
+    const uiRunIndex = prompt.originalIndex !== undefined ? prompt.originalIndex + 1 : runIndex;
+    console.log(`\n[main] ┌── PROMPT ${uiRunIndex}/${uiPromptTotal} ──────────────────────────────`);
     console.log(`[main] │ id=${prompt.id}, absIndex=${folderIndex - 1} (folder: ${String(folderIndex).padStart(3, '0')})`);
     console.log(`[main] │ target: ${targetCount} images`);
     console.log(`[main] │ projectId: ${projectId || 'NONE'}`);
@@ -396,6 +477,278 @@ ipcMain.handle('generate:start', async (event, { prompts, settings, projectId })
     console.log(`[main] │ text: "${(prompt.prompt || 'EMPTY!').substring(0, 60)}"`);
     console.log(`[main] └──────────────────────────────────────────────────`);
 
+    // ── SKIP: prompt already done — read result from meta.json, fire fake 'done' event ──
+    if (prompt._action === 'skip') {
+      console.log(`[main] ⏭️  SKIP prompt ${uiRunIndex} — status: done (meta.json)`);
+      let skipMeta = {};
+      try { skipMeta = JSON.parse(fs.readFileSync(path.join(promptDir, 'meta.json'), 'utf8')); } catch {}
+      results.push({
+        idx: folderIndex,
+        id: prompt.id,
+        status: 'done',
+        savedCount: skipMeta.saved_count || 0,
+        failedCount: skipMeta.failed_count || 0,
+        totalSlots: targetCount,
+        slots: skipMeta.slots || [],
+        _skipped: true,
+      });
+      // Advance progress bar so UI doesn't stall on skipped prompts
+      sendToRenderer('generate:progress', {
+        step: 'done',
+        promptCurrent: uiRunIndex,
+        promptTotal: uiPromptTotal,
+        imagesPerPrompt: targetCount,
+        message: `Промпт ${uiRunIndex}/${uiPromptTotal} — уже готов`,
+        _skipped: true,
+        _mode: 'resume',
+      });
+      continue;
+    }
+
+    // ── BACKFILL: partial prompt — dozzapolnyaem nedostayushchie sloty cherez skipSlots ──
+    // This is NOT a normal run. Engine will skip already-saved slots and generate only missing ones.
+    // Old meta is loaded as the source of truth. Final meta = merge(old slots + new slots).
+    if (prompt._action === 'backfill') {
+      console.log(`[main] 🔄 BACKFILL prompt ${uiRunIndex} — дозаполняем частичный промпт через skipSlots`);
+
+      // ── Load old meta — source of truth for already-saved slots ──
+      let oldMeta = {};
+      try { oldMeta = JSON.parse(fs.readFileSync(path.join(promptDir, 'meta.json'), 'utf8')); } catch {}
+      const oldSlots = oldMeta.slots || []; // [{slot, state, file, size, ...}]
+
+      // Build skipSlots: slot numbers that are already saved — do NOT generate these
+      const skipSlots = oldSlots
+        .filter(s => s.state === 'saved' && s.file)
+        .map(s => s.slot);
+      const missingSlots = targetCount - skipSlots.length;
+
+      console.log(`[main] 🔄 BACKFILL: saved slots=${skipSlots.join(',') || 'none'}, missing=${missingSlots}`);
+
+      if (missingSlots <= 0) {
+        // Nothing to backfill — all slots already saved, update meta to done
+        console.log(`[main] ✅ BACKFILL: all slots already present — marking done`);
+        oldMeta.status = 'done';
+        saveMeta(promptDir, oldMeta);
+        results.push({
+          idx: folderIndex, id: prompt.id, status: 'done',
+          savedCount: skipSlots.length, failedCount: 0,
+          totalSlots: targetCount, slots: oldSlots, _backfillComplete: true,
+        });
+        sendToRenderer('generate:progress', {
+          step: 'done', promptCurrent: uiRunIndex, promptTotal: uiPromptTotal,
+          imagesPerPrompt: targetCount,
+          message: `✅ Промпт ${uiRunIndex}/${uiPromptTotal}: все слоты уже есть — BACKFILL завершён`,
+        });
+        continue;
+      }
+
+      // ── Update meta to 'backfilling' state before engine call ──
+      const backfillMeta = {
+        ...oldMeta,
+        status: 'backfilling',
+        timestamps: { ...(oldMeta.timestamps || {}), backfill_started: new Date().toISOString() },
+      };
+      saveMeta(promptDir, backfillMeta);
+
+      sendToRenderer('generate:progress', {
+        promptCurrent: uiRunIndex, promptTotal: uiPromptTotal,
+        promptText: prompt.prompt, imagesPerPrompt: targetCount,
+        status: 'backfilling',
+        _mode: 'backfill',
+        message: `Промпт ${uiRunIndex}/${uiPromptTotal} — дозаполняю (${skipSlots.length} из ${targetCount} уже есть)`,
+      });
+
+      try {
+        const backfillResult = await engine.generatePrompt(prompt.prompt, {
+          model, aspect, quality,
+          imagesCount: targetCount,
+          outputDir: promptDir,
+          excludeFingerprints: crossPromptExcludeFingerprints,
+          skipSlots,        // ← engine skips these, injects pre-existing records
+          existingSlots: oldSlots, // ← engine uses these to reconstruct imageResults for skipped slots
+          onProgress: async (progress) => {
+            const enriched = {
+              promptCurrent: uiRunIndex, promptTotal: uiPromptTotal,
+              promptText: prompt.prompt, imagesPerPrompt: targetCount,
+              _mode: 'backfill', // tag all backfill slot events
+              ...progress,
+            };
+            // Enrich real 'saved' events with preview (same as normal run)
+            if (progress.step === 'saved' && progress.savedSlot && !progress._backfillSkipped) {
+              try {
+                await new Promise(r => setTimeout(r, 300));
+                const filePath = path.join(promptDir, `gen_${progress.savedSlot}.jpg`);
+                if (fs.existsSync(filePath)) {
+                  const data = await fs.promises.readFile(filePath);
+                  enriched.previewDataUrl = `data:image/jpeg;base64,${data.toString('base64')}`;
+                  enriched.promptIndex = uiRunIndex;
+                  enriched.slotIndex = progress.savedSlot;
+                }
+              } catch {}
+            }
+            sendToRenderer('generate:progress', enriched);
+          },
+        });
+
+        // ── MERGE: combine old saved slots + new session results into final meta ──
+        // imageResults from engine: _backfillSkipped=true slots come from existingSlots,
+        // real slots come from this session. Together they represent the full picture.
+        const newImages = backfillResult.images || [];
+
+        // Build merged slots: for each slot index 1..targetCount, prefer new result
+        // (may include _backfillSkipped=true), fall back to oldSlots record
+        const mergedSlots = [];
+        for (let s = 1; s <= targetCount; s++) {
+          const fromNew = newImages.find(r => r.index === s);
+          if (fromNew) {
+            mergedSlots.push({
+              slot: s,
+              state: fromNew.state,
+              file: fromNew.file || null,
+              size: fromNew.size || null,
+              quality: fromNew.quality || null,
+              attempts: fromNew.attempts || 0,
+              errorReason: fromNew.errorReason || null,
+              _backfillSkipped: fromNew._backfillSkipped || false,
+            });
+          } else {
+            // Should not happen (engine always fills all slots), but safe fallback
+            const fromOld = oldSlots.find(o => o.slot === s);
+            if (fromOld) mergedSlots.push(fromOld);
+          }
+        }
+
+        const mergedSavedCount = mergedSlots.filter(s => s.state === 'saved').length;
+        const mergedFailedCount = mergedSlots.filter(s => s.state === 'failed').length;
+        const mergedFiles = mergedSlots.filter(s => s.state === 'saved' && s.file).map(s => s.file);
+        const mergedStatus = mergedSavedCount >= targetCount ? 'done'
+          : mergedSavedCount > 0 ? 'partial'
+          : 'error';
+
+        // Write final merged meta — full picture of all slots across all sessions
+        const finalMeta = {
+          ...oldMeta,
+          status: mergedStatus,
+          saved_count: mergedSavedCount,
+          failed_count: mergedFailedCount,
+          files: mergedFiles,
+          slots: mergedSlots,
+          error: mergedStatus !== 'done' ? `Backfill: saved ${mergedSavedCount}/${targetCount}` : null,
+          timestamps: {
+            ...(oldMeta.timestamps || {}),
+            backfill_completed: new Date().toISOString(),
+          },
+        };
+        saveMeta(promptDir, finalMeta);
+
+        console.log(`[main] 🔄 BACKFILL prompt ${uiRunIndex}: merged=${mergedSavedCount}/${targetCount} saved, status=${mergedStatus}`);
+
+        results.push({
+          idx: folderIndex, id: prompt.id,
+          status: mergedStatus,
+          savedCount: mergedSavedCount,
+          failedCount: mergedFailedCount,
+          totalSlots: targetCount,
+          slots: mergedSlots,
+          _backfill: true,
+        });
+
+        sendToRenderer('generate:progress', {
+          step: mergedStatus === 'done' ? 'done' : 'partial_skipped',
+          promptCurrent: uiRunIndex, promptTotal: uiPromptTotal,
+          imagesPerPrompt: targetCount,
+          _mode: 'backfill',
+          message: mergedStatus === 'done'
+            ? `Промпт ${uiRunIndex}/${uiPromptTotal} — дозаполнен, все ${targetCount} варианта готовы`
+            : `Промпт ${uiRunIndex}: дозаполнено ${mergedSavedCount}/${targetCount}`,
+        });
+
+      } catch (backfillErr) {
+        console.error(`[main] ❌ BACKFILL ошибка prompt ${uiRunIndex}:`, backfillErr.message);
+
+        // ── RECOVER: read current meta.json from disk ──
+        // The engine may have updated it via saveIntermediateMeta (format: { images[], savedCount })
+        // We must NOT fall back to oldMeta blindly — it would erase progress from this session.
+        let diskMeta = {};
+        try { diskMeta = JSON.parse(fs.readFileSync(path.join(promptDir, 'meta.json'), 'utf8')); } catch {}
+
+        // diskMeta may be in engine format (images[]) or main.js format (slots[])
+        // Normalize to slot records: [{slot, state, file, size}]
+        const diskImages = diskMeta.images || diskMeta.slots || [];
+
+        // Merge: for each slot 1..targetCount pick the best available record
+        // Priority: disk (most recent, includes progress from this session) > oldSlots (pre-backfill)
+        const recoveredSlots = [];
+        for (let s = 1; s <= targetCount; s++) {
+          // Find disk record (engine format uses .index, main.js format uses .slot)
+          const fromDisk = diskImages.find(r => (r.index === s) || (r.slot === s));
+          const fromOld  = oldSlots.find(o => o.slot === s);
+
+          if (fromDisk) {
+            // Normalize to main.js slot format
+            recoveredSlots.push({
+              slot:        s,
+              state:       fromDisk.state,
+              file:        fromDisk.file || null,
+              size:        fromDisk.size || null,
+              quality:     fromDisk.quality || null,
+              attempts:    fromDisk.attempts || 0,
+              errorReason: fromDisk.errorReason || null,
+              _backfillSkipped: fromDisk._backfillSkipped || false,
+            });
+          } else if (fromOld && fromOld.state === 'saved') {
+            // Fall back to pre-backfill record only for saved slots (safe ground)
+            recoveredSlots.push(fromOld);
+          } else {
+            // Slot unknown — mark as error so next resume will try to backfill it
+            recoveredSlots.push({ slot: s, state: 'error', file: null, errorReason: 'backfill_error' });
+          }
+        }
+
+        const recoveredSaved  = recoveredSlots.filter(s => s.state === 'saved').length;
+        const recoveredFailed = recoveredSlots.filter(s => s.state !== 'saved').length;
+        const recoveredFiles  = recoveredSlots.filter(s => s.state === 'saved' && s.file).map(s => s.file);
+        // Status: partial so next resume will trigger backfill again for missing slots
+        const recoveredStatus = recoveredSaved >= targetCount ? 'done'
+          : recoveredSaved > 0 ? 'partial'
+          : 'error';
+
+        const recoveredMeta = {
+          ...oldMeta,                   // preserve prompt, model, aspect, resolution, timestamps
+          status:       recoveredStatus,
+          saved_count:  recoveredSaved,
+          failed_count: recoveredFailed,
+          files:        recoveredFiles,
+          slots:        recoveredSlots,
+          error:        `Backfill error: ${backfillErr.message}`,
+          timestamps: {
+            ...(oldMeta.timestamps || {}),
+            backfill_error: new Date().toISOString(),
+          },
+        };
+        saveMeta(promptDir, recoveredMeta);
+        console.log(`[main] 🔄 BACKFILL crash recovery: saved=${recoveredSaved}/${targetCount}, status=${recoveredStatus}`);
+
+        results.push({
+          idx: folderIndex, id: prompt.id,
+          status:      recoveredStatus,
+          savedCount:  recoveredSaved,
+          failedCount: recoveredFailed,
+          totalSlots:  targetCount,
+          slots:       recoveredSlots,
+          _backfill:   true,
+        });
+
+        if (backfillErr.isFatal) {
+          sendToRenderer('generate:progress', { status: 'fatal_error', message: backfillErr.message, errorReason: backfillErr.errorReason });
+          break;
+        }
+      }
+
+      continue;
+    }
+
+    // ── RUN: generate this prompt (no meta, error, preparing, generating) ──
     if (!fs.existsSync(promptDir)) {
       fs.mkdirSync(promptDir, { recursive: true });
     }
@@ -427,12 +780,13 @@ ipcMain.handle('generate:start', async (event, { prompts, settings, projectId })
 
     // Send progress to renderer
     sendToRenderer('generate:progress', {
-      promptCurrent: runIndex,
-      promptTotal: prompts.length,
+      promptCurrent: uiRunIndex,
+      promptTotal: uiPromptTotal,
       promptText: prompt.prompt,
       imagesPerPrompt: targetCount,
       status: 'generating',
-      message: `Промпт ${runIndex}/${prompts.length}...`,
+      _mode: 'normal',
+      message: `Промпт ${uiRunIndex}/${uiPromptTotal}...`,
     });
 
     // ── Single call to engine (engine handles per-slot retries internally) ──
@@ -450,10 +804,11 @@ ipcMain.handle('generate:start', async (event, { prompts, settings, projectId })
         onProgress: async (progress) => {
           const enriched = {
             // Prompt-level fields (never overwritten by engine)
-            promptCurrent: runIndex,
-            promptTotal: prompts.length,
+            promptCurrent: uiRunIndex,
+            promptTotal: uiPromptTotal,
             promptText: prompt.prompt,
             imagesPerPrompt: targetCount,
+            _mode: 'normal', // tag all normal run slot events
             // Engine slot-level fields pass through as-is
             ...progress,
           };
@@ -472,18 +827,18 @@ ipcMain.handle('generate:start', async (event, { prompts, settings, projectId })
               const data = await fs.promises.readFile(filePath);
               const ext = path.extname(filePath).slice(1) || 'jpeg';
               enriched.previewDataUrl = `data:image/${ext};base64,${data.toString('base64')}`;
-              enriched.promptIndex = runIndex;
+              enriched.promptIndex = uiRunIndex;
               enriched.slotIndex = progress.savedSlot;
             } catch (e) {
               // File may not exist yet — non-fatal, progress.js will show placeholder
               console.warn('[main] Preview read error (tile will show placeholder):', e.message);
-              enriched.promptIndex = runIndex;
+              enriched.promptIndex = uiRunIndex;
               enriched.slotIndex = progress.savedSlot;
               
               // Deferred retry: try again after 1.5s to upgrade placeholder with real preview
               const retrySlot = progress.savedSlot;
               const retryPromptDir = promptDir;
-              const retryRunIndex = runIndex;
+              const retryRunIndex = uiRunIndex; // absolute prompt index for correct UI mapping
               setTimeout(async () => {
                 try {
                   let fp = path.join(retryPromptDir, `gen_${retrySlot}.jpg`);
@@ -496,9 +851,9 @@ ipcMain.handle('generate:start', async (event, { prompts, settings, projectId })
                     const ext = path.extname(fp).slice(1) || 'jpeg';
                     sendToRenderer('generate:progress', {
                       step: 'saved',
-                      promptCurrent: retryRunIndex,
-                      promptTotal: prompts.length,
-                      promptIndex: retryRunIndex,
+                      promptCurrent: uiRunIndex,
+                      promptTotal: uiPromptTotal,
+                      promptIndex: uiRunIndex,
                       slotIndex: retrySlot,
                       savedSlot: retrySlot,
                       previewDataUrl: `data:image/${ext};base64,${d.toString('base64')}`,
@@ -517,8 +872,8 @@ ipcMain.handle('generate:start', async (event, { prompts, settings, projectId })
 
       // ── МЕЖПРОМПТОВЫЙ БАРЬЕР (RC-3, RC-6, RC-DESYNC) ──
       // Ждём стабилизации ленты и фиксируем ТЕКУЩИЕ UUID для защиты следующего промпта
-      if (i < prompts.length - 1 && !engine.getShouldStop()) {
-        console.log(`[main] ⏳ После промпта ${runIndex}: ждём стабилизации ленты...`);
+      if (i < effectivePrompts.length - 1 && !engine.getShouldStop()) {
+        console.log(`[main] ⏳ После промпта ${uiRunIndex}: ждём стабилизации ленты...`);
         const page = require('./chrome-manager').getActivePage();
         if (page) {
           const stabilityResult = await engine.waitForFeedStable(page, 45_000);
@@ -660,25 +1015,26 @@ ipcMain.handle('generate:start', async (event, { prompts, settings, projectId })
       // ── Send per-prompt 'done' event so progress.js can advance bar deterministically ──
       sendToRenderer('generate:progress', {
         step: 'done',
-        promptCurrent: runIndex,
-        promptTotal: prompts.length,
+        promptCurrent: uiRunIndex,
+        promptTotal: uiPromptTotal,
         imagesPerPrompt: targetCount,
-        message: `✅ Промпт ${runIndex}/${prompts.length} завершён — ${files.length}/${targetCount} сохранено`,
+        message: `✅ Промпт ${uiRunIndex}/${uiPromptTotal} завершён — ${files.length}/${targetCount} сохранено`,
       });
 
-      console.log(`[main] ┌── RESULT PROMPT ${runIndex} ─────────────────────────`);
+      console.log(`[main] ┌── RESULT PROMPT ${uiRunIndex} ─────────────────────────`);
       console.log(`[main] │ status: ${promptStatus.toUpperCase()} → saved ${files.length}/${targetCount}`);
       console.log(`[main] │ failed: ${result.failedCount || 0} slots`);
       console.log(`[main] │ files: [${files.join(', ')}]`);
       console.log(`[main] │ folder: ${promptDir}`);
       console.log(`[main] └──────────────────────────────────────────────────`);
 
+
     } catch (err) {
       // Engine throws only for fatal errors (isFatal=true) or 0-saved non-stop case
       const isFatal = err.isFatal === true;
       const reason = err.errorReason || 'unknown';
 
-      console.error(`[main] Prompt ${runIndex} FAILED [fatal=${isFatal}, reason=${reason}]: ${err.message}`);
+      console.error(`[main] Prompt ${uiRunIndex} FAILED [fatal=${isFatal}, reason=${reason}]: ${err.message}`);
 
       meta.status = 'error';
       meta.error = err.message;
@@ -688,7 +1044,7 @@ ipcMain.handle('generate:start', async (event, { prompts, settings, projectId })
 
       results.push({ idx: folderIndex, id: prompt.id, status: 'error', error: err.message, errorReason: reason });
 
-      console.log(`[main] ┌── RESULT PROMPT ${runIndex} ─────────────────────────`);
+      console.log(`[main] ┌── RESULT PROMPT ${uiRunIndex} ─────────────────────────`);
       console.log(`[main] │ status: ERROR [${reason}]`);
       console.log(`[main] │ fatal: ${isFatal}`);
       console.log(`[main] │ error: ${err.message}`);
@@ -708,6 +1064,30 @@ ipcMain.handle('generate:start', async (event, { prompts, settings, projectId })
     // Check if stopped by user (only via explicit stop button)
     if (engine.getShouldStop()) {
       console.log(`[main] ─── User pressed STOP after prompt ${i + 1}. Breaking. ───`);
+
+      // ── SAVE STOP MARKER: informational only (resume is now meta.json-based) ──
+      // generationState no longer drives which prompts to skip — meta.json does.
+      // We only save it so the banner in settings.js can show "stopped" info.
+      if (projectId) {
+        try {
+          const resumeProjects = loadProjects();
+          const resumeProj = resumeProjects.find(p => p.id === projectId);
+          const resumeSet = resumeProj ? getActiveSet(resumeProj) : null;
+          if (resumeSet) {
+            resumeSet.generationState = {
+              stoppedAt: new Date().toISOString(),
+              totalPrompts: prompts.length,
+              settings: { model, aspect, quality, imagesCount },
+            };
+            resumeSet.status = 'paused';
+            saveProject(resumeProj);
+            console.log(`[main] 💾 Stop marker saved for banner (meta.json drives actual resume)`);
+          }
+        } catch (saveErr) {
+          console.warn('[main] Could not save stop marker:', saveErr.message);
+        }
+      }
+
       break;
     }
   }
@@ -718,6 +1098,25 @@ ipcMain.handle('generate:start', async (event, { prompts, settings, projectId })
   if (typeof engine.getIsGenerating === 'function') {
     // Direct module-level reset
     engine._resetIsGenerating && engine._resetIsGenerating();
+  }
+
+  // ── CLEAR RESUME STATE on full completion (not stopped) ──
+  // If the batch ran to the end naturally (no stop), wipe generationState
+  // so next launch starts fresh.
+  if (!engine.getShouldStop() && projectId) {
+    try {
+      const doneProjects = loadProjects();
+      const doneProj = doneProjects.find(p => p.id === projectId);
+      const doneSet = doneProj ? getActiveSet(doneProj) : null;
+      if (doneSet && doneSet.generationState) {
+        delete doneSet.generationState;
+        if (doneSet.status === 'paused') doneSet.status = 'completed';
+        saveProject(doneProj);
+        console.log('[main] ✅ Resume state cleared — batch completed fully');
+      }
+    } catch (clearErr) {
+      console.warn('[main] Could not clear resume state:', clearErr.message);
+    }
   }
 
   // ── FIX: Small delay before 'complete' so last 'saved'/'done' events propagate via IPC ──
@@ -746,6 +1145,96 @@ function saveMeta(dir, meta) {
 ipcMain.handle('generate:stop', () => {
   engine.stopGeneration();
   return { success: true };
+});
+
+// ── Get resume state — scans meta.json on disk, not resumeFromIndex ──
+// Returns real counts: how many prompts are done, pending, partial.
+// canResume: true if any prompt is not 'done' (= pending or partial).
+ipcMain.handle('generate:get-resume-state', (event, { projectId }) => {
+  if (!projectId) return { canResume: false };
+  const projects = loadProjects();
+  const project = projects.find(p => p.id === projectId);
+  if (!project) return { canResume: false };
+  const activeSet = getActiveSet(project);
+  if (!activeSet) return { canResume: false };
+
+  // Only show banner if we have a stop marker (user explicitly stopped)
+  const genState = activeSet.generationState;
+  if (!genState || !genState.stoppedAt) return { canResume: false };
+
+  // Scan generated/ folder for prompt subdirs
+  let baseGenDir;
+  try {
+    baseGenDir = path.join(getSetDir(project, activeSet.id), 'generated');
+  } catch { return { canResume: false }; }
+  if (!fs.existsSync(baseGenDir)) return { canResume: false };
+
+  const totalPrompts = genState.totalPrompts || (activeSet.prompts?.length || 0);
+  if (totalPrompts === 0) return { canResume: false };
+
+  // Count statuses across all prompt folders (001, 002, ...)
+  let doneCount = 0;
+  let partialCount = 0;
+  let pendingCount = 0;
+
+  for (let i = 0; i < totalPrompts; i++) {
+    const folder = path.join(baseGenDir, String(i + 1).padStart(3, '0'));
+    const metaPath = path.join(folder, 'meta.json');
+    if (!fs.existsSync(metaPath)) {
+      pendingCount++;
+      continue;
+    }
+    try {
+      const m = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+      if (m.status === 'done') doneCount++;
+      else if (m.status === 'partial' || m.status === 'partial_desync') partialCount++;
+      else pendingCount++; // preparing / generating / error
+    } catch {
+      pendingCount++; // damaged meta
+    }
+  }
+
+  // canResume: there's something left to generate
+  const canResume = pendingCount > 0;
+  // If everything is done or partial-only — no point showing resume
+  if (!canResume && partialCount === 0) {
+    // All done — clean up stop marker
+    try {
+      delete activeSet.generationState;
+      if (activeSet.status === 'paused') activeSet.status = 'completed';
+      saveProject(project);
+    } catch {}
+    return { canResume: false };
+  }
+
+  return {
+    canResume,
+    totalPrompts,
+    doneCount,
+    pendingCount,
+    partialCount,
+    stoppedAt: genState.stoppedAt,
+    settings: genState.settings || null,
+  };
+});
+
+// ── Clear resume state (user chose to start fresh instead of resuming) ──
+ipcMain.handle('generate:clear-resume-state', (event, { projectId }) => {
+  if (!projectId) return { success: false };
+  try {
+    const projects = loadProjects();
+    const project = projects.find(p => p.id === projectId);
+    if (!project) return { success: false };
+    const activeSet = getActiveSet(project);
+    if (activeSet && activeSet.generationState) {
+      delete activeSet.generationState;
+      if (activeSet.status === 'paused') activeSet.status = 'draft';
+      saveProject(project);
+    }
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
 });
 
 // =============================================================
@@ -1236,10 +1725,20 @@ ipcMain.handle('projects:get-images', (event, { projectId, promptIndex }) => {
       };
     });
 
-    return { success: true, images };
+    // ── Read meta.json for backfill marker ──
+    let wasBackfilled = false;
+    try {
+      const metaPath = path.join(promptDir, 'meta.json');
+      if (fs.existsSync(metaPath)) {
+        const meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+        wasBackfilled = !!(meta.timestamps && meta.timestamps.backfill_completed);
+      }
+    } catch { /* meta read failure is non-blocking */ }
+
+    return { success: true, images, wasBackfilled };
   } catch (err) {
     console.error('[projects] get-images error:', err);
-    return { success: false, images: [] };
+    return { success: false, images: [], wasBackfilled: false };
   }
 });
 

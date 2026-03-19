@@ -54,6 +54,8 @@ async function generatePrompt(prompt, options = {}) {
     outputDir = null,
     onProgress = () => {},
     excludeFingerprints = [], // UUID от предыдущего промпта — нельзя принять за своих
+    skipSlots = [],           // [1,2] — slot numbers already saved (backfill mode). Engine skips these.
+    existingSlots = [],       // pre-existing slot records from old meta (used to reconstruct imageResults)
   } = options;
 
   // ── FORENSIC: Prompt entry point ──
@@ -128,7 +130,41 @@ async function generatePrompt(prompt, options = {}) {
         attempts: 0,
       };
 
+      // ── BACKFILL SKIP: slot already saved in previous session ──
+      // Do NOT click Generate. Do NOT download. Do NOT overwrite the file.
+      // Inject the pre-existing slot record and notify renderer.
+      if (skipSlots.includes(img.index)) {
+        const existing = existingSlots.find(s => s.slot === img.index) || {};
+        console.log(`\n[engine] ⏭️  BACKFILL SKIP slot ${img.index}/${imagesCount} — already saved (file: ${existing.file || 'gen_' + img.index + '.jpg'})`);
+        imageResults.push({
+          index: img.index,
+          state: 'saved',
+          file: existing.file || `gen_${img.index}.jpg`,
+          size: existing.size || 0,
+          quality: existing.quality || null,
+          error: null,
+          errorReason: null,
+          attempts: 0,
+          _backfillSkipped: true,  // marker: this result came from old meta, not this session
+        });
+        // Notify renderer so progress bar advances — same event shape as real 'saved'
+        onProgress({
+          step: 'saved',
+          message: `⏭️ Слот ${img.index}/${imagesCount}: уже сохранён (backfill пропуск)`,
+          current: img.index,
+          total: imagesCount,
+          state: 'saved',
+          savedSlot: img.index,
+          _backfillSkipped: true,
+        });
+        // Save intermediate meta after this slot (includes skipped + any already-done real slots)
+        saveIntermediateMeta(outputDir, prompt, model, aspect, quality, imageResults, imagesCount);
+        continue;
+      }
+
       console.log(`\n[engine] ═══ SLOT ${img.index}/${imagesCount} — starting ═══`);
+
+
 
       // ── Per-slot retry loop: up to 2 attempts ──
       let slotSucceeded = false;
@@ -2290,7 +2326,42 @@ async function waitForSingleImage(page, feedCountBefore, fingerprintsBefore, ind
   // Набор всех запрещённых UUID: до клика + от прошлого промпта
   const forbiddenUUIDs = new Set([...fingerprintsBefore, ...excludeFingerprints]);
 
-  while (Date.now() < hardDeadline && !shouldStop) {
+  // ── SOFT PAUSE: grace period for in-flight slot ──
+  // When shouldStop is set, don't exit immediately — give the in-flight slot
+  // time to finish. Continue polling with a 90s grace deadline.
+  const GRACE_PERIOD_MS = 90_000;
+  let graceDeadline = null; // set on first shouldStop detection
+
+  while (Date.now() < hardDeadline) {
+    // ── SOFT PAUSE: detect shouldStop and enter grace period ──
+    if (shouldStop && !graceDeadline) {
+      graceDeadline = Date.now() + GRACE_PERIOD_MS;
+      const graceSec = Math.round(GRACE_PERIOD_MS / 1000);
+      console.log(`[engine] ⏸ SOFT PAUSE: slot ${index} in-flight — grace period ${graceSec}s, ожидаю результат...`);
+      onProgress({
+        step: 'waiting',
+        message: `⏸ Приостановка — дожидаюсь текущего слота ${index}/${total}...`,
+      });
+    }
+
+    // ── SOFT PAUSE: check grace period expiry ──
+    if (graceDeadline && Date.now() > graceDeadline) {
+      const graceElapsed = Math.round((Date.now() - (graceDeadline - GRACE_PERIOD_MS)) / 1000);
+      console.log(`[engine] ⏸ GRACE PERIOD EXPIRED: slot ${index} — ${graceElapsed}s since pause, proceeding to reconciliation`);
+      break;
+    }
+
+    // ── SOFT PAUSE: early exit if in-flight cleared without result ──
+    if (graceDeadline) {
+      const inFlightNow = await countInFlightItems(page);
+      if (inFlightNow.total === 0 && queuedGone) {
+        // Site finished processing but no new image appeared — no point waiting longer
+        const graceElapsed = Math.round((Date.now() - (graceDeadline - GRACE_PERIOD_MS)) / 1000);
+        console.log(`[engine] ⏸ GRACE EXIT: in-flight cleared (${graceElapsed}s since pause), no result — proceeding to reconciliation`);
+        break;
+      }
+    }
+
     await chrome.sleep(POLL_INTERVAL);
     const elapsed = Math.round((Date.now() - startTime) / 1000);
     const pastSoft = Date.now() > softDeadline;
@@ -2331,7 +2402,7 @@ async function waitForSingleImage(page, feedCountBefore, fingerprintsBefore, ind
       const topForeUrl = await getFirstFeedImgUrl(page);
       const topForeUUID = extractUUID(topForeUrl);
       const isForbidden = topForeUUID ? forbiddenUUIDs.has(topForeUUID) : null;
-      console.log(`[engine] 🔍 POLL[${elapsed}s] img=${index}: queued=${queued}, feed=${feedCountNow}/${feedCountBefore}, topUUID=${topForeUUID || 'none'}, forbidden=${isForbidden}, genDetected=${generationDetected}, queuedGone=${queuedGone}`);
+      console.log(`[engine] 🔍 POLL[${elapsed}s] img=${index}: queued=${queued}, feed=${feedCountNow}/${feedCountBefore}, topUUID=${topForeUUID || 'none'}, forbidden=${isForbidden}, genDetected=${generationDetected}, queuedGone=${queuedGone}${graceDeadline ? ', ⏸ GRACE' : ''}`);
     }
 
     const shouldCheckUUID = queuedGone || feedCountNow > feedCountBefore || elapsed > 10;
@@ -2343,7 +2414,8 @@ async function waitForSingleImage(page, feedCountBefore, fingerprintsBefore, ind
 
       if (topUUID && !forbiddenUUIDs.has(topUUID)) {
         // Genuinely new image — not in pre-click snapshot and not from prior prompt!
-        console.log(`[engine] ✅ Image ${index} ready via UUID detection (${elapsed}s, feedCount: ${feedCountBefore}→${feedCountNow}, queued=${queued}, uuid=${topUUID}): ${(topUrl || '').substring(0, 80)}...`);
+        const graceNote = graceDeadline ? ' (during grace period — saving before pause!)' : '';
+        console.log(`[engine] ✅ Image ${index} ready via UUID detection (${elapsed}s, feedCount: ${feedCountBefore}→${feedCountNow}, queued=${queued}, uuid=${topUUID})${graceNote}: ${(topUrl || '').substring(0, 80)}...`);
         // Небольшое ожидание для полной загрузки, но URL уже зафиксирован
         await chrome.sleep(800);
         return topUrl;
@@ -2365,7 +2437,8 @@ async function waitForSingleImage(page, feedCountBefore, fingerprintsBefore, ind
           }
 
           if (foundUrl) {
-            console.log(`[engine] ✅ Image ${index} ready via deep UUID scan (${elapsed}s, queued=${queued}, newUUIDs=${newFingerprints.length}): ${foundUrl.substring(0, 80)}...`);
+            const graceNote = graceDeadline ? ' (during grace period — saving before pause!)' : '';
+            console.log(`[engine] ✅ Image ${index} ready via deep UUID scan (${elapsed}s, queued=${queued}, newUUIDs=${newFingerprints.length})${graceNote}: ${foundUrl.substring(0, 80)}...`);
             await chrome.sleep(800);
             return foundUrl;
           }
@@ -2374,10 +2447,12 @@ async function waitForSingleImage(page, feedCountBefore, fingerprintsBefore, ind
     }
 
     // Status update
-    const status = queuedGone ? 'обработка...' : queued > 0 ? 'генерация...' : 'ожидание...';
+    const statusText = graceDeadline
+      ? `⏸ дожидаюсь результата...`
+      : (queuedGone ? 'обработка...' : queued > 0 ? 'генерация...' : 'ожидание...');
     onProgress({
       step: 'waiting',
-      message: `Изображение ${index}/${total}: ${status} (${elapsed}с)`,
+      message: `Изображение ${index}/${total}: ${statusText} (${elapsed}с)`,
     });
 
     // Debug log every 15 seconds
@@ -2385,7 +2460,7 @@ async function waitForSingleImage(page, feedCountBefore, fingerprintsBefore, ind
       const topUrl = await getFirstFeedImgUrl(page);
       const topUUID = extractUUID(topUrl);
       const isKnown = topUUID ? forbiddenUUIDs.has(topUUID) : 'N/A';
-      console.log(`[engine] DEBUG: queued=${queued}, queuedGone=${queuedGone}, feedCount=${feedCountNow}/${feedCountBefore}, topUUID=${topUUID || 'none'}, isForbidden=${isKnown}, elapsed=${elapsed}s`);
+      console.log(`[engine] DEBUG: queued=${queued}, queuedGone=${queuedGone}, feedCount=${feedCountNow}/${feedCountBefore}, topUUID=${topUUID || 'none'}, isForbidden=${isKnown}, elapsed=${elapsed}s${graceDeadline ? ', ⏸ GRACE' : ''}`);
     }
 
     // Past soft timeout: log extended wait status every 30s and break when in-flight clears

@@ -1766,6 +1766,210 @@ input:focus-visible {
   flex-shrink: 0;
 }
 
+/* ── Log: mode badge in header (Смешанный / Уже готово) ── */
+.log-mode-badge {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 10px;
+  letter-spacing: 0.02em;
+  flex-shrink: 0;
+}
+
+.log-mode-badge--mixed {
+  background: rgba(255, 159, 10, 0.15);
+  color: var(--orange);
+  border: 1px solid rgba(255, 159, 10, 0.3);
+}
+
+.log-mode-badge--resume {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-tertiary);
+  border: 1px solid var(--border);
+}
+
+/* ── SESSION MODE BADGE (hero context) ── */
+.session-mode-badge {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 10px;
+  border-radius: 10px;
+  letter-spacing: 0.02em;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.session-mode-badge--mixed {
+  background: rgba(255, 159, 10, 0.12);
+  color: var(--orange);
+  border: 1px solid rgba(255, 159, 10, 0.25);
+}
+
+.session-mode-badge--resume {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-tertiary);
+  border: 1px solid var(--border);
+}
+
+/* ── Log: session_start summary row ── */
+.log-session-start {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  padding: 8px 0 10px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 4px;
+}
+
+.log-session-chip {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 8px;
+  white-space: nowrap;
+}
+
+.log-session-chip--normal {
+  background: rgba(48, 209, 88, 0.12);
+  color: var(--green);
+}
+
+.log-session-chip--backfill {
+  background: rgba(10, 132, 255, 0.12);
+  color: var(--accent);
+}
+
+.log-session-chip--skip {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-tertiary);
+}
+
+/* ── HERO SESSION CHIPS (summary in hero, not in log) ── */
+.hero-session-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 6px;
+}
+
+.hero-session-chips:empty {
+  display: none;
+}
+
+.hero-chip {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 8px;
+  white-space: nowrap;
+}
+
+.hero-chip--normal {
+  background: rgba(48, 209, 88, 0.12);
+  color: var(--green);
+}
+
+.hero-chip--backfill {
+  background: rgba(10, 132, 255, 0.12);
+  color: var(--accent);
+}
+
+.hero-chip--skip {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-tertiary);
+}
+
+/* ── PAUSED STATE (hero-only replacement) ── */
+.progress-paused {
+  border-color: rgba(255, 159, 10, 0.3);
+  background: linear-gradient(135deg, var(--bg-elevated), rgba(255, 159, 10, 0.04));
+}
+
+.paused-layout {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 8px 4px;
+  width: 100%;
+}
+
+.paused-icon {
+  font-size: 28px;
+  line-height: 1;
+  flex-shrink: 0;
+  opacity: 0.85;
+}
+
+.paused-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.paused-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--orange);
+  letter-spacing: -0.2px;
+}
+
+.paused-stats {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-top: 4px;
+  line-height: 1.6;
+}
+
+.paused-stats strong {
+  color: var(--text-primary);
+  font-weight: 700;
+}
+
+.paused-actions {
+  margin-top: 10px;
+}
+
+.paused-resume-btn {
+  font-size: 12px !important;
+  padding: 7px 18px !important;
+  background: var(--orange) !important;
+  border-color: var(--orange) !important;
+  color: #fff !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.01em;
+  transition: all 0.15s;
+}
+
+.paused-resume-btn:hover {
+  filter: brightness(1.1);
+  box-shadow: 0 2px 12px rgba(255, 159, 10, 0.3);
+}
+
+.paused-links {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.paused-link {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  transition: color 0.12s;
+  text-decoration: none;
+}
+
+.paused-link:hover {
+  color: var(--text-secondary);
+  text-decoration: underline;
+}
+
+.paused-link-sep {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  opacity: 0.5;
+}
+
 /* ── LIVE GRID ── */
 .live-grid {
   flex: 1;
@@ -2663,4 +2867,30 @@ input:focus-visible {
   border-radius: 4px;
   background: var(--accent-soft);
   color: var(--accent);
+}
+
+/* ── BACKFILL BADGE ── */
+.backfill-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 9px;
+  font-weight: 700;
+  padding: 1px 7px;
+  border-radius: 4px;
+  background: rgba(10, 132, 255, 0.12);
+  color: var(--accent);
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  vertical-align: middle;
+  margin-left: 4px;
+}
+
+/* ── SELECTION QUEUE: backfill mark ── */
+.queue-backfill-mark {
+  flex-shrink: 0;
+  font-size: 10px;
+  color: var(--accent);
+  opacity: 0.6;
+  margin-left: auto;
 }

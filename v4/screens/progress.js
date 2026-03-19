@@ -29,14 +29,47 @@ let lastState = {
   primary: 'Генерация изображений',
   detail: 'Ожидание запуска…',
   detailColor: '',
-  logEntries: [],      // [{message, step}]
+  logEntries: [],      // [{message, step, mode}]
   liveTiles: [],       // [{key, html, promptIdx}] — recent tiles with full html
   agedCounts: { done: 0, failed: 0 }, // aggregate counters for aged-out tiles
   agedSlots: new Map(),   // Map<promptIdx, bitmask> — bits 0-7: done slots, bits 8-15: failed slots
   promptCur: 0,
   promptTotal: 0,
   savedSlotsPerPrompt: {}, // {promptIdx: maxSavedSlot} — confirmed progress floor
+  sessionMode: null,       // 'normal' | 'mixed' | 'resume' | null
+  sessionSummary: null,    // {runCount, backfillCount, skipCount} — from session_start
 };
+
+// ── Build a single log entry HTML based on step + mode ──
+function _buildLogEntryHTML(message, step, mode) {
+  // Step-based priority (errors/retries) > mode-based colour
+  const isFailed  = step === 'slot_failed' || step === 'boundary_desync';
+  const isRetry   = step === 'retry';
+  const isSkipped = step === 'session_start';
+
+  let dotStyle = '';
+  let textColor = 'var(--text-secondary)';
+
+  if (isFailed) {
+    dotStyle  = 'background:var(--red)';
+    textColor = 'var(--red)';
+  } else if (isRetry) {
+    dotStyle  = 'background:var(--orange)';
+    textColor = 'var(--orange)';
+  } else if (isSkipped) {
+    dotStyle  = 'background:transparent;border:1px solid var(--border-2)';
+    textColor = 'var(--text-tertiary)';
+  } else if (mode === 'backfill') {
+    dotStyle  = 'background:var(--accent)';
+    textColor = 'var(--text-secondary)';
+  } else if (mode === 'resume') {
+    dotStyle  = 'background:var(--text-tertiary)';
+    textColor = 'var(--text-tertiary)';
+  }
+  // 'normal' — default: dot accent, text secondary (no override needed)
+
+  return `<span class="log-dot" style="${dotStyle}"></span><span style="color:${textColor};flex:1">${message}</span>`;
+}
 
 function render() {
   // Only reset progress counters if NOT resuming an active generation
@@ -55,6 +88,8 @@ function render() {
       promptCur: 0,
       promptTotal: 0,
       savedSlotsPerPrompt: {},
+      sessionMode: null,
+      sessionSummary: null,
     };
   }
 
@@ -75,12 +110,16 @@ function render() {
         <div class="progress-hero">
           <div id="ph-percent" class="ph-percent">${pct}%</div>
           <div style="flex:1">
-            <div id="ph-primary" style="font-size:14px;font-weight:700">${primary}</div>
+            <div style="display:flex;align-items:center;gap:8px">
+              <div id="ph-primary" style="font-size:14px;font-weight:700">${primary}</div>
+              ${lastState.sessionMode && lastState.sessionMode !== 'normal' ? `<span id="session-mode-badge" class="session-mode-badge session-mode-badge--${lastState.sessionMode}">${lastState.sessionMode === 'mixed' ? 'Новые + дозаполнение' : '✓ всё готово'}</span>` : ''}
+            </div>
             <div id="ph-detail" style="font-size:12px;color:${detailColor || 'var(--text-tertiary)'};margin-top:2px">${detail}</div>
             <div class="progress-bar-track"><div id="ph-bar" class="progress-bar-fill" style="width:${pct}%"></div></div>
+            <div id="hero-session-chips" class="hero-session-chips"></div>
           </div>
           <div>
-            <button id="btn-stop" class="btn btn-secondary" style="font-size:11px;padding:6px 12px;color:var(--red)" ${isStopping ? 'disabled' : ''}>${isStopping ? 'Останавливаю\u2026' : 'Остановить'}</button>
+            <button id="btn-stop" class="btn btn-secondary" style="font-size:11px;padding:6px 12px;color:var(--red)" ${isStopping ? 'disabled' : ''}>${isStopping ? 'Останавливаю\u2026' : '⏸ Приостановить'}</button>
           </div>
         </div>
         <!-- Live grid -->
@@ -108,11 +147,9 @@ function render() {
     const logList = document.getElementById('log-list');
     if (logList) {
       lastState.logEntries.forEach(entry => {
-        const isFailed = entry.step === 'slot_failed';
-        const isRetry = entry.step === 'retry';
         const el = document.createElement('div');
         el.className = 'log-entry';
-        el.innerHTML = `<span class="log-dot" style="${isFailed ? 'background:var(--red)' : isRetry ? 'background:var(--orange)' : ''}"></span><span style="color:${isFailed ? 'var(--red)' : isRetry ? 'var(--orange)' : 'var(--text-secondary)'};flex:1">${entry.message}</span>`;
+        el.innerHTML = _buildLogEntryHTML(entry.message, entry.step, entry.mode);
         logList.appendChild(el);
       });
     }
@@ -137,6 +174,9 @@ function render() {
 
   // Update summary row
   updateSummaryRow();
+
+  // Restore hero session chips on remount
+  _renderHeroSessionChips();
 
   container.querySelector('#btn-stop')?.addEventListener('click', async () => {
     isStopping = true;
@@ -315,8 +355,8 @@ function updateProgress(data) {
         });
       }
     } else if (data.status === 'complete' && isStopping) {
-      lastState.primary = 'Остановлено';
-      lastState.detail = 'Генерация остановлена. Сохранённые изображения доступны для отбора.';
+      lastState.primary = 'Приостановлено';
+      lastState.detail = 'Генерация приостановлена. Сохранённые изображения доступны.';
       lastState.detailColor = 'var(--orange)';
     }
 
@@ -341,11 +381,8 @@ function updateProgress(data) {
       const detail = document.getElementById('ph-detail');
       const bar = document.getElementById('ph-bar');
       if (isStopping) {
-        if (primary) primary.textContent = lastState.primary;
-        if (detail) {
-          detail.textContent = lastState.detail;
-          detail.style.color = lastState.detailColor;
-        }
+        // ── Paused: stay on Progress, show paused state in hero ──
+        showPausedState();
       } else {
         if (pctEl) pctEl.textContent = '100%';
         if (primary) primary.textContent = lastState.primary;
@@ -354,8 +391,8 @@ function updateProgress(data) {
           detail.style.color = lastState.detailColor;
         }
         if (bar) bar.style.width = '100%';
+        setTimeout(() => navigate('selection'), 1500);
       }
-      setTimeout(() => navigate('selection'), isStopping ? 2500 : 1500);
     } else {
       showError(data.message);
     }
@@ -381,6 +418,36 @@ function updateProgress(data) {
   // ══════════════════════════════════════════════════════════════
   // STATE PERSISTENCE: always runs, even when container is null
   // ══════════════════════════════════════════════════════════════
+
+  // ── SESSION START: summary event from main.js ──
+  if (data.step === 'session_start') {
+    lastState.sessionMode    = data.sessionMode || 'normal';
+    lastState.sessionSummary = { runCount: data.runCount || 0, backfillCount: data.backfillCount || 0, skipCount: data.skipCount || 0 };
+    lastState.promptTotal    = data.promptTotal || lastState.promptTotal;
+
+    // Persist as first log entry
+    lastState.logEntries.unshift({ message: data.message, step: 'session_start', mode: null });
+
+    // DOM: render session chips in hero + mode badge
+    if (container) {
+      // Render chips in hero (not in log)
+      _renderHeroSessionChips();
+
+      // Update mode badge in hero (next to ph-primary)
+      const primaryEl = document.getElementById('ph-primary');
+      if (primaryEl && lastState.sessionMode !== 'normal') {
+        let existing = document.getElementById('session-mode-badge');
+        if (!existing) {
+          existing = document.createElement('span');
+          existing.id = 'session-mode-badge';
+          primaryEl.after(existing);
+        }
+        existing.className = `session-mode-badge session-mode-badge--${lastState.sessionMode}`;
+        existing.textContent = lastState.sessionMode === 'mixed' ? 'Новые + дозаполнение' : '✓ всё готово';
+      }
+    }
+    return; // session_start has no progress bar impact
+  }
 
   // ── Calculate combined progress ──
   const promptCur = data.promptCurrent || 1;
@@ -413,10 +480,16 @@ function updateProgress(data) {
   } else if (data.step === 'slot_failed') {
     const failedSlot = data.failedSlot || slotCur;
     combinedPct = basePromptPct + (failedSlot / ipp) * perPromptPct;
-  } else if (data.step === 'done') {
+  } else if (data.step === 'done' || data.step === 'partial_skipped') {
+    // 'done'            — prompt fully generated, reconcile tiles
+    // 'partial_skipped' — prompt had partial results, skipped (Stage 2). Count as full step.
     combinedPct = (promptCur / promptTotal) * 100;
-    // ── RECONCILE: backfill any missing tiles for this prompt ──
-    reconcileTiles(promptCur, ipp);
+    if (data.step === 'done') {
+      // ── RECONCILE: backfill any missing tiles for this prompt ──
+      reconcileTiles(promptCur, ipp);
+    }
+    // partial_skipped: no reconcileTiles — partial prompts have no expected tiles to fill
+
   } else if (data.step === 'generate' || data.step === 'downloading' || data.step === 'waiting') {
     const slotIdx = slotCur || 1;
     combinedPct = basePromptPct + ((slotIdx - 1) / ipp) * perPromptPct;
@@ -446,7 +519,7 @@ function updateProgress(data) {
 
   // Persist log entry (always, skip for retry-upgrade)
   if (!data._retryUpgrade && data.message) {
-    lastState.logEntries.unshift({ message: formatTime(data.message), step: data.step });
+    lastState.logEntries.unshift({ message: formatTime(data.message), step: data.step, mode: data._mode || null });
     if (lastState.logEntries.length > 100) lastState.logEntries.length = 100;
   }
 
@@ -528,14 +601,9 @@ function updateProgress(data) {
   if (!data._retryUpgrade) {
     const logList = document.getElementById('log-list');
     if (logList && data.message) {
-      const isFailed = data.step === 'slot_failed' || data.step === 'boundary_desync';
-      const isRetry = data.step === 'retry';
       const entry = document.createElement('div');
       entry.className = 'log-entry';
-      entry.innerHTML = `
-        <span class="log-dot" style="${isFailed ? 'background:var(--red)' : isRetry ? 'background:var(--orange)' : ''}"></span>
-        <span style="color:${isFailed ? 'var(--red)' : isRetry ? 'var(--orange)' : 'var(--text-secondary)'};flex:1">${formatTime(data.message)}</span>
-      `;
+      entry.innerHTML = _buildLogEntryHTML(formatTime(data.message), data.step, data._mode);
       logList.prepend(entry);
     }
   }
@@ -584,6 +652,87 @@ function updateProgress(data) {
       }
     }
   }
+}
+
+// ── Render session summary chips into hero (single source of truth) ──
+function _renderHeroSessionChips() {
+  const chipsEl = document.getElementById('hero-session-chips');
+  if (!chipsEl) return;
+  const summary = lastState.sessionSummary;
+  if (!summary || lastState.sessionMode === 'normal' || lastState.sessionMode === null) {
+    chipsEl.innerHTML = '';
+    return;
+  }
+  const chips = [];
+  if (summary.runCount > 0)      chips.push(`<span class="hero-chip hero-chip--normal">🟢 ${summary.runCount} ${summary.runCount === 1 ? 'новый' : 'новых'}</span>`);
+  if (summary.backfillCount > 0) chips.push(`<span class="hero-chip hero-chip--backfill">🔵 ${summary.backfillCount} дозаполн${summary.backfillCount === 1 ? 'ение' : 'ения'}</span>`);
+  if (summary.skipCount > 0)     chips.push(`<span class="hero-chip hero-chip--skip">⏱ ${summary.skipCount} уже готов${summary.skipCount === 1 ? '' : 'ы'}</span>`);
+  chipsEl.innerHTML = chips.join('');
+}
+
+// ── Paused state: replaces hero content only, keeps grid + log intact ──
+function showPausedState() {
+  if (!container) return;
+  const heroEl = container.querySelector('.progress-hero');
+  if (!heroEl) return;
+
+  const s = lastRunSnapshot;
+  if (!s) return;
+
+  // Stats
+  const remaining = Math.max(0, (s.promptTotal || 0) - Math.ceil((s.doneCount || 0) / 4));
+  const statParts = [];
+  if (s.doneCount > 0)   statParts.push(`<strong>${s.doneCount}</strong> сохранено`);
+  if (s.failedCount > 0) statParts.push(`<span style="color:var(--red)"><strong>${s.failedCount}</strong> ошибок</span>`);
+  if (remaining > 0)     statParts.push(`<strong>${remaining}</strong> промптов осталось`);
+
+  heroEl.className = 'progress-hero progress-paused';
+  heroEl.innerHTML = `
+    <div class="paused-layout">
+      <div class="paused-icon">⏸</div>
+      <div class="paused-body">
+        <div class="paused-title">Генерация приостановлена</div>
+        <div class="paused-stats">${statParts.join(' · ')}</div>
+        <div class="paused-actions">
+          <button id="btn-paused-resume" class="btn btn-primary paused-resume-btn">▶ Продолжить генерацию</button>
+        </div>
+        <div class="paused-links">
+          ${s.doneCount > 0 ? '<a id="link-paused-selection" class="paused-link">Перейти к отбору</a><span class="paused-link-sep">·</span>' : ''}
+          <a id="link-paused-settings" class="paused-link">Новая генерация</a>
+        </div>
+      </div>
+    </div>
+  `;
+
+  // ── Resume: restart generation from paused state ──
+  heroEl.querySelector('#btn-paused-resume')?.addEventListener('click', async () => {
+    // Check connection before resuming
+    const connStatus = state.connectionStatus;
+    const READY_STATUSES = ['ready', 'page_not_ready'];
+    if (!connStatus || !READY_STATUSES.includes(connStatus)) {
+      const { showToast } = await import('../app.js');
+      showToast('Chrome не готов. Проверьте подключение.', 4000);
+      return;
+    }
+    // Reset paused state and re-trigger generation
+    isStopping = false;
+    lastRunSnapshot = null;
+    lastPct = 0;
+    lastState = {
+      pct: 0, primary: 'Генерация изображений', detail: 'Возобновление…',
+      detailColor: '', logEntries: [], liveTiles: [],
+      agedCounts: { done: 0, failed: 0 }, agedSlots: new Map(),
+      promptCur: 0, promptTotal: 0, savedSlotsPerPrompt: {},
+      sessionMode: null, sessionSummary: null,
+    };
+    state.generationRequested = true;
+    // Re-mount the screen to trigger new generation
+    const { navigate } = await import('../app.js');
+    navigate('progress');
+  });
+
+  heroEl.querySelector('#link-paused-selection')?.addEventListener('click', () => navigate('selection'));
+  heroEl.querySelector('#link-paused-settings')?.addEventListener('click', () => navigate('settings'));
 }
 
 function showIdleState() {
@@ -703,6 +852,8 @@ export default {
         promptCur: 0,
         promptTotal: 0,
         savedSlotsPerPrompt: {},
+        sessionMode: null,
+        sessionSummary: null,
       };
     }
 

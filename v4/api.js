@@ -39,7 +39,7 @@ const STUBS = {
   generate: {
     start: async () => ({ success: false }),
     stop: async () => ({ success: true }),
-    onProgress: (cb) => () => {}, // returns cleanup fn
+    onProgress: (cb) => () => { }, // returns cleanup fn
   },
   fs: {
     openFolder: async () => false,
@@ -55,7 +55,7 @@ const STUBS = {
   },
   models: {
     getUnlimitedList: async () => [
-      { id: 'nano_banana_pro', name: 'Nano Banana Pro', qualities: ['1K','2K'], defaultQuality: '2K', aspects: ['1:1','3:4','4:3','9:16','16:9'], defaultAspect: '1:1' },
+      { id: 'nano_banana_pro', name: 'Nano Banana Pro', qualities: ['1K', '2K'], defaultQuality: '2K', aspects: ['1:1', '3:4', '4:3', '9:16', '16:9'], defaultAspect: '1:1' },
     ],
     resolveSettings: async (s) => ({ effective: s, warnings: [], blocked: false }),
   },

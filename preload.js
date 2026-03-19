@@ -64,6 +64,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
       // Return cleanup function
       return () => ipcRenderer.removeListener('generate:progress', handler);
     },
+    getResumeState: (projectId) =>
+      ipcRenderer.invoke('generate:get-resume-state', { projectId }),
+    clearResumeState: (projectId) =>
+      ipcRenderer.invoke('generate:clear-resume-state', { projectId }),
   },
 
   // ── File System ──

@@ -371,8 +371,96 @@ async function render() {
   });
 }
 
+// ── Resume Banner: shown when a previous generation was stopped mid-batch ──
+function _showResumeBanner(resume, project) {
+  if (!container) return;
+
+  // Remove existing banner if any
+  container.querySelector('#resume-banner')?.remove();
+
+  const banner = document.createElement('div');
+  banner.id = 'resume-banner';
+  banner.style.cssText = `
+    position:sticky;top:0;z-index:10;
+    background:linear-gradient(135deg,rgba(255,159,10,0.12),rgba(255,159,10,0.06));
+    border:1px solid rgba(255,159,10,0.3);
+    border-radius:10px;margin:0 0 12px;padding:12px 16px;
+    display:flex;align-items:flex-start;gap:12px;
+    animation:liveTileFadeIn 0.3s ease;
+  `;
+
+  // Build action breakdown
+  const actionLines = [];
+  if (resume.pendingCount > 0) {
+    actionLines.push(`<span style="color:var(--text-primary);font-weight:600">${resume.pendingCount}</span> ${resume.pendingCount === 1 ? 'промпт требует генерации' : 'промптов требуют генерации'}`);
+  }
+  if (resume.partialCount > 0) {
+    actionLines.push(`<span style="color:var(--accent);font-weight:600">${resume.partialCount}</span> ${resume.partialCount === 1 ? 'промпт частично заполнен' : 'промпта частично заполнены'} — дозаполним недостающие варианты`);
+  }
+
+  const totalAction = resume.pendingCount + resume.partialCount;
+  const btnLabel = totalAction === 1 ? '1 промпт' : `${totalAction} промпта`;
+
+  banner.innerHTML = `
+    <span style="font-size:20px;margin-top:1px">⏸</span>
+    <div style="flex:1;min-width:0">
+      <div style="font-size:13px;font-weight:700;color:var(--orange)">Генерация остановлена</div>
+      <div style="font-size:11px;color:var(--text-secondary);margin-top:3px;line-height:1.6">
+        Готово: <strong style="color:var(--text-primary)">${resume.doneCount}</strong> из ${resume.totalPrompts} &nbsp;·&nbsp;
+        Осталось: <strong style="color:var(--text-primary)">${totalAction}</strong>
+      </div>
+      ${actionLines.length > 0 ? `<div style="margin-top:6px;display:flex;flex-direction:column;gap:2px">
+        ${actionLines.map(l => `<div style="font-size:11px;color:var(--text-tertiary)">${l}</div>`).join('')}
+      </div>` : ''}
+    </div>
+    <div style="flex-shrink:0;margin-top:2px">
+      <button id="btn-resume-continue" class="btn btn-primary" style="font-size:11px;padding:5px 14px;background:var(--orange);border-color:var(--orange)">
+        ▶ Продолжить (${btnLabel})
+      </button>
+    </div>
+  `;
+
+  // Insert at top of scroll area
+  const scrollArea = container.querySelector('[style*="overflow-y:auto"]') || container.firstElementChild;
+  if (scrollArea) {
+    scrollArea.insertBefore(banner, scrollArea.firstChild);
+  }
+
+  // ── "Continue": navigate to progress — meta.json classifier will skip done prompts ──
+  banner.querySelector('#btn-resume-continue')?.addEventListener('click', async () => {
+    const connStatus = state.connectionStatus;
+    const READY_STATUSES = ['ready', 'page_not_ready'];
+    if (!connStatus || !READY_STATUSES.includes(connStatus)) {
+      const { showToast } = await import('../app.js');
+      showToast('Chrome не готов. Проверьте подключение.', 4000);
+      return;
+    }
+    // meta.json classifier in generate:start will automatically skip 'done' prompts
+    state.generationRequested = true;
+    const { navigate } = await import('../app.js');
+    navigate('progress');
+  });
+}
+
 export default {
   id: 'settings',
-  async mount(c) { container = c; await render(); },
+  async mount(c) {
+    container = c;
+    await render();
+
+    // ── Resume state check ──
+    // If a previous generation was stopped, show a prominent resume banner
+    const project = state.currentProject;
+    if (project) {
+      try {
+        const resume = await api.generate.getResumeState(project.id);
+        if (resume?.canResume) {
+          _showResumeBanner(resume, project);
+        }
+      } catch (e) {
+        // Non-fatal — settings render already complete
+      }
+    }
+  },
   unmount() { container = null; },
 };

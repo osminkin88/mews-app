@@ -7,12 +7,16 @@ let currentIndex = 0;
 let images = [];
 let selections = {};
 let viewingVariant = 0;
+let wasBackfilled = false;
+let backfillMap = {};  // {promptIndex: bool} — cached per-prompt backfill flags
 
 async function loadPromptImages(idx) {
   const project = state.currentProject;
   if (!project) return;
   const result = await api.projects.getImages(project.id, idx);
   images = result?.images || [];
+  wasBackfilled = result?.wasBackfilled || false;
+  backfillMap[idx] = wasBackfilled;
 
   // Clamp: if saved selection points beyond available images, treat as invalid
   const savedSel = selections[idx];
@@ -135,7 +139,7 @@ function render() {
     heroZoneHTML = `
       <div class="hero-image" id="hero-img">
         ${heroSrc ? `<img src="${heroSrc}" class="hero-img-el" draggable="false" />` : ''}
-        <span class="hero-label">Единственный вариант</span>
+        <span class="hero-label">Единственный вариант${wasBackfilled ? ' <span class="backfill-badge">⟳ backfill</span>' : ''}</span>
         ${selected === 0 ? '<span class="hero-selected-badge">✓ Выбрано</span>' : ''}
       </div>
       ${selected === undefined ? `
@@ -149,7 +153,7 @@ function render() {
     heroZoneHTML = `
       <div class="hero-image" id="hero-img">
         ${heroSrc ? `<img src="${heroSrc}" class="hero-img-el" draggable="false" />` : ''}
-        <span class="hero-label">Вариант ${viewingVariant + 1} из 2</span>
+        <span class="hero-label">Вариант ${viewingVariant + 1} из 2${wasBackfilled ? ' <span class="backfill-badge">⟳ backfill</span>' : ''}</span>
         ${selected === viewingVariant ? '<span class="hero-selected-badge">✓ Выбрано</span>' : ''}
       </div>
       <div class="filmstrip filmstrip-duo">
@@ -173,7 +177,7 @@ function render() {
     heroZoneHTML = `
       <div class="hero-image" id="hero-img">
         ${heroSrc ? `<img src="${heroSrc}" class="hero-img-el" draggable="false" />` : ''}
-        <span class="hero-label">Вариант ${viewingVariant + 1} из ${imgCount}</span>
+        <span class="hero-label">Вариант ${viewingVariant + 1} из ${imgCount}${wasBackfilled ? ' <span class="backfill-badge">⟳ backfill</span>' : ''}</span>
         ${selected === viewingVariant ? '<span class="hero-selected-badge">✓ Выбрано</span>' : ''}
       </div>
       <div class="filmstrip">
@@ -218,7 +222,7 @@ function render() {
         </div>
         <div class="decision-prompt">
           <div class="section-label" style="margin-bottom:4px;display:flex;align-items:center;justify-content:space-between">
-            <span>Промпт #${currentIndex + 1}</span>
+            <span>Промпт #${currentIndex + 1}${wasBackfilled ? ' <span class="backfill-badge">⟳ дозаполнен</span>' : ''}</span>
             ${isLongPrompt ? `<button id="btn-prompt-read" class="prompt-toggle-btn">Читать полностью</button>` : ''}
           </div>
           <div style="position:relative">
@@ -237,10 +241,12 @@ function render() {
             const numColor = isCurrent ? 'var(--accent)' : isDone ? 'var(--green)' : 'var(--text-tertiary)';
             const promptText = p.prompt || p.text || '';
             const truncated = promptText.length > 40 ? promptText.substring(0, 40) + '…' : promptText;
+            const isBf = backfillMap[i] || false;
             return `<div class="queue-item ${isCurrent ? 'current' : ''}" data-prompt="${i}">
               <span class="queue-num" style="color:${numColor}">${i + 1}</span>
               <span class="queue-dot" style="background:${dotBg};${dotBorder}"></span>
               <span class="queue-text" style="color:${textColor}">${truncated}</span>
+              ${isBf ? '<span class="queue-backfill-mark" title="Дозаполнен через backfill">⟳</span>' : ''}
             </div>`;
           }).join('')}
         </div>
@@ -585,6 +591,8 @@ export default {
   id: 'selection',
   async mount(c) {
     container = c;
+    backfillMap = {};
+    wasBackfilled = false;
     const project = state.currentProject;
     let result = null;
     if (project) {

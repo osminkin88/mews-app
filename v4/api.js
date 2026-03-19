@@ -42,6 +42,7 @@ const STUBS = {
     duplicateSetAsActive: async () => ({ success: true }),
     archiveSet: async () => ({ success: true, wasActive: false, nextActiveSet: null }),
     unarchiveSet: async () => ({ success: true }),
+    cleanupGenerated: async () => ({ success: true, deletedCount: 0 }),
   },
   generate: {
     start: async () => ({ success: false }),

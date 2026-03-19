@@ -2265,6 +2265,100 @@ ipcMain.handle('projects:export-selected', async (event, { projectId }) => {
   }
 });
 
+// ── Cleanup generated variants after selection (move to trash) ──
+/**
+ * Count image files inside generated/<NNN>/ subdirs.
+ * Used to report how many files were cleaned up.
+ */
+function countGeneratedFiles(generatedDir) {
+  if (!fs.existsSync(generatedDir)) return 0;
+  let count = 0;
+  try {
+    const subdirs = fs.readdirSync(generatedDir);
+    for (const d of subdirs) {
+      const dp = path.join(generatedDir, d);
+      try {
+        if (fs.statSync(dp).isDirectory()) {
+          count += fs.readdirSync(dp).filter(f => /\.(png|jpg|jpeg|webp)$/i.test(f)).length;
+        }
+      } catch { /* skip unreadable subdir */ }
+    }
+  } catch { /* skip unreadable root */ }
+  return count;
+}
+
+ipcMain.handle('projects:cleanup-generated', (event, { projectId }) => {
+  const projects = loadProjects();
+  const project = projects.find(p => p.id === projectId);
+  if (!project) return { success: false, error: 'Проект не найден' };
+
+  const activeSet = getActiveSet(project);
+  if (!activeSet) return { success: false, error: 'Нет активного набора' };
+
+  // ── GUARD: only completed sets can be cleaned ──
+  if (activeSet.status !== 'completed') {
+    return {
+      success: false,
+      error: 'Очистка доступна только после завершения отбора.',
+      reason: 'not_completed',
+    };
+  }
+
+  // ── GUARD: idempotent — already cleaned ──
+  if (activeSet.generationCleaned) {
+    return { success: true, alreadyClean: true, deletedCount: 0 };
+  }
+
+  const setDir = getSetDir(project, activeSet.id);
+  const generatedDir = path.join(setDir, 'generated');
+  const selectedDir = path.join(setDir, 'selected');
+
+  // ── GUARD: selected/ must not be empty (finales must exist) ──
+  let selectedCount = 0;
+  if (fs.existsSync(selectedDir)) {
+    try {
+      selectedCount = fs.readdirSync(selectedDir).filter(f => /\.(png|jpg|jpeg|webp)$/i.test(f)).length;
+    } catch { /* treat as 0 */ }
+  }
+  if (selectedCount === 0) {
+    return {
+      success: false,
+      error: 'Нет финальных кадров в selected/. Завершите отбор перед очисткой.',
+      reason: 'no_selected',
+    };
+  }
+
+  // ── Nothing to clean — generated/ doesn't exist ──
+  if (!fs.existsSync(generatedDir)) {
+    activeSet.generationCleaned = true;
+    activeSet.generationCleanedAt = new Date().toISOString();
+    activeSet.updatedAt = new Date().toISOString();
+    saveProject(project);
+    return { success: true, alreadyClean: true, deletedCount: 0 };
+  }
+
+  // ── Count files before move (for reporting) ──
+  const deletedCount = countGeneratedFiles(generatedDir);
+
+  // ── SAFE DELETE: move generated/ to _trash/ ──
+  const trashLabel = `${project.name} — ${activeSet.name} — черновики`;
+  const trashPath = moveToTrash(generatedDir, trashLabel);
+
+  if (!trashPath) {
+    console.error('[cleanup] trash move failed for generated dir:', generatedDir);
+    return { success: false, error: 'Не удалось переместить черновики в корзину. Очистка отменена.' };
+  }
+
+  // ── Mark set as cleaned ──
+  activeSet.generationCleaned = true;
+  activeSet.generationCleanedAt = new Date().toISOString();
+  activeSet.updatedAt = new Date().toISOString();
+  saveProject(project);
+
+  console.log(`[cleanup] ✅ Moved generated/ to trash for set "${activeSet.name}" (${activeSet.id}): ${deletedCount} files → ${trashPath}`);
+  return { success: true, deletedCount, trashPath };
+});
+
 // =============================================================
 //  IPC HANDLERS — File System
 // =============================================================

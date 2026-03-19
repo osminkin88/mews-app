@@ -57,6 +57,9 @@ function renderShell(project) {
           <button id="btn-export-results" class="btn btn-primary res-action-btn" style="display:none">
             Сохранить финалы
           </button>
+          <button id="btn-cleanup-generated" class="btn btn-secondary res-action-btn" style="display:none;font-size:12px;opacity:0.7" title="Переместить невыбранные варианты в корзину Mews">
+            Очистить черновики
+          </button>
           <button id="btn-open-folder" class="btn btn-secondary res-action-btn" title="Открыть папку" style="padding:0 14px">
             <svg viewBox="0 0 24 24" width="16" height="16"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2v11Z" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
           </button>
@@ -214,6 +217,20 @@ async function render() {
     }
   }
 
+  // ── Determine cleanup eligibility ──
+  const activeSet = project.promptSets?.find(s => s.id === project.activePromptSetId);
+  const canCleanup = hasSelectedImages
+    && activeSet?.status === 'completed'
+    && !activeSet?.generationCleaned;
+
+  if (canCleanup) {
+    const btnCleanup = container.querySelector('#btn-cleanup-generated');
+    if (btnCleanup) {
+      btnCleanup.style.display = 'inline-flex';
+      btnCleanup.addEventListener('click', () => openCleanupConfirm(project, btnCleanup));
+    }
+  }
+
   if (hasSelectedImages) {
     const grid = container?.querySelector('#results-grid');
     const countEl = container?.querySelector('#res-count-num');
@@ -275,6 +292,83 @@ async function render() {
       
       overlay.querySelector('#btn-goto-selection').addEventListener('click', () => navigate('selection'));
     }
+  }
+}
+
+// ── Cleanup confirm dialog ──
+function openCleanupConfirm(project, triggerBtn) {
+  const overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed;inset:0;z-index:9000;background:rgba(0,0,0,0.6);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);display:flex;align-items:center;justify-content:center;';
+
+  const card = document.createElement('div');
+  card.style.cssText = 'background:var(--bg-card,#1c1c1e);border:1px solid rgba(255,255,255,0.1);border-radius:16px;padding:28px 28px 24px;max-width:380px;width:90%;box-shadow:0 24px 60px rgba(0,0,0,0.5);';
+
+  card.innerHTML = `
+    <div style="font-size:15px;font-weight:600;margin-bottom:10px;letter-spacing:-0.2px">Очистить черновики?</div>
+    <div style="font-size:13px;line-height:1.6;color:var(--text-secondary,rgba(255,255,255,0.6));margin-bottom:24px">
+      Финальные кадры останутся на месте. Невыбранные варианты будут перемещены в корзину Mews и удалены через 30 дней.
+    </div>
+    <div style="display:flex;gap:10px;justify-content:flex-end">
+      <button id="cleanup-cancel" class="btn btn-secondary" style="font-size:13px">Отмена</button>
+      <button id="cleanup-confirm" class="btn btn-secondary" style="font-size:13px;color:rgba(255,255,255,0.5)">Очистить черновики</button>
+    </div>
+  `;
+
+  overlay.appendChild(card);
+  document.body.appendChild(overlay);
+
+  const close = () => overlay.remove();
+
+  card.querySelector('#cleanup-cancel').addEventListener('click', close);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+
+  document.addEventListener('keydown', function escHandler(e) {
+    if (e.key === 'Escape') { close(); document.removeEventListener('keydown', escHandler); }
+  });
+
+  card.querySelector('#cleanup-confirm').addEventListener('click', async () => {
+    close();
+    await doCleanupGenerated(project, triggerBtn);
+  });
+}
+
+async function doCleanupGenerated(project, triggerBtn) {
+  if (!triggerBtn) return;
+
+  // ── Loading state ──
+  const originalText = triggerBtn.textContent;
+  triggerBtn.textContent = 'Очищаю…';
+  triggerBtn.style.opacity = '0.5';
+  triggerBtn.style.pointerEvents = 'none';
+
+  const res = await api.projects.cleanupGenerated(project.id);
+
+  if (res?.success) {
+    // ── Success: replace button with calm status label ──
+    triggerBtn.style.display = 'none';
+
+    // Insert calm status message in same slot
+    const statusSpan = document.createElement('span');
+    statusSpan.style.cssText = 'font-size:11px;color:var(--text-tertiary,rgba(255,255,255,0.35));display:inline-flex;align-items:center;gap:5px;padding:0 4px;';
+    const count = res.deletedCount || 0;
+    statusSpan.innerHTML = `
+      <svg viewBox="0 0 24 24" width="12" height="12" style="fill:none;stroke:currentColor;stroke-width:2.5;flex-shrink:0"><polyline points="20 6 9 17 4 12"/></svg>
+      ${count > 0 ? `Черновики очищены (${count})` : 'Черновики очищены'}
+    `;
+    triggerBtn.parentNode.insertBefore(statusSpan, triggerBtn);
+  } else if (!res?.canceled) {
+    // ── Error: restore button, show toast ──
+    triggerBtn.textContent = originalText;
+    triggerBtn.style.opacity = '0.7';
+    triggerBtn.style.pointerEvents = 'auto';
+    if (typeof showToast === 'function') {
+      showToast(res?.error || 'Не удалось очистить черновики');
+    }
+  } else {
+    // canceled — just restore button
+    triggerBtn.textContent = originalText;
+    triggerBtn.style.opacity = '0.7';
+    triggerBtn.style.pointerEvents = 'auto';
   }
 }
 

@@ -61,6 +61,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('projects:archive-set', { projectId, setId }),
     unarchiveSet: (projectId, setId) =>
       ipcRenderer.invoke('projects:unarchive-set', { projectId, setId }),
+    cleanupGenerated: (projectId) =>
+      ipcRenderer.invoke('projects:cleanup-generated', { projectId }),
   },
 
   // ── Generation ──

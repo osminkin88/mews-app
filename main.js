@@ -345,13 +345,22 @@ ipcMain.handle('generate:start', async (event, { prompts, settings, projectId })
   }
 
   // ── All preflight checks passed — mark project as in_progress ──
+  let projName = '';
+  let setName = '';
   if (projectId) {
     const allProjects = loadProjects();
     const proj = allProjects.find(p => p.id === projectId);
-    if (proj && proj.status !== 'in_progress') {
-      proj.status = 'in_progress';
-      saveProject(proj);
-      console.log(`[main] project.status → in_progress for ${projectId}`);
+    if (proj) {
+      projName = proj.name || '';
+      const activeSet = getActiveSet(proj);
+      if (activeSet) {
+        setName = activeSet.name || '';
+      }
+      if (proj.status !== 'in_progress') {
+        proj.status = 'in_progress';
+        saveProject(proj);
+        console.log(`[main] project.status → in_progress for ${projectId}`);
+      }
     }
   }
 
@@ -440,6 +449,9 @@ ipcMain.handle('generate:start', async (event, { prompts, settings, projectId })
       skipCount,
       promptTotal: prompts.length,
       message: sessionStartMsg,
+      projectId: projectId || null,
+      projectName: projName,
+      setName: setName,
     });
   }
 
@@ -1314,18 +1326,45 @@ function generateSetId() {
   return 'set_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 }
 
-/**
- * Generate a clean, human-readable folder name for a new prompt set.
- * Pattern: prompt-set-NNN (001, 002, etc.) — unique within the project.
- */
-function generateSetFolderName(project) {
-  const existing = (project.promptSets || []).map(s => s.folderName || s.id);
-  for (let i = 1; i <= 999; i++) {
-    const candidate = `prompt-set-${String(i).padStart(3, '0')}`;
-    if (!existing.includes(candidate)) return candidate;
+function sanitizeComponent(name, maxLength) {
+  if (!name) return 'unnamed';
+  let s = name.toString().toLowerCase();
+  s = s.replace(/[^a-z0-9а-яё]/gi, '-');
+  s = s.replace(/-+/g, '-');
+  s = s.replace(/^-+|-+$/g, '');
+  if (!s) return 'unnamed';
+  return s.substring(0, Math.min(maxLength, s.length));
+}
+
+function generateSetNames(project, baseName) {
+  const existingFolders = (project.promptSets || []).map(s => (s.folderName || s.id).toLowerCase());
+  const projPart = sanitizeComponent(project.name || project.folderName || 'project', 30);
+  let cleanBaseName = (baseName || 'prompts').replace(/\.csv$|\.xlsx$/i, '').trim();
+  const setPart = sanitizeComponent(cleanBaseName, 30);
+
+  const baseFolder = `${projPart}__${setPart}`;
+
+  let version = 1;
+  while (true) {
+    const candidateFolder = `${baseFolder}__v${version}`;
+    const candidateUiName = `${cleanBaseName} v${version}`;
+
+    if (!existingFolders.includes(candidateFolder.toLowerCase())) {
+      const projectDir = path.join(config.ensureOutputDir(), project.folderName || project.id);
+      const setDir = path.join(projectDir, 'sets', candidateFolder);
+      if (!fs.existsSync(setDir)) {
+        return { folderName: candidateFolder, uiName: candidateUiName };
+      }
+    }
+    version++;
+    if (version > 999) break;
   }
-  // Fallback (should never happen): use id-based name
-  return 'prompt-set-' + Date.now().toString(36);
+
+  const fallbackTime = Date.now().toString(36);
+  return { 
+    folderName: `${baseFolder}__v${version}_${fallbackTime}`, 
+    uiName: `${cleanBaseName} v${version} (${fallbackTime})`
+  };
 }
 
 function getActiveSet(project) {
@@ -1596,8 +1635,10 @@ ipcMain.handle('projects:save-prompts', (event, { projectId, prompts, sourceFile
   if (!fs.existsSync(projectDir)) fs.mkdirSync(projectDir, { recursive: true });
 
   // Create a NEW prompt set (never overwrite existing)
+  const sourceRawName = sourceFile ? require('path').basename(sourceFile) : 'prompts';
+  const names = generateSetNames(project, sourceRawName);
   const setId = generateSetId();
-  const setFolderName = generateSetFolderName(project);
+  const setFolderName = names.folderName;
   const setDir = path.join(projectDir, 'sets', setFolderName);
   fs.mkdirSync(path.join(setDir, 'generated'), { recursive: true });
   fs.mkdirSync(path.join(setDir, 'selected'), { recursive: true });
@@ -1615,7 +1656,7 @@ ipcMain.handle('projects:save-prompts', (event, { projectId, prompts, sourceFile
   const promptSet = {
     id: setId,
     folderName: setFolderName,
-    name: sourceMeta?.originalFileName || `Набор ${setNumber}`,
+    name: names.uiName,
     prompts,
     promptCount: prompts.length,
     sourceMeta,
@@ -1698,7 +1739,6 @@ ipcMain.handle('projects:delete-set', (event, { projectId, setId }) => {
     }
   }
 
-  // Remove from metadata
   project.promptSets.splice(setIdx, 1);
 
   // Handle active set switching
@@ -1716,6 +1756,53 @@ ipcMain.handle('projects:delete-set', (event, { projectId, setId }) => {
   saveProject(project);
   console.log(`[projects] Deleted prompt set: "${targetSet.name}" (${setId})`);
   return { success: true, remainingSets: project.promptSets.length };
+});
+
+// ── Duplicate Set as Active (Restart Generation from Zero) ──
+ipcMain.handle('projects:duplicate-set-as-active', (event, { projectId }) => {
+  const projects = loadProjects();
+  const project = projects.find(p => p.id === projectId);
+  if (!project) return { success: false, error: 'Проект не найден' };
+
+  const activeSet = getActiveSet(project);
+  if (!activeSet) return { success: false, error: 'Нет активного набора для копирования' };
+
+  // Generate new set ID
+  const newId = generateSetId();
+
+  // Extract clean base name without any trailing " vN"
+  let baseName = activeSet.name || 'prompts';
+  baseName = baseName.replace(/ v\d+(\s*\(.*?\))?$/i, '').trim();
+
+  const names = generateSetNames(project, baseName);
+
+  // Clone prompts
+  const clonedPrompts = (activeSet.prompts || []).map(p => ({ ...p }));
+
+  const newSet = {
+    id: newId,
+    name: names.uiName,
+    folderName: names.folderName,
+    prompts: clonedPrompts,
+    promptCount: clonedPrompts.length,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    selections: {},
+    status: 'draft' // Starts pristine
+  };
+
+  project.promptSets.push(newSet);
+  project.activePromptSetId = newId;
+  
+  // Clear project-level selection state tracking
+  project.selections = {};
+  project.selectionCurrentPrompt = 0;
+  // Note: we don't wipe project.status so it remains in_progress or completed
+  // but the active set is purely draft.
+
+  saveProject(project);
+  console.log(`[projects] Duplicated active set into new set: "${newName}" (${newId}) for project ${projectId}`);
+  return { success: true, newSetId: newId };
 });
 
 // ── Get generated images for a prompt ──

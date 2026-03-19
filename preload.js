@@ -51,6 +51,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('projects:switch-set', { projectId, setId }),
     deleteSet: (projectId, setId) =>
       ipcRenderer.invoke('projects:delete-set', { projectId, setId }),
+    duplicateSetAsActive: (projectId) =>
+      ipcRenderer.invoke('projects:duplicate-set-as-active', { projectId }),
   },
 
   // ── Generation ──

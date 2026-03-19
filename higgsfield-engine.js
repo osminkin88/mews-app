@@ -318,7 +318,7 @@ async function generatePrompt(prompt, options = {}) {
           console.log(`[engine] 📡 POST-CLICK (2s): inFlight=${inFlightPost.total} (Q=${inFlightPost.queued} G=${inFlightPost.generating}), feed=${feedPost} (was ${feedCountBefore}), topUUID=${topUUIDPost || 'none'}, isForbidden=${topUUIDPost ? (excludeFingerprints.includes(topUUIDPost) || fingerprintsBefore.includes(topUUIDPost)) : 'N/A'}`);
 
           // ═══ WAIT FOR NEW IMAGE (fingerprint primary detection) ═══
-          onProgress({ step: 'waiting', message: `Слот ${img.index}/${imagesCount}: жду результат...`, state: 'generating' });
+          onProgress({ step: 'waiting', message: `Слот ${img.index}/${imagesCount}: создаю изображение...`, state: 'generating' });
           let imageUrl = await waitForSingleImage(page, feedCountBefore, fingerprintsBefore, img.index, imagesCount, onProgress, excludeFingerprints);
 
           // ═══ LAST-CHANCE RESCAN: image may have appeared at timeout edge ═══
@@ -535,7 +535,8 @@ async function generatePrompt(prompt, options = {}) {
         img.state = shouldCancel ? 'cancelled' : 'paused';
         img.errorReason = shouldCancel ? 'cancelled' : 'paused';
         console.log(`[engine] ⚠️ Slot ${img.index} aborted due to flag. Assigning state: ${img.state}`);
-        onProgress({ step: 'debug', message: `🛑 Exit reason: ${img.state} (флаг активности)` });
+        console.log(`[engine] 🛑 Exit reason: ${img.state} (флаг активности)`);
+        onProgress({ step: 'debug', message: shouldCancel ? `🛑 Генерация отменена пользователем` : `⏸ Работа приостановлена` });
       }
 
       imageResults.push(img);
@@ -570,7 +571,8 @@ async function generatePrompt(prompt, options = {}) {
     if (shouldPause || shouldCancel) {
       const slotState = shouldCancel ? 'cancelled' : 'paused';
       console.log(`[engine] ⚠️ Skip remaining slots, assigning state: ${slotState}`);
-      onProgress({ step: 'debug', message: `⏭ Пропуск оставшихся слотов (${slotState})` });
+      console.log(`[engine] ⏭ Пропуск оставшихся слотов (${slotState})`);
+      onProgress({ step: 'debug', message: shouldCancel ? `Остановлено пользователем` : `Подождите, сохраняю прогресс...` });
       for (let j = imageResults.length; j < imagesCount; j++) {
         imageResults.push({ index: j + 1, state: slotState, errorReason: slotState, url: null, file: null });
       }
@@ -2363,7 +2365,8 @@ async function waitForSingleImage(page, feedCountBefore, fingerprintsBefore, ind
     // ── HARD CANCEL: immediate break, no grace period ──
     if (shouldCancel) {
       console.log(`[engine] ✕ HARD CANCEL: slot ${index} abandoned immediately`);
-      onProgress({ step: 'debug', message: `🛑 Exit reason: cancelled (слот сброшен)` });
+      console.log(`[engine] 🛑 Exit reason: cancelled (слот сброшен)`);
+      onProgress({ step: 'debug', message: `🛑 Генерация отменена пользователем` });
       return null;
     }
 
@@ -2371,7 +2374,8 @@ async function waitForSingleImage(page, feedCountBefore, fingerprintsBefore, ind
     if (shouldPause && !shouldCancel) {
       if (!pauseLogged) {
         console.log(`[engine] ⏸ SOFT PAUSE: slot ${index} in-flight — продолжаю ожидание до ${Math.round(HARD_TIMEOUT/1000)}с (HARD_TIMEOUT)...`);
-        onProgress({ step: 'debug', message: `⏸ Вход в долгое ожидание: дожидаюсь конца слота ${index} (Pause)` });
+        console.log(`[engine] ⏸ Вход в долгое ожидание: дожидаюсь конца слота ${index} (Pause)`);
+        onProgress({ step: 'debug', message: `⏸ Ожидаю завершения текущего слота перед паузой...` });
         pauseLogged = true;
       }
       onProgress({
@@ -2387,7 +2391,8 @@ async function waitForSingleImage(page, feedCountBefore, fingerprintsBefore, ind
         zeroInFlightTicks++;
         if (zeroInFlightTicks >= 2) { // Require 2 consecutive checks (with POLL_INTERVAL between)
           console.log(`[engine] ⏸ GRACE EXIT: in-flight cleared (confirmed twice), proceed to reconciliation`);
-          onProgress({ step: 'debug', message: `🛑 Exit reason: inflight_zero_confirmed` });
+          console.log(`[engine] 🛑 Exit reason: inflight_zero_confirmed`);
+          onProgress({ step: 'debug', message: `✅ Задача снята с очереди сервера` });
           break;
         }
       } else {
@@ -2407,7 +2412,8 @@ async function waitForSingleImage(page, feedCountBefore, fingerprintsBefore, ind
         softTimeoutLogged = true;
       } else {
         console.log(`[engine] ⏳ SOFT TIMEOUT (${Math.round(SOFT_TIMEOUT/1000)}s): slot ${index} — no in-flight, proceeding to reconciliation`);
-        onProgress({ step: 'debug', message: `🛑 Exit reason: hard_timeout (no in-flight after soft_timeout)` });
+        console.log(`[engine] 🛑 Exit reason: hard_timeout (no in-flight after soft_timeout)`);
+        onProgress({ step: 'debug', message: `⏳ Завершено по таймауту, проверяю результат...` });
         break; // Exit loop → reconciliation
       }
     }
@@ -2451,7 +2457,8 @@ async function waitForSingleImage(page, feedCountBefore, fingerprintsBefore, ind
         const graceNote = (shouldPause && !shouldCancel) ? ' (saved during pause wait!)' : '';
         console.log(`[engine] ✅ Image ${index} ready via UUID detection (${elapsed}s, feedCount: ${feedCountBefore}→${feedCountNow}, queued=${queued}, uuid=${topUUID})${graceNote}: ${(topUrl || '').substring(0, 80)}...`);
         // Небольшое ожидание для полной загрузки, но URL уже зафиксирован
-        onProgress({ step: 'debug', message: `✅ Exit reason: uuid_detected (top url)` });
+        console.log(`[engine] ✅ Exit reason: uuid_detected (top url)`);
+        onProgress({ step: 'debug', message: `✅ Изображение готово, подготавливаю...` });
         await chrome.sleep(800);
         return topUrl;
       }
@@ -2474,7 +2481,8 @@ async function waitForSingleImage(page, feedCountBefore, fingerprintsBefore, ind
           if (foundUrl) {
             const graceNote = (shouldPause && !shouldCancel) ? ' (saved during pause wait!)' : '';
             console.log(`[engine] ✅ Image ${index} ready via deep UUID scan (${elapsed}s, queued=${queued}, newUUIDs=${newFingerprints.length})${graceNote}: ${foundUrl.substring(0, 80)}...`);
-            onProgress({ step: 'debug', message: `✅ Exit reason: uuid_detected (deep scan)` });
+            console.log(`[engine] ✅ Exit reason: uuid_detected (deep scan)`);
+            onProgress({ step: 'debug', message: `✅ Изображение найдено, подготавливаю...` });
             await chrome.sleep(800);
             return foundUrl;
           }
@@ -2485,10 +2493,10 @@ async function waitForSingleImage(page, feedCountBefore, fingerprintsBefore, ind
     // Status update
     const statusText = (shouldPause && !shouldCancel)
       ? `⏸ дожидаюсь результата...`
-      : (queuedGone ? 'обработка...' : queued > 0 ? 'генерация...' : 'ожидание...');
+      : (queuedGone ? 'обработка...' : queued > 0 ? 'создаю изображение...' : 'ожидание...');
     onProgress({
       step: 'waiting',
-      message: `Изображение ${index}/${total}: ${statusText} (${elapsed}с)`,
+      message: `Слот ${index}/${total}: ${statusText} (${elapsed}с)`,
     });
 
     // Debug log every 30 seconds
@@ -2497,7 +2505,8 @@ async function waitForSingleImage(page, feedCountBefore, fingerprintsBefore, ind
       const topUUID = extractUUID(topUrl);
       const isKnown = topUUID ? forbiddenUUIDs.has(topUUID) : 'N/A';
       console.log(`[engine] DEBUG: queued=${queued}, queuedGone=${queuedGone}, feedCount=${feedCountNow}/${feedCountBefore}, topUUID=${topUUID || 'none'}, isForbidden=${isKnown}, elapsed=${elapsed}s${(shouldPause && !shouldCancel) ? ', ⏸ PAUSED' : ''}`);
-      onProgress({ step: 'debug', message: `💓 Heartbeat (${elapsed}с): inFlight=${queued > 0 ? queued : (queuedGone ? 1 : 0)}, top UUID=${topUUID ? topUUID.split('-')[0]+'...' : 'none'}` });
+      console.log(`[engine] 💓 Heartbeat (${elapsed}с): inFlight=${queued > 0 ? queued : (queuedGone ? 1 : 0)}, top UUID=${topUUID ? topUUID.split('-')[0]+'...' : 'none'}`);
+      onProgress({ step: 'debug', message: `Проверяю статус задачи на сервере (${elapsed}с)...` });
     }
 
     // Past soft timeout: log extended wait status every 30s and break when in-flight clears
@@ -2505,7 +2514,8 @@ async function waitForSingleImage(page, feedCountBefore, fingerprintsBefore, ind
       const inFlight = await countInFlightItems(page);
       if (inFlight.total === 0) {
         console.log(`[engine] ✅ In-flight cleared at ${elapsed}s (past soft timeout) — proceeding to reconciliation`);
-        onProgress({ step: 'debug', message: `🛑 Exit reason: inflight_zero_confirmed (past timeout)` });
+        console.log(`[engine] 🛑 Exit reason: inflight_zero_confirmed (past timeout)`);
+        onProgress({ step: 'debug', message: `✅ Задача снята с очереди сервера (прошло ${elapsed}с)` });
         break;
       }
       console.log(`[engine] ⏳ EXTENDED WAIT: slot ${index}, ${elapsed}s, still in-flight (Q=${inFlight.queued} G=${inFlight.generating}), hard limit=${Math.round(HARD_TIMEOUT/1000)}s`);
@@ -2573,7 +2583,8 @@ async function waitForSingleImage(page, feedCountBefore, fingerprintsBefore, ind
     const bestUrl = reconCandidates.find(c => extractUUID(c.url) === best.uuid)?.url;
     if (bestUrl) {
       console.log(`[engine] 🆘 RESCUE: Image ${index} found via reconciliation (${elapsedTotal}s, uuid=${best.uuid}): ${bestUrl.substring(0, 80)}...`);
-      onProgress({ step: 'debug', message: `🚑 Exit reason: reconciliation_rescue (слот восстановился)` });
+      console.log(`[engine] 🚑 Exit reason: reconciliation_rescue (слот восстановился)`);
+      onProgress({ step: 'debug', message: `🚑 Слот восстановлен, подготавливаю изображение...` });
       await chrome.sleep(800);
       return bestUrl;
     }
@@ -2590,7 +2601,8 @@ async function waitForSingleImage(page, feedCountBefore, fingerprintsBefore, ind
 
   // True zero-candidate timeout
   console.log(`[engine] ⚠️ TIMEOUT: Image ${index} — no valid candidate found after reconciliation (${elapsedTotal}s)`);
-  onProgress({ step: 'debug', message: `🛑 Exit reason: hard_timeout (пусто после сканирования)` });
+  console.log(`[engine] 🛑 Exit reason: hard_timeout (пусто после сканирования)`);
+  onProgress({ step: 'debug', message: `🛑 Таймаут ожидания изображения, сервер не ответил` });
   return null;
 }
 

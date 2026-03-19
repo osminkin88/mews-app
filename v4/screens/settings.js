@@ -13,6 +13,9 @@ async function render() {
   const sourceMeta = loadResult?.sourceMeta || null;
   const promptCount = prompts.length;
 
+  const activeSet = promptSets.find(s => s.id === activeSetId) || null;
+  const activeSetHasProgress = activeSet && activeSet.status && activeSet.status !== 'draft';
+
   // ── Fetch model capabilities from single source of truth ──
   const models = await api.models.getUnlimitedList() || [];
   const selectedModel = cfg.selectedModel || models[0]?.id || 'nano_banana_pro';
@@ -147,10 +150,22 @@ async function render() {
             <div class="summary-col"><div class="summary-value">×${imagesCount}</div><div class="summary-label">вариантов</div></div>
             <div class="summary-col"><div class="summary-value" style="color:var(--accent)">${totalImages}</div><div class="summary-label">всего</div></div>
           </div>
-          <button id="btn-launch" class="btn-launch" ${promptCount === 0 ? 'disabled' : ''}>
-            <svg viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-            Запустить генерацию
-          </button>
+          ${activeSetHasProgress ? `
+            <div style="display:flex;gap:12px;width:100%">
+              <button id="btn-launch" class="btn-launch" style="flex:1" ${promptCount === 0 ? 'disabled' : ''}>
+                <svg viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                Продолжить генерацию
+              </button>
+              <button id="btn-restart" class="btn-launch" style="flex:0.6;background:var(--bg-elevated);color:var(--text-secondary);border:1px solid var(--border-2)" ${promptCount === 0 ? 'disabled' : ''}>
+                ↺ Начать заново
+              </button>
+            </div>
+          ` : `
+            <button id="btn-launch" class="btn-launch" ${promptCount === 0 ? 'disabled' : ''}>
+              <svg viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+              Запустить генерацию
+            </button>
+          `}
         </div>
       </div>
     </div>
@@ -303,7 +318,8 @@ async function render() {
     render();
   });
 
-  container.querySelector('#btn-launch')?.addEventListener('click', async () => {
+  // ── Launch logic ──
+  const handleLaunch = async (isRestart = false) => {
     if (promptCount === 0) return;
 
     // Pre-launch validation: resolve settings against model capabilities
@@ -336,18 +352,6 @@ async function render() {
       }
     }
 
-    // ── New cycle: clear old selection state ──
-    state.selections = {};
-    state.selectionCurrentPrompt = 0;
-    if (project) {
-      // Reset active set selections and mark as in_progress
-      api.projects.update(project.id, {
-        selections: {},
-        selectionCurrentPrompt: 0,
-        status: 'in_progress',
-      });
-    }
-
     // ── Guard: check connection status before navigating to progress ──
     const connStatus = state.connectionStatus;
     const READY_STATUSES = ['ready', 'page_not_ready']; // allow page_not_ready — engine will navigate itself
@@ -366,8 +370,59 @@ async function render() {
       return;
     }
 
+    if (isRestart) {
+      const res = await api.projects.duplicateSetAsActive(project.id);
+      if (!res.success) {
+        showToast(res.error || 'Не удалось создать новый запуск');
+        return;
+      }
+    }
+
+    // ── New cycle: clear old selection state ──
+    state.selections = {};
+    state.selectionCurrentPrompt = 0;
+    if (project) {
+      // Reset active set selections and mark as in_progress
+      api.projects.update(project.id, {
+        selections: {},
+        selectionCurrentPrompt: 0,
+        status: 'in_progress',
+      });
+    }
+
     state.generationRequested = true;
     navigate('progress');
+  };
+
+  container.querySelector('#btn-launch')?.addEventListener('click', () => handleLaunch(false));
+  
+  container.querySelector('#btn-restart')?.addEventListener('click', () => {
+    if (promptCount === 0) return;
+    
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.innerHTML = `
+      <div class="modal-card" style="width:360px">
+        <div class="modal-header">Начать генерацию заново?</div>
+        <div class="modal-body">
+          <div style="font-size:13px;line-height:1.5">
+            Будет создан новый набор, и прогресс начнется с нуля (0%).<br><br>
+            <span style="color:var(--text-tertiary)">Старые картинки не удалятся &mdash; они останутся в истории предыдущего набора.</span>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button id="restart-cancel" class="btn btn-secondary">Отмена</button>
+          <button id="restart-confirm" class="btn btn-primary" style="background:var(--orange);border:none;color:#fff">Начать заново</button>
+        </div>
+      </div>
+    `;
+    container.appendChild(overlay);
+
+    overlay.querySelector('#restart-cancel').addEventListener('click', () => overlay.remove());
+    overlay.querySelector('#restart-confirm').addEventListener('click', async () => {
+      overlay.remove();
+      handleLaunch(true);
+    });
   });
 }
 

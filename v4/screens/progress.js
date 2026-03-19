@@ -24,6 +24,9 @@ function formatTime(msg) {
 }
 
 // Persistent state across remounts (survives unmount/mount cycle)
+let activeRunProjectId = null;
+let activeRunProjectName = '';
+let activeRunSetName = '';
 let lastState = {
   pct: 0,
   primary: 'Генерация изображений',
@@ -141,6 +144,9 @@ function render() {
   if (!isRunning && !lastRunSnapshot) {
     lastPct = 0;
     uiPhase = 'generating';
+    activeRunProjectId = null;
+    activeRunProjectName = '';
+    activeRunSetName = '';
     lastState = {
       pct: 0,
       primary: 'Генерация изображений',
@@ -168,13 +174,29 @@ function render() {
   const agedTotal = lastState.agedCounts.done + lastState.agedCounts.failed;
   const totalGenerated = lastState.liveTiles.length + agedTotal;
 
+  const isForeign = activeRunProjectId && state.currentProject && state.currentProject.id !== activeRunProjectId;
+
   container.innerHTML = `
     <div style="display:grid;grid-template-columns:1fr 280px;overflow:hidden;flex:1">
       <div style="display:flex;flex-direction:column;overflow:hidden;padding:16px;gap:12px">
         <!-- Progress hero -->
+        ${isForeign ? `
+          <div class="foreign-alert" style="background:rgba(255,159,10,0.1);border:1px solid rgba(255,159,10,0.3);border-radius:10px;padding:12px 16px;display:flex;align-items:center;justify-content:space-between;margin-bottom:0px">
+            <div>
+              <div style="font-size:13px;font-weight:700;color:var(--orange)">⚠️ Фоновая генерация</div>
+              <div style="font-size:11px;color:var(--text-secondary);margin-top:2px">Выполняется для: <strong>${activeRunProjectName || 'неизвестного проекта'}</strong>${activeRunSetName ? ` / ${activeRunSetName}` : ''}</div>
+            </div>
+            <button id="btn-switch-active" class="btn btn-secondary" style="font-size:11px;padding:6px 12px;color:var(--orange);border-color:var(--orange)">Перейти к ней</button>
+          </div>
+        ` : ''}
         <div class="progress-hero">
           <div id="ph-percent" class="ph-percent">${pct}%</div>
           <div style="flex:1">
+            ${(!isForeign && (activeRunProjectName || activeRunSetName)) ? `
+              <div style="font-size:11px;color:var(--text-tertiary);margin-bottom:4px;font-weight:600">
+                ПРОЕКТ: ${activeRunProjectName}${activeRunSetName ? ` / ${activeRunSetName}` : ''}
+              </div>
+            ` : ''}
             <div style="display:flex;align-items:center;gap:8px">
               <div id="ph-primary" style="font-size:14px;font-weight:700">${primary}</div>
               ${lastState.sessionMode && lastState.sessionMode !== 'normal' ? `<span id="session-mode-badge" class="session-mode-badge session-mode-badge--${lastState.sessionMode}">${lastState.sessionMode === 'mixed' ? 'Новые + дозаполнение' : '✓ всё готово'}</span>` : ''}
@@ -249,6 +271,17 @@ function render() {
 
   // Restore hero session chips on remount
   _renderHeroSessionChips();
+
+  container.querySelector('#btn-switch-active')?.addEventListener('click', async () => {
+    const list = await api.projects.list();
+    const p = list.find(x => x.id === activeRunProjectId);
+    if (p) {
+      state.currentProject = p;
+      const { updateStatusbar } = await import('../app.js');
+      updateStatusbar();
+      render();
+    }
+  });
 
   container.querySelector('#btn-pause')?.addEventListener('click', async () => {
     uiPhase = 'pauseRequested';
@@ -401,9 +434,8 @@ function updateSummaryRow() {
 
 // ── syncDiskImages (Phase 1 hook) ──
 function syncDiskImages(promptIdx) {
-  const project = state.currentProject;
-  if (!project) return;
-  api.projects.getImages(project.id, promptIdx - 1).then(res => {
+  if (!activeRunProjectId) return;
+  api.projects.getImages(activeRunProjectId, promptIdx - 1).then(res => {
     if (res && res.images) {
       res.images.forEach(img => {
         const match = img.name.match(/gen_(\d+)/);
@@ -504,7 +536,23 @@ function updateProgress(data) {
       recentTiles: lastState.liveTiles.slice(-8).map(t => ({ key: t.key, status: t.status, url: t.url, promptIdx: t.promptIdx, slotIdx: t.slotIdx, isBackfill: t.isBackfill })),
     };
 
+    const isForeign = activeRunProjectId && state.currentProject && state.currentProject.id !== activeRunProjectId;
+    if (data.status === 'complete' || data.status === 'fatal_error' || data.status === 'auth_error') {
+       activeRunProjectId = null;
+    }
+
     if (!container) return;
+
+    if (isForeign) {
+       if (data.status === 'complete') {
+          container.innerHTML = `
+            <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:12px;text-align:center;padding:40px;">
+              <div style="font-size:36px;opacity:0.5">✅</div>
+              <div style="font-size:16px;font-weight:700;color:var(--text-secondary)">Фоновая генерация завершена</div>
+            </div>`;
+       }
+       return;
+    }
 
     if (data.status === 'complete') {
       const pctEl = document.getElementById('ph-percent');
@@ -564,6 +612,9 @@ function updateProgress(data) {
     lastState.sessionMode    = data.sessionMode || 'normal';
     lastState.sessionSummary = { runCount: data.runCount || 0, backfillCount: data.backfillCount || 0, skipCount: data.skipCount || 0 };
     lastState.promptTotal    = data.promptTotal || lastState.promptTotal;
+    activeRunProjectId       = data.projectId || activeRunProjectId;
+    activeRunProjectName     = data.projectName || activeRunProjectName;
+    activeRunSetName         = data.setName || activeRunSetName;
 
     // Persist as first log entry
     lastState.logEntries.unshift({ message: data.message, step: 'session_start', mode: null });
@@ -777,7 +828,7 @@ function showPausedState() {
         </div>
         <div class="paused-links">
           ${s.doneCount > 0 ? '<a id="link-paused-selection" class="paused-link">Перейти к отбору</a><span class="paused-link-sep">·</span>' : ''}
-          <a id="link-paused-settings" class="paused-link">Новая генерация</a>
+          <a id="link-paused-settings" class="paused-link">К настройкам</a>
         </div>
       </div>
     </div>
@@ -797,6 +848,9 @@ function showPausedState() {
     uiPhase = 'generating';
     lastRunSnapshot = null;
     lastPct = 0;
+    activeRunProjectId = state.currentProject ? state.currentProject.id : null;
+    activeRunProjectName = state.currentProject ? state.currentProject.name : '';
+    activeRunSetName = ''; // We could look it up, but it'll update on session_start
     lastState = {
       pct: 0, primary: 'Генерация изображений', detail: 'Возобновление…',
       detailColor: '', logEntries: [], liveTiles: [],
@@ -865,7 +919,7 @@ function showIdleState() {
         ${logsHtml}
         <div style="display:flex;gap:8px;margin-top:4px">
           ${s.doneCount > 0 ? `<button class="btn btn-primary" style="font-size:12px;padding:6px 16px" id="btn-idle-selection">Перейти к отбору</button>` : ''}
-          <button class="btn btn-secondary" style="font-size:12px;padding:6px 16px" id="btn-idle-settings">Новая генерация</button>
+          <button class="btn btn-secondary" style="font-size:12px;padding:6px 16px" id="btn-idle-settings">В настройки</button>
         </div>
       </div>`;
     container.querySelector('#btn-idle-settings')?.addEventListener('click', () => navigate('settings'));
@@ -919,6 +973,9 @@ export default {
       lastRunSnapshot = null;
       lastPct = 0;
       uiPhase = 'generating';
+      activeRunProjectId = state.currentProject ? state.currentProject.id : null;
+      activeRunProjectName = state.currentProject ? state.currentProject.name : '';
+      activeRunSetName = '';
       lastState = {
         pct: 0,
         primary: 'Генерация изображений',
@@ -936,11 +993,16 @@ export default {
       };
     }
 
+    if (isRunning && !activeRunProjectId) {
+      activeRunProjectId = state.currentProject?.id;
+      activeRunProjectName = state.currentProject?.name;
+    }
+
     render();
     cleanupProgress = api.generate.onProgress(updateProgress);
 
     // Sync disk images for active live tiles (Phase 1)
-    if (isRunning && state.currentProject) {
+    if (isRunning && activeRunProjectId) {
       const activePromptIndices = [...new Set(lastState.liveTiles.map(t => t.promptIdx).filter(Boolean))];
       activePromptIndices.forEach(pIdx => {
         syncDiskImages(pIdx);

@@ -35,6 +35,7 @@ const STUBS = {
     saveSelection: async () => ({ success: true }),
     getProjectPath: async () => ({ success: false, path: null }),
     getSelectedImages: async () => ({ success: true, images: [] }),
+    exportSelected: async () => ({ success: true, count: 0 }),
   },
   generate: {
     start: async () => ({ success: false }),

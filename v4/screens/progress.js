@@ -130,7 +130,6 @@ function _updateDOMTile(tile) {
     node.style.cssText = `position:relative;border-radius:10px;overflow:hidden;aspect-ratio:1;background:var(--bg-float);animation: liveTileFadeIn 0.35s ease;${extraStyle}`;
     node.innerHTML = htmlContent;
     grid.appendChild(node);
-    enforceDomCap();
     return;
   }
   
@@ -139,14 +138,59 @@ function _updateDOMTile(tile) {
   }
 }
 
+function upsertTile(tileData) {
+  if (!tileData || !tileData.key) return;
+
+  const existingIdx = lastState.liveTiles.findIndex(t => t.key === tileData.key);
+  let tile;
+  
+  if (existingIdx >= 0) {
+    // Merge while preserving required fields
+    tile = { ...lastState.liveTiles[existingIdx], ...tileData };
+    lastState.liveTiles[existingIdx] = tile;
+  } else {
+    // Create new with unified shape
+    tile = {
+      key: tileData.key,
+      promptIdx: tileData.promptIdx || 1,
+      slotIdx: tileData.slotIdx || 1,
+      status: tileData.status || 'unknown',
+      url: tileData.url || null,
+      isBackfill: !!tileData.isBackfill,
+      reason: tileData.reason || null
+    };
+    lastState.liveTiles.push(tile);
+  }
+
+  // Stable sort: oldest prompts first, then slot order
+  lastState.liveTiles.sort((a, b) => {
+    if (a.promptIdx !== b.promptIdx) return a.promptIdx - b.promptIdx;
+    return a.slotIdx - b.slotIdx;
+  });
+
+  ageOutOldTiles();
+  _updateDOMTile(tile); // Updates HTML content and ensures it exists in DOM
+  
+  // Force existing DOM nodes into the visually stable order
+  const grid = document.getElementById('live-grid');
+  if (grid) {
+    lastState.liveTiles.forEach(t => {
+      const node = grid.querySelector(`[data-key="${t.key}"]`);
+      if (node) grid.appendChild(node);
+    });
+    // DOM cap after ordering so we safely truncate the oldest items from the top
+    enforceDomCap();
+  }
+}
+
 function render() {
   // Only reset progress counters if NOT resuming an active generation
   if (!isRunning && !lastRunSnapshot) {
     lastPct = 0;
     uiPhase = 'generating';
-    activeRunProjectId = null;
-    activeRunProjectName = '';
-    activeRunSetName = '';
+    // activeRunProjectId is managed by IPC and updateProgress
+    // activeRunProjectName = '';
+    // activeRunSetName = '';
     lastState = {
       pct: 0,
       primary: 'Генерация изображений',
@@ -443,20 +487,13 @@ function syncDiskImages(promptIdx) {
           const slot = parseInt(match[1]);
           const key = `p${promptIdx}-s${slot}`;
           const existingTile = lastState.liveTiles.find(t => t.key === key);
-          
+          const mask = lastState.agedSlots.get(promptIdx) || 0;
+          const doneAged = (mask & (1 << (slot - 1))) !== 0;
+
           if (existingTile) {
-            existingTile.url = img.dataUrl;
-            if (existingTile.status === 'placeholder') existingTile.status = 'saved';
-            _updateDOMTile(existingTile);
-          } else {
-            const mask = lastState.agedSlots.get(promptIdx) || 0;
-            const doneAged = (mask & (1 << (slot - 1))) !== 0;
-            if (!doneAged) {
-              const newTile = { key, promptIdx, slotIdx: slot, status: 'saved', url: img.dataUrl, isBackfill: true };
-              lastState.liveTiles.push(newTile);
-              ageOutOldTiles();
-              _updateDOMTile(newTile);
-            }
+            upsertTile({ key, url: img.dataUrl, status: existingTile.status === 'placeholder' ? 'saved' : existingTile.status });
+          } else if (!doneAged) {
+            upsertTile({ key, promptIdx, slotIdx: slot, status: 'saved', url: img.dataUrl, isBackfill: true });
           }
         }
       });
@@ -481,10 +518,7 @@ function reconcileTiles(promptIdx, slotCount) {
     const failAged = (mask & (1 << (slotBit + 8))) !== 0;
     if (!exists && !failExists && !doneAged && !failAged) {
       // Backfill placeholder tile
-      const newTile = { key, promptIdx, slotIdx: s, status: 'placeholder' };
-      lastState.liveTiles.push(newTile);
-      ageOutOldTiles();
-      _updateDOMTile(newTile);
+      upsertTile({ key, promptIdx, slotIdx: s, status: 'placeholder' });
     }
   }
 }
@@ -724,29 +758,13 @@ function updateProgress(data) {
     const promptIdx = data.promptIndex || promptCur;
     const slotIdx = data.slotIndex || data.savedSlot;
     const key = `p${promptIdx}-s${slotIdx}`;
-    let existingTile = lastState.liveTiles.find(t => t.key === key);
-
-    if (existingTile) {
-      existingTile.url = data.previewDataUrl || existingTile.url;
-      existingTile.status = 'saved';
-      _updateDOMTile(existingTile);
-    } else {
-      const newTile = { key, promptIdx, slotIdx, status: 'saved', url: data.previewDataUrl };
-      lastState.liveTiles.push(newTile);
-      ageOutOldTiles();
-      _updateDOMTile(newTile);
-    }
+    upsertTile({ key, promptIdx, slotIdx, status: 'saved', url: data.previewDataUrl });
   }
 
   // Persist failed tile state (always)
   if (data.step === 'slot_failed') {
     const key = `p${promptCur}-s${data.failedSlot}-fail`;
-    if (!lastState.liveTiles.find(t => t.key === key)) {
-      const newTile = { key, promptIdx: promptCur, slotIdx: data.failedSlot, status: 'failed', reason: data.failedReason };
-      lastState.liveTiles.push(newTile);
-      ageOutOldTiles();
-      _updateDOMTile(newTile);
-    }
+    upsertTile({ key, promptIdx: promptCur, slotIdx: data.failedSlot, status: 'failed', reason: data.failedReason });
   }
 
   // ══════════════════════════════════════════════════════════════
@@ -945,8 +963,8 @@ function showIdleState() {
         const tile = document.createElement('div');
         tile.className = 'live-tile';
         tile.dataset.key = t.key;
-        tile.style.cssText = `position:relative;border-radius:10px;overflow:hidden;aspect-ratio:1;background:var(--bg-float);${t.isFailed ? 'border:1px solid rgba(255,59,48,0.2);' : ''}`;
-        tile.innerHTML = t.html;
+        tile.style.cssText = `position:relative;border-radius:10px;overflow:hidden;aspect-ratio:1;background:var(--bg-float);${t.status === 'failed' ? 'border:1px solid rgba(255,59,48,0.2);' : ''}`;
+        tile.innerHTML = _buildTileHTML(t);
         grid.appendChild(tile);
       });
     }

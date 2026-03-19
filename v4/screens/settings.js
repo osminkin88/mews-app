@@ -37,28 +37,66 @@ async function render() {
 
   const totalImages = promptCount * imagesCount;
 
-  // Build set-switcher chips HTML (only if >1 set)
-  const setChipsHTML = promptSets.length > 1 ? `
-    <div class="set-switcher">
-      <div class="field-label" style="margin-bottom:6px">Наборы промптов</div>
-      <div class="set-chips">
-        ${promptSets.map(s => `
-          <div class="set-chip ${s.id === activeSetId ? 'active' : ''}" data-set-id="${s.id}">
-            <span class="set-chip-name">${s.name}</span>
-            <span class="set-chip-count">${s.promptCount}</span>
-            <button class="set-chip-del" data-del-id="${s.id}" data-del-name="${s.name}" data-del-count="${s.promptCount}" title="Удалить набор">&times;</button>
+  // Build Iteration History HTML
+  let setChipsHTML = '';
+  if (promptSets.length > 0) {
+    const rows = promptSets.map(s => {
+      const isActive = s.id === activeSetId;
+      const mapStateText = { draft: 'Черновик', in_progress: 'В процессе', completed: 'Завершён' };
+      const mapStateColor = { draft: 'var(--text-tertiary)', in_progress: 'var(--orange)', completed: 'var(--green)' };
+      const statusText = mapStateText[s.status] || s.status;
+      const statusColor = mapStateColor[s.status] || 'var(--text-tertiary)';
+      const selCount = s.selections ? Object.keys(s.selections).length : 0;
+      const selectionsCount = selCount > 0 ? ` &nbsp;·&nbsp; <span style="color:var(--text-secondary);font-weight:500">${selCount}</span> отобрано` : '';
+      
+      const activeBadge = isActive ? '<span style="font-size:10px;background:var(--accent);color:#fff;padding:2px 6px;border-radius:4px;font-weight:700;letter-spacing:0.3px">АКТИВНАЯ</span>' : '';
+      const statusBadge = `<div style="display:flex;align-items:center;gap:4px;font-size:10px;font-weight:600;color:${statusColor};text-transform:uppercase;letter-spacing:0.3px;"><div style="width:6px;height:6px;border-radius:50%;background:${statusColor}"></div>${statusText}</div>`;
+      
+      const btnSwitch = !isActive ? `<button class="btn btn-ghost history-btn-switch" data-id="${s.id}" style="font-size:11px;padding:4px 12px;border-radius:100px;border:1px solid var(--border);margin-right:4px">Перейти</button>` : '';
+      const btnRename = `<button class="history-btn-rename" data-id="${s.id}" data-name="${s.name}" title="Переименовать" style="padding:6px;color:var(--text-tertiary);background:transparent;border:none;cursor:pointer;border-radius:4px;transition:0.15s;display:flex" onmouseover="this.style.color='var(--text-primary)';this.style.background='var(--bg-float)'" onmouseout="this.style.color='var(--text-tertiary)';this.style.background='transparent'"><svg viewBox="0 0 24 24" style="width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg></button>`;
+      const btnDel = !isActive ? `<button class="history-btn-del" data-id="${s.id}" data-name="${s.name}" title="Удалить" style="padding:6px;color:var(--text-tertiary);background:transparent;border:none;cursor:pointer;border-radius:4px;transition:0.15s;display:flex" onmouseover="this.style.color='var(--red)';this.style.background='var(--red-soft)'" onmouseout="this.style.color='var(--text-tertiary)';this.style.background='transparent'"><svg viewBox="0 0 24 24" style="width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg></button>` : '';
+
+      return `
+      <div class="history-set-row ${isActive ? 'active' : ''}" data-set-id="${s.id}" style="display:flex;align-items:center;background:var(--bg-float);padding:12px 14px;border-radius:10px;border:1px solid ${isActive ? 'var(--accent)' : 'var(--border-2)'};cursor:default;">
+        <div style="flex:1;min-width:0;">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+            <span class="history-set-name" style="font-weight:600;font-size:13px;color:${isActive ? 'var(--text-primary)' : 'var(--text-secondary)'};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:220px;" title="${s.name}">${s.name}</span>
+            ${isActive ? activeBadge : statusBadge}
           </div>
-        `).join('')}
+          <div style="font-size:11px;color:var(--text-tertiary);">
+            <span style="color:var(--text-secondary);font-weight:500">${s.promptCount}</span> промптов
+            ${selectionsCount}
+          </div>
+        </div>
+        
+        <div style="display:flex;align-items:center;gap:2px;flex-shrink:0;">
+          ${btnSwitch}
+          ${btnRename}
+          ${btnDel}
+        </div>
       </div>
-    </div>
-  ` : '';
+      `;
+    }).join('');
+
+    setChipsHTML = `
+      <div class="history-block" style="margin-top:36px;border-top:1px solid var(--border);padding-top:24px;">
+        <div class="field-label" style="margin-bottom:14px;font-size:14px;display:flex;align-items:baseline">
+          <span style="color:var(--text-primary)">История итераций</span>
+          <span style="font-size:12px;color:var(--text-tertiary);margin-left:8px;font-weight:400">${promptSets.length} запусков</span>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:10px;">
+          ${rows}
+        </div>
+      </div>
+    `;
+  }
 
   container.innerHTML = `
     <div style="overflow-y:auto;padding:16px 24px 40px;flex:1">
       <div class="settings-card">
         <div class="settings-header">
           <div style="font-size:18px;font-weight:800;letter-spacing:-0.3px">Подготовка к запуску</div>
-          <div style="font-size:12px;color:var(--text-tertiary);margin-top:3px">${project ? project.name : 'Выберите проект'}</div>
+          <div style="font-size:12px;color:var(--text-tertiary);margin-top:3px">${project ? project.name : 'Выберите проект'} <span style="font-weight:400;margin-left:8px;padding-left:8px;border-left:1px solid rgba(255,255,255,0.1)">${activeSet ? activeSet.name : 'Итерация'}</span></div>
         </div>
 
         <div class="settings-body">
@@ -75,10 +113,10 @@ async function render() {
                 </div>
                 <button id="btn-replace-file" class="source-replace">Добавить новый</button>
               </div>
-              ${setChipsHTML}
-              <div class="template-hint template-hint-subtle">
-                <a id="btn-download-template" class="template-link">↓ Скачать шаблон</a>
+              <div class="template-hint template-hint-subtle" style="margin-top:12px;margin-bottom:0">
+                <a id="btn-download-template" class="template-link" style="font-size:11px;padding:4px 8px;border-radius:6px;background:rgba(255,255,255,0.04);border:1px solid var(--border);">↓ Скачать шаблон</a>
               </div>
+              ${setChipsHTML}
             ` : `
               <div id="drop-zone" class="drop-zone">
                 <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
@@ -208,11 +246,11 @@ async function render() {
   };
   container.querySelector('#btn-download-template')?.addEventListener('click', downloadTemplate);
 
-  // Set-switcher chip clicks (switch set)
-  container.querySelectorAll('.set-chip').forEach(chip => {
-    chip.addEventListener('click', async (e) => {
-      if (e.target.closest('.set-chip-del')) return; // handled separately
-      const setId = chip.dataset.setId;
+  // Switch Set
+  container.querySelectorAll('.history-btn-switch').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const setId = btn.dataset.id;
       if (setId === activeSetId) return;
       await api.projects.switchSet(project.id, setId);
       state.selections = {};
@@ -224,13 +262,32 @@ async function render() {
     });
   });
 
-  // Set-chip delete buttons
-  container.querySelectorAll('.set-chip-del').forEach(btn => {
+  // Rename Set
+  container.querySelectorAll('.history-btn-rename').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const setId = btn.dataset.id;
+      const currentName = btn.dataset.name;
+      const newName = prompt('Новое название итерации:', currentName);
+      if (newName && newName.trim() && newName.trim() !== currentName) {
+        api.projects.renameSet(project.id, setId, newName.trim()).then(async () => {
+          const projects = await api.projects.list();
+          const updatedProject = projects.find(p => p.id === project.id);
+          if (updatedProject) state.currentProject = updatedProject;
+          render();
+        });
+      }
+    });
+  });
+
+  // Delete Set
+  container.querySelectorAll('.history-btn-del').forEach(btn => {
     btn.addEventListener('click', async (e) => {
       e.stopPropagation();
-      const delId = btn.dataset.delId;
-      const delName = btn.dataset.delName;
-      const delCount = btn.dataset.delCount;
+      const delId = btn.dataset.id;
+      const delName = btn.dataset.name;
+      // Need prompt count so just search the array:
+      const delCount = promptSets.find(s => s.id === delId)?.promptCount || 0;
 
       // Confirmation modal
       const overlay = document.createElement('div');

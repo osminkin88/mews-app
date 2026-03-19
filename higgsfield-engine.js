@@ -2099,6 +2099,48 @@ async function detectSiteError(page) {
 }
 
 /**
+ * Strict detector for a failed generation card at the top of the feed.
+ * Requires multiple signals ("failed", "refunded", "retry") to avoid false positives.
+ */
+async function checkTopFeedCardFailed(page) {
+  try {
+    return await page.evaluate(() => {
+      const feed = document.querySelector('#soul-feed-scroll');
+      if (!feed || !feed.children.length) return false;
+      
+      // Look at the top 3 cards in case the failed card is slightly pushed
+      for (let i = 0; i < Math.min(feed.children.length, 3); i++) {
+        const card = feed.children[i];
+        if (!card) continue;
+        
+        // Find leaf elements only, to avoid catching prompts with "failed" inside
+        const leaves = Array.from(card.querySelectorAll('*')).filter(el => el.children.length === 0);
+        
+        let hasFailed = false;
+        let hasRefunded = false;
+        let hasRetry = false;
+        
+        for (const leaf of leaves) {
+          const text = (leaf.textContent || '').trim().toLowerCase();
+          if (text === 'failed' || text === 'generation failed' || text === 'generating failed') hasFailed = true;
+          if (text === 'credits refunded' || text === 'refunded') hasRefunded = true;
+          if (text === 'retry') hasRetry = true;
+        }
+        
+        // Strict matching: requires at least two robust signs of failure
+        if ((hasFailed && hasRefunded) || (hasFailed && hasRetry) || (hasRefunded && hasRetry)) {
+          return true;
+        }
+      }
+      return false;
+    });
+  } catch (err) {
+    console.log(`[engine] checkTopFeedCardFailed error: ${err.message}`);
+    return false;
+  }
+}
+
+/**
  * Core feed scanner: extracts generation-only image URLs from the Higgsfield feed.
  * Filters out:
  * - Non-UUID images (promo banners, placeholders)
@@ -2368,6 +2410,24 @@ async function waitForSingleImage(page, feedCountBefore, fingerprintsBefore, ind
       console.log(`[engine] 🛑 Exit reason: cancelled (слот сброшен)`);
       onProgress({ step: 'debug', message: `🛑 Генерация отменена пользователем` });
       return null;
+    }
+
+    // ── TARGETED FAILURE DETECTION (All Modes: normal, pause, resume) ──
+    if (queuedGone || Math.round((Date.now() - startTime) / 1000) > 10) {
+      const inFlightNow = await countInFlightItems(page);
+      if (inFlightNow.total === 0) {
+        const isFailed = await checkTopFeedCardFailed(page);
+        if (isFailed) {
+          const elapsedFa = Math.round((Date.now() - startTime) / 1000);
+          console.log(`[engine] ❌ Image ${index}: Generation failed card detected at top of feed! (elapsed=${elapsedFa}s)`);
+          console.log(`[engine] 🛑 Exit reason: slot_failed_in_feed`);
+          onProgress({ step: 'error', message: `❌ Генерация прервана: сервер вернул ошибку (refunded)` });
+          const err = new Error('Сбой генерации (site_failed)');
+          err.errorClass = 'recoverable';
+          err.errorReason = 'site_failed';
+          throw err;
+        }
+      }
     }
 
     // ── SOFT PAUSE: detect shouldPause and enter wait mode ──

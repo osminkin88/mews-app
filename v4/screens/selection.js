@@ -123,6 +123,14 @@ function render() {
   // ── Build hero zone based on image count ──
   let heroZoneHTML = '';
 
+  const backfillHtml = wasBackfilled ? ' <span class="backfill-badge" style="opacity:0.8;font-weight:500;">⟳ догенерировано</span>' : '';
+  const isViewingSelected = selected === viewingVariant;
+  
+  // Hero Image Overlay details
+  const heroSelectedOverlay = isViewingSelected 
+    ? '<div style="position:absolute;inset:0;box-shadow:inset 0 0 0 3px var(--green);border-radius:12px;pointer-events:none;z-index:10;"></div><span class="hero-selected-badge" style="background:var(--green);color:#000;box-shadow:0 4px 12px rgba(48,209,88,0.3);">✓ Выбрано</span>'
+    : '';
+
   if (imgCount === 0) {
     // ── EMPTY STATE ──
     heroZoneHTML = `
@@ -134,69 +142,51 @@ function render() {
         <div class="sel-empty-hint">Этот промпт ещё не был обработан.<br>Пропустите или вернитесь после генерации.</div>
       </div>`;
 
-  } else if (imgCount === 1) {
-    // ── SINGLE IMAGE: hero + explicit select button ──
-    heroZoneHTML = `
-      <div class="hero-image" id="hero-img">
-        ${heroSrc ? `<img src="${heroSrc}" class="hero-img-el" draggable="false" />` : ''}
-        <span class="hero-label">Единственный вариант${wasBackfilled ? ' <span class="backfill-badge">⟳ backfill</span>' : ''}</span>
-        ${selected === 0 ? '<span class="hero-selected-badge">✓ Выбрано</span>' : ''}
-      </div>
-      ${selected === undefined ? `
-        <button id="btn-select-single" class="btn btn-primary sel-select-single-btn">
-          <svg viewBox="0 0 24 24" width="15" height="15" style="fill:none;stroke:currentColor;stroke-width:2.5"><polyline points="20 6 9 17 4 12"/></svg>
-          Выбрать этот вариант
-        </button>
-      ` : ''}`;
-
-  } else if (imgCount === 2) {
-    heroZoneHTML = `
-      <div class="hero-image" id="hero-img">
-        ${heroSrc ? `<img src="${heroSrc}" class="hero-img-el" draggable="false" />` : ''}
-        <span class="hero-label">Вариант ${viewingVariant + 1} из 2${wasBackfilled ? ' <span class="backfill-badge">⟳ backfill</span>' : ''}</span>
-        ${selected === viewingVariant ? '<span class="hero-selected-badge">✓ Выбрано</span>' : ''}
-      </div>
-      <div class="filmstrip filmstrip-duo">
-        ${images.map((img, i) => {
-          const src = img.dataUrl || '';
-          const isViewing = i === viewingVariant;
-          const isSelected = selected === i;
-          const classes = ['film-thumb'];
-          if (isViewing) classes.push('viewing');
-          if (isSelected) classes.push('selected');
-          return `<div class="${classes.join(' ')}" data-idx="${i}">
-            ${src ? `<img src="${src}" class="film-thumb-img" draggable="false" />` : ''}
-            <span class="film-num">${i + 1}</span>
-            ${isSelected ? '<span class="film-check"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></span>' : ''}
-          </div>`;
-        }).join('')}
-      </div>`;
-
   } else {
-    // ── GALLERY: hero + compact filmstrip (3-4 images) ──
-    heroZoneHTML = `
-      <div class="hero-image" id="hero-img">
-        ${heroSrc ? `<img src="${heroSrc}" class="hero-img-el" draggable="false" />` : ''}
-        <span class="hero-label">Вариант ${viewingVariant + 1} из ${imgCount}${wasBackfilled ? ' <span class="backfill-badge">⟳ backfill</span>' : ''}</span>
-        ${selected === viewingVariant ? '<span class="hero-selected-badge">✓ Выбрано</span>' : ''}
+    // ── IMAGE(S) STATE ──
+    const labelText = imgCount === 1 ? 'Единственный вариант' : `Вариант ${viewingVariant + 1} из ${imgCount}`;
+    
+    // Hero block
+    const heroBlock = `
+      <div class="hero-image" id="hero-img" style="${isViewingSelected ? 'opacity:1;' : ''}">
+        ${heroSrc ? `<img src="${heroSrc}" class="hero-img-el" draggable="false" style="${isViewingSelected ? 'filter: brightness(1.05);' : ''}" />` : ''}
+        <span class="hero-label">${labelText}${backfillHtml}</span>
+        ${heroSelectedOverlay}
       </div>
-      <div class="filmstrip">
-        ${images.map((img, i) => {
-          const src = img.dataUrl || '';
-          const isViewing = i === viewingVariant;
-          const isSelected = selected === i;
-          const classes = ['film-thumb'];
-          if (isViewing) classes.push('viewing');
-          if (isSelected) classes.push('selected');
-          return `<div class="${classes.join(' ')}" data-idx="${i}">
-            ${src ? `<img src="${src}" class="film-thumb-img" draggable="false" />` : ''}
-            <span class="film-num">${i + 1}</span>
-            ${isSelected ? '<span class="film-check"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></span>' : ''}
-          </div>`;
-        }).join('')}
-      </div>`;
-  }
+    `;
 
+    // Filmstrip block
+    let filmstripBlock = '';
+    if (imgCount > 1) {
+      const isDuo = imgCount === 2;
+      filmstripBlock = `
+        <div class="filmstrip ${isDuo ? 'filmstrip-duo' : ''}">
+          ${images.map((img, i) => {
+            const src = img.dataUrl || '';
+            const isViewing = i === viewingVariant;
+            const isSelected = selected === i;
+            const classes = ['film-thumb'];
+            if (isViewing) classes.push('viewing');
+            if (isSelected) classes.push('selected');
+            return `<div class="${classes.join(' ')}" data-idx="${i}">
+              ${src ? `<img src="${src}" class="film-thumb-img" draggable="false" />` : ''}
+              <span class="film-num">${i + 1}</span>
+              ${isSelected ? '<span class="film-check"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></span>' : ''}
+            </div>`;
+          }).join('')}
+        </div>`;
+    }
+
+    // Explicit Select Button
+    const selectBtnBlock = !isViewingSelected ? `
+      <button id="btn-select-variant" class="btn btn-primary" style="align-self:center; margin-top:4px; padding:8px 20px; border-radius:100px; box-shadow:0 4px 14px rgba(255,255,255,0.1); transition:all 0.2s; font-weight:600;">
+        <svg viewBox="0 0 24 24" width="16" height="16" style="fill:none;stroke:currentColor;stroke-width:2.5;margin-right:6px;"><polyline points="20 6 9 17 4 12"/></svg>
+        Выбрать этот вариант
+      </button>
+    ` : '';
+
+    heroZoneHTML = heroBlock + filmstripBlock + selectBtnBlock;
+  }
   // Prompt text handling: truncate for preview
   const rawPromptText = prompt?.prompt || prompt?.text || '—';
   const isLongPrompt = rawPromptText.length > 120;
@@ -213,6 +203,9 @@ function render() {
       </div>
       <div class="decision-panel">
         <div class="decision-header">
+          <div style="font-size:12px;color:var(--text-tertiary);margin-bottom:4px;text-transform:uppercase;letter-spacing:0.5px">
+            ${state.currentProject?.name} <span style="opacity:0.5">/</span> ${state.currentProject?.promptSets?.find(s => s.id === state.currentProject?.activePromptSetId)?.name || 'Итерация'}
+          </div>
           <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
             <span style="font-size:20px;font-weight:800;letter-spacing:-0.5px">${currentIndex + 1}</span>
             <small style="font-size:14px;color:var(--text-tertiary)">/ ${totalCount}</small>
@@ -222,7 +215,7 @@ function render() {
         </div>
         <div class="decision-prompt">
           <div class="section-label" style="margin-bottom:4px;display:flex;align-items:center;justify-content:space-between">
-            <span>Промпт #${currentIndex + 1}${wasBackfilled ? ' <span class="backfill-badge">⟳ дозаполнен</span>' : ''}</span>
+            <span>Промпт #${currentIndex + 1}${wasBackfilled ? ' <span class="backfill-badge" style="opacity:0.8;font-weight:500;">⟳ догенерировано</span>' : ''}</span>
             ${isLongPrompt ? `<button id="btn-prompt-read" class="prompt-toggle-btn">Читать полностью</button>` : ''}
           </div>
           <div style="position:relative">
@@ -246,7 +239,7 @@ function render() {
               <span class="queue-num" style="color:${numColor}">${i + 1}</span>
               <span class="queue-dot" style="background:${dotBg};${dotBorder}"></span>
               <span class="queue-text" style="color:${textColor}">${truncated}</span>
-              ${isBf ? '<span class="queue-backfill-mark" title="Дозаполнен через backfill">⟳</span>' : ''}
+              ${isBf ? '<span class="queue-backfill-mark" title="Ранее догенерировано">⟳</span>' : ''}
             </div>`;
           }).join('')}
         </div>
@@ -293,9 +286,9 @@ function render() {
     openPromptModal(rawPromptText, currentIndex + 1);
   });
 
-  // Single-image: explicit select button
-  container.querySelector('#btn-select-single')?.addEventListener('click', () => {
-    selectVariant(0);
+  // Explicit select button (for any image count)
+  container.querySelector('#btn-select-variant')?.addEventListener('click', () => {
+    selectVariant(viewingVariant);
   });
 
   // Queue: click to jump

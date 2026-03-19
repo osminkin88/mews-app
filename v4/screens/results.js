@@ -27,12 +27,15 @@ async function loadBounded(tasks, concurrency) {
 }
 
 function renderShell(project) {
+  const activeSet = project.promptSets?.find(s => s.id === project.activePromptSetId);
+  const setName = activeSet ? activeSet.name : 'Итерация';
+
   container.innerHTML = `
     <div class="res-scroll">
       <!-- Summary hero -->
       <div class="res-summary">
         <div class="res-summary-left">
-          <div class="res-project-name">${project.name || 'Проект'}</div>
+          <div class="res-project-name">${project.name || 'Проект'} <span style="color:var(--text-tertiary);font-weight:400;font-size:14px;margin-left:8px;padding-left:8px;border-left:1px solid rgba(255,255,255,0.1)">${setName}</span></div>
           <div class="res-summary-stats">
             <span class="res-stat" id="res-img-count">
               <svg viewBox="0 0 24 24" width="13" height="13" style="fill:none;stroke:currentColor;stroke-width:2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5" fill="currentColor"/><polyline points="21 15 16 10 5 21"/></svg>
@@ -51,11 +54,13 @@ function renderShell(project) {
           </div>
         </div>
         <div class="res-summary-actions">
-          <button id="btn-open-folder" class="btn btn-secondary res-action-btn">
-            <svg viewBox="0 0 24 24" width="15" height="15"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2v11Z" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
-            Открыть папку
+          <button id="btn-export-results" class="btn btn-primary res-action-btn" style="display:none">
+            Сохранить финалы
           </button>
-          <button id="btn-back-projects" class="btn btn-primary res-action-btn">
+          <button id="btn-open-folder" class="btn btn-secondary res-action-btn" title="Открыть папку" style="padding:0 14px">
+            <svg viewBox="0 0 24 24" width="16" height="16"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2v11Z" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
+          </button>
+          <button id="btn-back-projects" class="btn btn-secondary res-action-btn">
             К проектам
           </button>
         </div>
@@ -168,6 +173,29 @@ async function render() {
 
   // Update open-folder to use selected/ subdir if applicable
   if (hasSelectedImages) {
+    const btnExport = container.querySelector('#btn-export-results');
+    if (btnExport) {
+      btnExport.style.display = 'inline-flex';
+      btnExport.addEventListener('click', async () => {
+        const originalText = btnExport.textContent;
+        btnExport.textContent = 'Экспортирую...';
+        btnExport.style.opacity = '0.7';
+        btnExport.style.pointerEvents = 'none';
+        
+        const res = await api.projects.exportSelected(project.id);
+        
+        btnExport.textContent = originalText;
+        btnExport.style.opacity = '1';
+        btnExport.style.pointerEvents = 'auto';
+        
+        if (res?.success) {
+          showToast(`Успешно сохранено кадров: ${res.count}`);
+        } else if (res?.error) {
+          showToast(`Ошибка экспорта: ${res.error}`);
+        }
+      });
+    }
+
     const oldBtn = container.querySelector('#btn-open-folder');
     if (oldBtn) {
       const newBtn = oldBtn.cloneNode(true);
@@ -196,7 +224,11 @@ async function render() {
   } else {
     const grid = container?.querySelector('#results-grid');
     const countEl = container?.querySelector('#res-count-num');
-    if (grid) grid.innerHTML = ''; // clear loading placeholder
+    if (grid) {
+      grid.innerHTML = ''; // clear loading placeholder
+      grid.style.position = 'relative';
+      grid.style.minHeight = '300px';
+    }
     let loadedCount = 0;
 
     const tasks = prompts.map((p, i) => async () => {
@@ -226,6 +258,22 @@ async function render() {
 
     if (loadedCount === 0) {
       showEmpty();
+    } else if (grid) {
+      // Fade out loaded items slightly
+      Array.from(grid.children).forEach(el => el.style.opacity = '0.3');
+      
+      // Inject glass overlay
+      const overlay = document.createElement('div');
+      overlay.style.cssText = 'position:absolute;inset:0;background:rgba(20,20,20,0.5);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:20;border-radius:12px;text-align:center;box-shadow:inset 0 0 0 1px rgba(255,255,255,0.05);';
+      overlay.innerHTML = `
+        <svg viewBox="0 0 24 24" width="48" height="48" style="fill:none;stroke:var(--accent);stroke-width:1.5;margin-bottom:16px"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><polyline points="14 2 14 8 20 8"/><circle cx="12" cy="14" r="3"/></svg>
+        <div style="font-size:20px;font-weight:600;margin-bottom:8px">Отбор не завершён</div>
+        <div style="font-size:14px;color:rgba(255,255,255,0.7);margin-bottom:24px;max-width:320px;line-height:1.5">У вас есть сгенерированные варианты, ожидающие вашего решения.</div>
+        <button class="btn btn-primary" id="btn-goto-selection" style="font-size:14px;padding:10px 24px;border-radius:100px;box-shadow:0 4px 14px rgba(255,255,255,0.1)">Продолжить отбор</button>
+      `;
+      grid.appendChild(overlay);
+      
+      overlay.querySelector('#btn-goto-selection').addEventListener('click', () => navigate('selection'));
     }
   }
 }

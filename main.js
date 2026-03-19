@@ -1507,6 +1507,53 @@ function loadProjects() {
           saveProject(projectData);
         }
 
+        // --- ENRICHMENT FOR PROJECT LIST UX ---
+        let stats = { generated: 0, selected: 0 };
+        let coverUrl = null;
+
+        const activeSet = getActiveSet(projectData);
+        if (activeSet) {
+          const setDir = getSetDir(projectData, activeSet.id);
+          const selDir = path.join(setDir, 'selected');
+          const genDir = path.join(setDir, 'generated');
+
+          if (fs.existsSync(selDir)) {
+            try {
+              const selFiles = fs.readdirSync(selDir).filter(f => /\.(png|jpg|jpeg|webp)$/i.test(f));
+              stats.selected = selFiles.length;
+              if (selFiles.length > 0) {
+                const p = path.join(selDir, selFiles[0]);
+                const ext = path.extname(p).slice(1).toLowerCase();
+                const mime = ext === 'jpg' ? 'image/jpeg' : `image/${ext}`;
+                coverUrl = `data:${mime};base64,${fs.readFileSync(p).toString('base64')}`;
+              }
+            } catch (_) {}
+          }
+
+          if (fs.existsSync(genDir)) {
+            try {
+              const subdirs = fs.readdirSync(genDir);
+              for (const d of subdirs) {
+                const dPath = path.join(genDir, d);
+                if (fs.statSync(dPath).isDirectory()) {
+                  const imgs = fs.readdirSync(dPath).filter(f => /\.(png|jpg|jpeg|webp)$/i.test(f));
+                  stats.generated += imgs.length;
+                  if (!coverUrl && imgs.length > 0) {
+                    const p = path.join(dPath, imgs[0]);
+                    const ext = path.extname(p).slice(1).toLowerCase();
+                    const mime = ext === 'jpg' ? 'image/jpeg' : `image/${ext}`;
+                    coverUrl = `data:${mime};base64,${fs.readFileSync(p).toString('base64')}`;
+                  }
+                }
+              }
+            } catch (_) {}
+          }
+        }
+        
+        projectData.stats = stats;
+        projectData.coverUrl = coverUrl;
+        // ----------------------------------------
+
         projects.push(projectData);
       } catch (e) {
         console.error(`[projects] Error reading ${projectFile}:`, e);
@@ -1712,6 +1759,21 @@ ipcMain.handle('projects:switch-set', (event, { projectId, setId }) => {
   return { success: true };
 });
 
+// ── Rename prompt set ──
+ipcMain.handle('projects:rename-set', (event, { projectId, setId, newName }) => {
+  const projects = loadProjects();
+  const project = projects.find(p => p.id === projectId);
+  if (!project) return { success: false, error: 'Project not found' };
+
+  const targetSet = (project.promptSets || []).find(s => s.id === setId);
+  if (!targetSet) return { success: false, error: 'Set not found' };
+
+  targetSet.name = newName;
+  saveProject(project);
+  console.log(`[projects] Renamed set to "${newName}" (${setId})`);
+  return { success: true };
+});
+
 // ── Delete a prompt set ──
 ipcMain.handle('projects:delete-set', (event, { projectId, setId }) => {
   const projects = loadProjects();
@@ -1728,16 +1790,16 @@ ipcMain.handle('projects:delete-set', (event, { projectId, setId }) => {
     return { success: false, error: 'Набор сейчас генерируется. Остановите генерацию перед удалением.' };
   }
 
-  // Remove set folder from disk
-  const setDir = getSetDir(project, setId);
-  if (fs.existsSync(setDir)) {
-    try {
-      fs.rmSync(setDir, { recursive: true, force: true });
-      console.log(`[projects] Deleted set folder: ${setDir}`);
-    } catch (e) {
-      console.error('[projects] Failed to delete set folder:', e.message);
-    }
-  }
+  // Physical deletion is temporarily disabled per request
+  // const setDir = getSetDir(project, setId);
+  // if (fs.existsSync(setDir)) {
+  //   try {
+  //     fs.rmSync(setDir, { recursive: true, force: true });
+  //     console.log(`[projects] Deleted set folder: ${setDir}`);
+  //   } catch (e) {
+  //     console.error('[projects] Failed to delete set folder:', e.message);
+  //   }
+  // }
 
   project.promptSets.splice(setIdx, 1);
 
@@ -1801,7 +1863,7 @@ ipcMain.handle('projects:duplicate-set-as-active', (event, { projectId }) => {
   // but the active set is purely draft.
 
   saveProject(project);
-  console.log(`[projects] Duplicated active set into new set: "${newName}" (${newId}) for project ${projectId}`);
+  console.log(`[projects] Duplicated active set into new set: "${names.uiName}" (${newId}) for project ${projectId}`);
   return { success: true, newSetId: newId };
 });
 
@@ -1951,6 +2013,52 @@ ipcMain.handle('projects:get-selected-images', (event, { projectId }) => {
   } catch (err) {
     console.error('[projects] get-selected-images error:', err);
     return { success: false, images: [] };
+  }
+});
+
+// ── Export selected images (scoped to active set) ──
+ipcMain.handle('projects:export-selected', async (event, { projectId }) => {
+  const projects = loadProjects();
+  const project = projects.find(p => p.id === projectId);
+  if (!project) return { success: false, error: 'Проект не найден' };
+
+  const activeSet = getActiveSet(project);
+  let selectedDir;
+  if (activeSet) {
+    selectedDir = path.join(getSetDir(project, activeSet.id), 'selected');
+  } else {
+    selectedDir = path.join(config.ensureOutputDir(), project.folderName || projectId, 'selected');
+  }
+
+  if (!fs.existsSync(selectedDir)) return { success: false, error: 'Папка selected не найдена' };
+
+  try {
+    const files = fs.readdirSync(selectedDir).filter(f => /\.(png|jpg|jpeg|webp)$/i.test(f));
+    if (files.length === 0) return { success: false, error: 'Нет файлов для экспорта' };
+
+    const { dialog, BrowserWindow } = require('electron');
+    const mainWindow = BrowserWindow.getAllWindows()[0];
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: 'Экспорт финальных кадров',
+      buttonLabel: 'Выбрать папку для экспорта',
+      properties: ['openDirectory', 'createDirectory']
+    });
+
+    if (result.canceled || !result.filePaths || result.filePaths.length === 0) {
+      return { success: false, canceled: true };
+    }
+
+    const targetDir = result.filePaths[0];
+    let count = 0;
+    for (const f of files) {
+      fs.copyFileSync(path.join(selectedDir, f), path.join(targetDir, f));
+      count++;
+    }
+
+    return { success: true, count, dest: targetDir };
+  } catch (err) {
+    console.error('[projects] export-selected error:', err);
+    return { success: false, error: err.message };
   }
 });
 

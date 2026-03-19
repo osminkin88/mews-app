@@ -26,9 +26,11 @@ Module.prototype.require = function(id) {
         this.on = vi.fn();
         this.loadFile = vi.fn().mockResolvedValue();
         this.show = vi.fn();
+        this.isDestroyed = vi.fn().mockReturnValue(false);
         this.webContents = { send: vi.fn(), openDevTools: vi.fn(), setWindowOpenHandler: vi.fn() };
       }, {
         getAllWindows: vi.fn().mockReturnValue([{
+          isDestroyed: () => false,
           webContents: { send: (...args) => sendToRendererSpy(...args) }
         }])
       }),

@@ -46,7 +46,8 @@ function renderBadge(status) {
     completed: ['Завершён', 'badge-done'],
   };
   const [text, cls] = map[status] || map.draft;
-  return `<span class="pc-badge ${cls}">${text}</span>`;
+  const pulseHtml = status === 'in_progress' ? '<span class="status-pulse"></span>' : '';
+  return `<span class="pc-badge ${cls}">${pulseHtml}${text}</span>`;
 }
 
 // ════════════════════════════════════════════════
@@ -106,26 +107,60 @@ async function render() {
 }
 
 function renderProjectCard(p) {
-  const step = getProjectStep(p);
   const date = p.createdAt ? new Date(p.createdAt).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' }) : '';
 
   const activeSet = (p.promptSets || []).find(s => s.id === p.activePromptSetId);
   const pc = activeSet?.promptCount || p.promptCount || 0;
   const setsCount = (p.promptSets || []).length;
-  const setsInfo = setsCount > 1 ? ` · ${setsCount} наборов` : '';
+  
+  const stats = p.stats || { generated: 0, selected: 0 };
+  
+  const coverHtml = p.coverUrl 
+    ? `<div class="pc-cover" style="background-image: url('${p.coverUrl}')"></div>`
+    : `<div class="pc-icon">${getIconSvg(p.icon)}</div>`;
+
+  const activeSetHtml = setsCount > 1 && activeSet ? `<div class="pc-active-set">Сет: ${activeSet.name}</div>` : '';
+
+  const primaryAction = (() => {
+    if (p.status === 'draft') return { label: 'Настроить', icon: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33h.09a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>', action: 'primary-settings' };
+    if (p.status === 'in_progress') return { label: 'Смотреть', icon: '<svg viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"/></svg>', action: 'primary-progress' };
+    return { label: 'К результатам', icon: '<svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 21V9"/></svg>', action: 'primary-results' };
+  })();
+
+  const qaHtml = `
+    <div class="pc-quick-actions">
+      <button class="pc-qa-btn pc-qa-icon" data-action="folder" data-id="${p.id}" title="Открыть папку">
+        <svg viewBox="0 0 24 24"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+      </button>
+      <button class="pc-qa-btn pc-qa-icon" data-action="settings" data-id="${p.id}" title="Настройки">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33h.09a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+      </button>
+      <button class="pc-qa-btn pc-qa-primary" data-action="${primaryAction.action}" data-id="${p.id}" title="${primaryAction.label}">
+        ${primaryAction.icon}
+        <span>${primaryAction.label}</span>
+      </button>
+    </div>
+  `;
 
   return `
     <div class="project-card" data-id="${p.id}">
-      <div class="pc-icon">${getIconSvg(p.icon)}</div>
+      <div class="pc-cover-wrap">${coverHtml}</div>
       <div class="pc-info">
         <div class="pc-title" data-id="${p.id}">${p.name}</div>
-        <div class="pc-sub">${pc} промптов${setsInfo}</div>
-        <div class="pc-pipeline">${renderPipeline(step)}</div>
+        ${activeSetHtml}
+        <div class="pc-stats-row">
+          <span class="pc-stat" title="Промпты">📝 ${pc}</span>
+          <span class="pc-stat-sep">·</span>
+          <span class="pc-stat" title="Сгенерировано">🔄 ${stats.generated}</span>
+          <span class="pc-stat-sep">·</span>
+          <span class="pc-stat" title="Отобрано">✅ ${stats.selected}</span>
+        </div>
       </div>
       <div class="pc-right">
         ${renderBadge(p.status)}
         <span class="pc-date">${date}</span>
       </div>
+      ${qaHtml}
       <button class="pc-more" data-id="${p.id}" title="Действия" aria-label="Действия с проектом">
         <svg viewBox="0 0 24 24"><circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/></svg>
       </button>
@@ -238,6 +273,37 @@ function bindEvents() {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
       showContextMenu(btn.dataset.id, btn);
+    });
+  });
+
+  // Quick Actions binding
+  container.querySelectorAll('.pc-qa-btn').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const action = btn.dataset.action;
+      const id = btn.dataset.id;
+      const project = projects.find(p => p.id === id);
+      if (!project) return;
+
+      if (action === 'folder') {
+        const res = await api.projects.getProjectPath(project.id);
+        if (res?.success && res.path) {
+          const ok = await api.fs.openFolder(res.path);
+          if (!ok) showToast('Папка проекта не найдена');
+        }
+        return;
+      }
+
+      state.currentProject = project;
+      updateStatusbar();
+      
+      if (['primary-settings', 'settings'].includes(action)) {
+        navigate('settings');
+      } else if (action === 'primary-progress') {
+        navigate('progress');
+      } else if (action === 'primary-results') {
+        navigate('results');
+      }
     });
   });
 

@@ -1,0 +1,1126 @@
+
+> mews@1.0.1 test:all
+> npm run test && npm run test:smoke
+
+
+> mews@1.0.1 test
+> vitest run
+
+
+[1m[46m RUN [49m[22m [36mv4.1.0 [39m[90m/Users/osminkin/Desktop/🚀 Antigravity Projects/Higsvild antigravity[39m
+
+ [32m✓[39m tests/utils.test.js [2m([22m[2m16 tests[22m[2m)[22m[32m 7[2mms[22m[39m
+ [32m✓[39m tests/persistence.test.js [2m([22m[2m12 tests[22m[2m)[22m[32m 10[2mms[22m[39m
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould skip already saved slots (Backfill logic) without firing generate clicks
+[22m[39m
+[engine] ╔══════════════════════════════════════════════════════════════════════
+[engine] ║ GENERATE PROMPT START
+[engine] ║ prompt  : "test prompt"
+[engine] ║ model   : nano_banana_pro
+[engine] ║ aspect  : 1:1
+[engine] ║ images  : 4
+[engine] ║ output  : null
+[engine] ║ excludeFingerprints: 0 UUIDs
+[engine] ╚══════════════════════════════════════════════════════════════════════
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould skip already saved slots (Backfill logic) without firing generate clicks
+[22m[39m
+[engine] ╔══════════ PREFLIGHT SETTINGS SYNC ══════════
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould skip already saved slots (Backfill logic) without firing generate clicks
+[22m[39m[engine] Model verified via title: "Nano Banana Pro" ✓
+[engine] ✅ Active model confirmed: Nano Banana Pro (nano_banana_2)
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould skip already saved slots (Backfill logic) without firing generate clicks
+[22m[39m[engine] clearPromptField: found selectors=["[contenteditable=\"true\"]"], allEditable=1
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould skip already saved slots (Backfill logic) without firing generate clicks
+[22m[39m[engine] clearPromptField keyboard error: Cannot read properties of undefined (reading 'catch')
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould skip already saved slots (Backfill logic) without firing generate clicks
+[22m[39m[engine] ✅ clearPromptField: field is empty
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould skip already saved slots (Backfill logic) without firing generate clicks
+[22m[39m[engine] 🔍 isExtraFreeGensOn: state=undefined, strategy=undefined
+
+[90mstdout[2m | tests/higgsfield-engine-validation.test.js[2m > [22m[2mvalidateDownload[2m > [22m[2maccepts a valid small jpeg as preview instead of failing under 1MB
+[22m[39m[engine] ✓ Validation passed: 250KB, format=jpeg, quality=preview
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould skip already saved slots (Backfill logic) without firing generate clicks
+[22m[39m[engine] Extra free gens: OFF
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould skip already saved slots (Backfill logic) without firing generate clicks
+[22m[39m[engine] 🔍 isExtraFreeGensOn: state=undefined, strategy=undefined
+
+[90mstdout[2m | tests/engine-actions.test.js[2m > [22m[2mEngine Action Flags[2m > [22m[2mpauseGeneration sets shouldPause but not shouldCancel
+[22m[39m[engine] ⏸ pauseGeneration() called — soft pause requested
+
+[90mstdout[2m | tests/engine-actions.test.js[2m > [22m[2mEngine Action Flags[2m > [22m[2mcancelGeneration sets BOTH shouldCancel and shouldPause
+[22m[39m[engine] ✕ cancelGeneration() called — hard cancel requested
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould skip already saved slots (Backfill logic) without firing generate clicks
+[22m[39m[engine] Current batch: 1/4
+[engine] ✅ Batch already 1/4
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould skip already saved slots (Backfill logic) without firing generate clicks
+[22m[39m[engine] Unlimited state: true
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould skip already saved slots (Backfill logic) without firing generate clicks
+[22m[39m[engine] ✅ Quality already set to "1K"
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould skip already saved slots (Backfill logic) without firing generate clicks
+[22m[39m[engine] ✅ Aspect ratio already 1:1
+
+[90mstdout[2m | tests/engine-actions.test.js[2m > [22m[2mEngine Action Flags[2m > [22m[2mresetStopFlags clears both flags
+[22m[39m[engine] ✕ cancelGeneration() called — hard cancel requested
+
+[90mstdout[2m | tests/higgsfield-engine-validation.test.js[2m > [22m[2mvalidateDownload[2m > [22m[2maccepts a 1.5MB jpeg as acceptable quality
+[22m[39m[engine] ✓ Validation passed: 1465KB, format=jpeg, quality=acceptable
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould skip already saved slots (Backfill logic) without firing generate clicks
+[22m[39m[engine] ║ Setting          │ Expected   │ Actual     │ Status
+[engine] ║──────────────────┼────────────┼────────────┼───────
+[engine] ║ Model            │ Nano Banana Pro │ Nano Banana Pro │ ✅ MATCH
+[engine] ║ Quality          │ 1K         │ 1K         │ ✅ MATCH
+[engine] ║ Aspect Ratio     │ 1:1        │ 1:1        │ ✅ MATCH
+[engine] ║ Batch            │ 1/4        │ 1/4        │ ✅ MATCH
+[engine] ║ Unlimited        │ ON         │ ON         │ ✅ MATCH
+[engine] ║ Extra Free Gens  │ OFF        │ OFF        │ ✅ MATCH
+[engine] ╚═════════════════════════════════════════════
+[engine] ✅ PREFLIGHT PASSED — all settings verified
+
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould skip already saved slots (Backfill logic) without firing generate clicks
+[22m[39m[engine] === enterPrompt called ===
+[engine] Prompt text: "test prompt..."
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould skip already saved slots (Backfill logic) without firing generate clicks
+[22m[39m[engine] Method 1 (React execCommand): failed
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould skip already saved slots (Backfill logic) without firing generate clicks
+[22m[39m[engine] Verify (m1): ok=true, actual="test prompt"
+[engine] ✅ Prompt VERIFIED (11 chars)
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould skip already saved slots (Backfill logic) without firing generate clicks
+[22m[39m
+[engine] ⏭️  BACKFILL SKIP slot 1/4 — already saved (file: gen_1_old.jpg)
+
+[engine] ⏭️  BACKFILL SKIP slot 2/4 — already saved (file: gen_2_old.jpg)
+
+[engine] ═══ SLOT 3/4 — starting ═══
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould skip already saved slots (Backfill logic) without firing generate clicks
+[22m[39m[engine] Model verified via title: "Nano Banana Pro" ✓
+[engine] ✅ Active model confirmed: Nano Banana Pro (nano_banana_2)
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould skip already saved slots (Backfill logic) without firing generate clicks
+[22m[39m[engine] 🔍 isExtraFreeGensOn: state=undefined, strategy=undefined
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould skip already saved slots (Backfill logic) without firing generate clicks
+[22m[39m[engine] ┌─── PRE-SLOT 3 (attempt 1) ────────────────────────
+[engine] │ batch       : 1/4
+[engine] │ extra_free  : OFF ✅
+[engine] │ unlimited   : ON ✅
+[engine] │ queued_now  : 0
+[engine] │ prompt_field: ""
+[engine] │ expected_pr : "test prompt"
+[engine] │ field_match : ⚠️ NO MATCH
+[engine] └──────────────────────────────────────────────────────
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould skip already saved slots (Backfill logic) without firing generate clicks
+[22m[39m[engine] 📊 Slot 3 pre-click: feedCount=0, fingerprints=0 (ALL), exclude=0
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould skip already saved slots (Backfill logic) without firing generate clicks
+[22m[39m[engine] ✅ Generate clicked (via true)
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould skip already saved slots (Backfill logic) without firing generate clicks
+[22m[39m[engine] ✅ Slot 3 — Generate clicked
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould skip already saved slots (Backfill logic) without firing generate clicks
+[22m[39m[engine] 📡 POST-CLICK (2s): inFlight=0 (Q=0 G=0), feed=1 (was 0), topUUID=22222222-2222-2222-2222-773937432006, isForbidden=false
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould skip already saved slots (Backfill logic) without firing generate clicks
+[22m[39m[engine] ✅ Image 3 ready via UUID detection (0s, feedCount: 0→1, queued=0, uuid=22222222-2222-2222-2222-773937432006): https://higgsfield.ai/test-22222222-2222-2222-2222-773937432006-min.webp...
+[engine] ✅ Exit reason: uuid_detected (top url)
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould skip already saved slots (Backfill logic) without firing generate clicks
+[22m[39m[engine] ✅ Slot 3 image URL acquired
+[engine]    URL     : https://higgsfield.ai/test-22222222-2222-2222-2222-773937432006-min.webp
+[engine]    UUID    : 22222222-2222-2222-2222-773937432006
+[engine]    excluded: no ✅
+[engine] 💾 Slot 3 — downloading to: /Users/osminkin/Desktop/🚀 Antigravity Projects/Higsvild antigravity/output/temp/gen_3.jpg
+[engine] Extracted job_id: 22222222-2222-2222-2222-773937432006
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould skip already saved slots (Backfill logic) without firing generate clicks
+[22m[39m[engine] API response keys: undefined (no rawUrl found)
+
+[90mstdout[2m | tests/engine-actions.test.js[2m > [22m[2mEngine GeneratePrompt — Soft Pause Scenario[2m > [22m[2mshould gracefully stop generation loop when paused during progress
+[22m[39mDEBUG testPage url typeof: function
+
+[engine] ╔══════════════════════════════════════════════════════════════════════
+[engine] ║ GENERATE PROMPT START
+[engine] ║ prompt  : "test prompt"
+[engine] ║ model   : nano_banana_pro
+[engine] ║ aspect  : 1:1
+[engine] ║ images  : 4
+[engine] ║ output  : null
+[engine] ║ excludeFingerprints: 0 UUIDs
+[engine] ╚══════════════════════════════════════════════════════════════════════
+
+[90mstdout[2m | tests/engine-actions.test.js[2m > [22m[2mEngine GeneratePrompt — Soft Pause Scenario[2m > [22m[2mshould gracefully stop generation loop when paused during progress
+[22m[39m
+[engine] ╔══════════ PREFLIGHT SETTINGS SYNC ══════════
+
+[90mstdout[2m | tests/engine-actions.test.js[2m > [22m[2mEngine GeneratePrompt — Soft Pause Scenario[2m > [22m[2mshould gracefully stop generation loop when paused during progress
+[22m[39m[engine] Model verified via title: "Nano Banana Pro" ✓
+[engine] ✅ Active model confirmed: Nano Banana Pro (nano_banana_2)
+
+[90mstdout[2m | tests/engine-actions.test.js[2m > [22m[2mEngine GeneratePrompt — Soft Pause Scenario[2m > [22m[2mshould gracefully stop generation loop when paused during progress
+[22m[39m[engine] clearPromptField: found selectors=["[contenteditable=\"true\"]"], allEditable=1
+
+[90mstdout[2m | tests/engine-actions.test.js[2m > [22m[2mEngine GeneratePrompt — Soft Pause Scenario[2m > [22m[2mshould gracefully stop generation loop when paused during progress
+[22m[39m[engine] clearPromptField keyboard error: Cannot read properties of undefined (reading 'catch')
+
+[90mstdout[2m | tests/engine-actions.test.js[2m > [22m[2mEngine GeneratePrompt — Soft Pause Scenario[2m > [22m[2mshould gracefully stop generation loop when paused during progress
+[22m[39m[engine] ✅ clearPromptField: field is empty
+
+[90mstdout[2m | tests/engine-actions.test.js[2m > [22m[2mEngine GeneratePrompt — Soft Pause Scenario[2m > [22m[2mshould gracefully stop generation loop when paused during progress
+[22m[39m[engine] 🔍 isExtraFreeGensOn: state=undefined, strategy=undefined
+
+[90mstdout[2m | tests/engine-actions.test.js[2m > [22m[2mEngine GeneratePrompt — Soft Pause Scenario[2m > [22m[2mshould gracefully stop generation loop when paused during progress
+[22m[39m[engine] Extra free gens: OFF
+
+[90mstdout[2m | tests/engine-actions.test.js[2m > [22m[2mEngine GeneratePrompt — Soft Pause Scenario[2m > [22m[2mshould gracefully stop generation loop when paused during progress
+[22m[39m[engine] 🔍 isExtraFreeGensOn: state=undefined, strategy=undefined
+
+[90mstdout[2m | tests/engine-actions.test.js[2m > [22m[2mEngine GeneratePrompt — Soft Pause Scenario[2m > [22m[2mshould gracefully stop generation loop when paused during progress
+[22m[39m[engine] Current batch: 1/4
+[engine] ✅ Batch already 1/4
+
+[90mstdout[2m | tests/engine-actions.test.js[2m > [22m[2mEngine GeneratePrompt — Soft Pause Scenario[2m > [22m[2mshould gracefully stop generation loop when paused during progress
+[22m[39m[engine] Unlimited state: true
+
+[90mstdout[2m | tests/engine-actions.test.js[2m > [22m[2mEngine GeneratePrompt — Soft Pause Scenario[2m > [22m[2mshould gracefully stop generation loop when paused during progress
+[22m[39m[engine] ✅ Quality already set to "1K"
+
+[90mstdout[2m | tests/engine-actions.test.js[2m > [22m[2mEngine GeneratePrompt — Soft Pause Scenario[2m > [22m[2mshould gracefully stop generation loop when paused during progress
+[22m[39m[engine] ✅ Aspect ratio already 1:1
+
+[90mstdout[2m | tests/engine-actions.test.js[2m > [22m[2mEngine GeneratePrompt — Soft Pause Scenario[2m > [22m[2mshould gracefully stop generation loop when paused during progress
+[22m[39m[engine] ║ Setting          │ Expected   │ Actual     │ Status
+[engine] ║──────────────────┼────────────┼────────────┼───────
+[engine] ║ Model            │ Nano Banana Pro │ Nano Banana Pro │ ✅ MATCH
+[engine] ║ Quality          │ 1K         │ 1K         │ ✅ MATCH
+[engine] ║ Aspect Ratio     │ 1:1        │ 1:1        │ ✅ MATCH
+[engine] ║ Batch            │ 1/4        │ 1/4        │ ✅ MATCH
+[engine] ║ Unlimited        │ ON         │ ON         │ ✅ MATCH
+[engine] ║ Extra Free Gens  │ OFF        │ OFF        │ ✅ MATCH
+[engine] ╚═════════════════════════════════════════════
+[engine] ✅ PREFLIGHT PASSED — all settings verified
+
+
+[90mstdout[2m | tests/engine-actions.test.js[2m > [22m[2mEngine GeneratePrompt — Soft Pause Scenario[2m > [22m[2mshould gracefully stop generation loop when paused during progress
+[22m[39m[engine] === enterPrompt called ===
+[engine] Prompt text: "test prompt..."
+Unmatched page.evaluate: (text, sels) => {
+    let el = null;
+    for (cons
+
+[90mstdout[2m | tests/engine-actions.test.js[2m > [22m[2mEngine GeneratePrompt — Soft Pause Scenario[2m > [22m[2mshould gracefully stop generation loop when paused during progress
+[22m[39m[engine] Method 1 (React execCommand): failed
+
+[90mstdout[2m | tests/engine-actions.test.js[2m > [22m[2mEngine GeneratePrompt — Soft Pause Scenario[2m > [22m[2mshould gracefully stop generation loop when paused during progress
+[22m[39m[engine] Verify (m1): ok=true, actual="test prompt"
+[engine] ✅ Prompt VERIFIED (11 chars)
+
+[90mstdout[2m | tests/engine-actions.test.js[2m > [22m[2mEngine GeneratePrompt — Soft Pause Scenario[2m > [22m[2mshould gracefully stop generation loop when paused during progress
+[22m[39m
+[engine] ═══ SLOT 1/4 — starting ═══
+
+[90mstdout[2m | tests/engine-actions.test.js[2m > [22m[2mEngine GeneratePrompt — Soft Pause Scenario[2m > [22m[2mshould gracefully stop generation loop when paused during progress
+[22m[39m[engine] Model verified via title: "Nano Banana Pro" ✓
+[engine] ✅ Active model confirmed: Nano Banana Pro (nano_banana_2)
+
+[90mstdout[2m | tests/engine-actions.test.js[2m > [22m[2mEngine GeneratePrompt — Soft Pause Scenario[2m > [22m[2mshould gracefully stop generation loop when paused during progress
+[22m[39m[engine] 🔍 isExtraFreeGensOn: state=undefined, strategy=undefined
+
+[90mstdout[2m | tests/engine-actions.test.js[2m > [22m[2mEngine GeneratePrompt — Soft Pause Scenario[2m > [22m[2mshould gracefully stop generation loop when paused during progress
+[22m[39m[engine] ┌─── PRE-SLOT 1 (attempt 1) ────────────────────────
+[engine] │ batch       : 1/4
+[engine] │ extra_free  : OFF ✅
+[engine] │ unlimited   : ON ✅
+[engine] │ queued_now  : 0
+[engine] │ prompt_field: ""
+[engine] │ expected_pr : "test prompt"
+[engine] │ field_match : ⚠️ NO MATCH
+[engine] └──────────────────────────────────────────────────────
+
+[90mstdout[2m | tests/engine-actions.test.js[2m > [22m[2mEngine GeneratePrompt — Soft Pause Scenario[2m > [22m[2mshould gracefully stop generation loop when paused during progress
+[22m[39m[engine] 📊 Slot 1 pre-click: feedCount=0, fingerprints=0 (ALL), exclude=0
+
+[90mstdout[2m | tests/engine-actions.test.js[2m > [22m[2mEngine GeneratePrompt — Soft Pause Scenario[2m > [22m[2mshould gracefully stop generation loop when paused during progress
+[22m[39m[engine] ✅ Generate clicked (via true)
+
+[90mstdout[2m | tests/engine-actions.test.js[2m > [22m[2mEngine GeneratePrompt — Soft Pause Scenario[2m > [22m[2mshould gracefully stop generation loop when paused during progress
+[22m[39m[engine] ✅ Slot 1 — Generate clicked
+
+[90mstdout[2m | tests/engine-actions.test.js[2m > [22m[2mEngine GeneratePrompt — Soft Pause Scenario[2m > [22m[2mshould gracefully stop generation loop when paused during progress
+[22m[39m[engine] 📡 POST-CLICK (2s): inFlight=0 (Q=0 G=0), feed=1 (was 0), topUUID=11111111-1111-1111-1111-773937432013, isForbidden=false
+
+[90mstdout[2m | tests/engine-actions.test.js[2m > [22m[2mEngine GeneratePrompt — Soft Pause Scenario[2m > [22m[2mshould gracefully stop generation loop when paused during progress
+[22m[39m[engine] ✅ Image 1 ready via UUID detection (0s, feedCount: 0→1, queued=0, uuid=11111111-1111-1111-1111-773937432013): https://higgsfield.ai/test-11111111-1111-1111-1111-773937432013-min.webp...
+[engine] ✅ Exit reason: uuid_detected (top url)
+
+[90mstdout[2m | tests/engine-actions.test.js[2m > [22m[2mEngine GeneratePrompt — Soft Pause Scenario[2m > [22m[2mshould gracefully stop generation loop when paused during progress
+[22m[39m[engine] ✅ Slot 1 image URL acquired
+[engine]    URL     : https://higgsfield.ai/test-11111111-1111-1111-1111-773937432013-min.webp
+[engine]    UUID    : 11111111-1111-1111-1111-773937432013
+[engine]    excluded: no ✅
+[engine] 💾 Slot 1 — downloading to: /Users/osminkin/Desktop/🚀 Antigravity Projects/Higsvild antigravity/output/temp/gen_1.jpg
+[engine] Extracted job_id: 11111111-1111-1111-1111-773937432013
+
+[90mstdout[2m | tests/engine-actions.test.js[2m > [22m[2mEngine GeneratePrompt — Soft Pause Scenario[2m > [22m[2mshould gracefully stop generation loop when paused during progress
+[22m[39m[engine] API response keys: undefined (no rawUrl found)
+
+ [32m✓[39m tests/higgsfield-engine-validation.test.js [2m([22m[2m5 tests[22m[2m)[22m[32m 24[2mms[22m[39m
+[90mstdout[2m | tests/ipc-generate-contract.test.js[2m > [22m[2mIPC Contract — generate:pause, cancel, stop & resume[2m > [22m[2mgenerate:pause -> calls engine.pauseGeneration, NOT cancelGeneration
+[22m[39m[main] Forensic log: /mock/app/data/mews-forensic.log
+[main] V4 renderer loaded
+
+[90mstdout[2m | tests/ipc-generate-contract.test.js[2m > [22m[2mIPC Contract — generate:pause, cancel, stop & resume[2m > [22m[2mgenerate:pause -> calls engine.pauseGeneration, NOT cancelGeneration
+[22m[39m[main] 🛑 ACTION RECEIVED: PAUSE (soft timeout) for current slot
+[main] →renderer [generate:progress]: {"step":"debug","message":"🛑 PAUSE REQUESTED: дожидаюсь текущего слота"}
+
+[90mstdout[2m | tests/ipc-generate-contract.test.js[2m > [22m[2mIPC Contract — generate:pause, cancel, stop & resume[2m > [22m[2mgenerate:cancel -> calls engine.cancelGeneration, NOT pauseGeneration
+[22m[39m[main] Forensic log: /mock/app/data/mews-forensic.log
+[main] V4 renderer loaded
+
+[90mstdout[2m | tests/ipc-generate-contract.test.js[2m > [22m[2mIPC Contract — generate:pause, cancel, stop & resume[2m > [22m[2mgenerate:cancel -> calls engine.cancelGeneration, NOT pauseGeneration
+[22m[39m[main] ✕ ACTION RECEIVED: CANCEL (hard timeout) for current slot
+[main] →renderer [generate:progress]: {"step":"debug","message":"✕ CANCEL REQUESTED: сбрасываю текущий слот"}
+
+[90mstdout[2m | tests/ipc-generate-contract.test.js[2m > [22m[2mIPC Contract — generate:pause, cancel, stop & resume[2m > [22m[2mgenerate:stop alias -> calls engine.pauseGeneration, NOT cancelGeneration
+[22m[39m[main] Forensic log: /mock/app/data/mews-forensic.log
+[main] V4 renderer loaded
+
+[90mstdout[2m | tests/ipc-generate-contract.test.js[2m > [22m[2mIPC Contract — generate:pause, cancel, stop & resume[2m > [22m[2mgenerate:stop alias -> calls engine.pauseGeneration, NOT cancelGeneration
+[22m[39m[main] 🛑 ACTION RECEIVED: STOP (alias for pause)
+[main] →renderer [generate:progress]: {"step":"debug","message":"🛑 STOP REQUESTED: дожидаюсь текущего слота"}
+
+[90mstdout[2m | tests/ipc-generate-contract.test.js[2m > [22m[2mIPC Contract — generate:pause, cancel, stop & resume[2m > [22m[2mgenerate:clear-resume-state -> cleanly strips generationState from project JSON
+[22m[39m[main] Forensic log: /mock/app/data/mews-forensic.log
+[main] V4 renderer loaded
+
+ [32m✓[39m tests/ipc-generate-contract.test.js [2m([22m[2m4 tests[22m[2m)[22m[33m 385[2mms[22m[39m
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould skip already saved slots (Backfill logic) without firing generate clicks
+[22m[39m[engine] Node fetch failed: HTTP 404
+
+[90mstdout[2m | tests/engine-actions.test.js[2m > [22m[2mEngine GeneratePrompt — Soft Pause Scenario[2m > [22m[2mshould gracefully stop generation loop when paused during progress
+[22m[39m[engine] Node fetch failed: HTTP 404
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould skip already saved slots (Backfill logic) without firing generate clicks
+[22m[39m[engine] Node fetch failed: HTTP 404
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould skip already saved slots (Backfill logic) without firing generate clicks
+[22m[39m[engine] ✅ Downloaded: gen_3.jpg (49KB) via browser
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould skip already saved slots (Backfill logic) without firing generate clicks
+[22m[39m[engine] ✓ Validation passed: 1465KB, format=jpeg, quality=acceptable
+[engine] ✅ SLOT 3 — SAVED (1465KB, acceptable)
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould skip already saved slots (Backfill logic) without firing generate clicks
+[22m[39m
+[engine] ═══ SLOT 4/4 — starting ═══
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould skip already saved slots (Backfill logic) without firing generate clicks
+[22m[39m[engine] Model verified via title: "Nano Banana Pro" ✓
+[engine] ✅ Active model confirmed: Nano Banana Pro (nano_banana_2)
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould skip already saved slots (Backfill logic) without firing generate clicks
+[22m[39m[engine] 🔍 isExtraFreeGensOn: state=undefined, strategy=undefined
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould skip already saved slots (Backfill logic) without firing generate clicks
+[22m[39m[engine] ┌─── PRE-SLOT 4 (attempt 1) ────────────────────────
+[engine] │ batch       : 1/4
+[engine] │ extra_free  : OFF ✅
+[engine] │ unlimited   : ON ✅
+[engine] │ queued_now  : 0
+[engine] │ prompt_field: ""
+[engine] │ expected_pr : "test prompt"
+[engine] │ field_match : ⚠️ NO MATCH
+[engine] └──────────────────────────────────────────────────────
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould skip already saved slots (Backfill logic) without firing generate clicks
+[22m[39m[engine] 📊 Slot 4 pre-click: feedCount=1, fingerprints=1 (ALL), exclude=0
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould skip already saved slots (Backfill logic) without firing generate clicks
+[22m[39m[engine] ✅ Generate clicked (via true)
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould skip already saved slots (Backfill logic) without firing generate clicks
+[22m[39m[engine] ✅ Slot 4 — Generate clicked
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould skip already saved slots (Backfill logic) without firing generate clicks
+[22m[39m[engine] 📡 POST-CLICK (2s): inFlight=0 (Q=0 G=0), feed=2 (was 1), topUUID=22222222-2222-2222-2222-773937432495, isForbidden=false
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould skip already saved slots (Backfill logic) without firing generate clicks
+[22m[39m[engine] ✅ Image 4 ready via UUID detection (0s, feedCount: 1→2, queued=0, uuid=22222222-2222-2222-2222-773937432495): https://higgsfield.ai/test-22222222-2222-2222-2222-773937432495-min.webp...
+[engine] ✅ Exit reason: uuid_detected (top url)
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould skip already saved slots (Backfill logic) without firing generate clicks
+[22m[39m[engine] ✅ Slot 4 image URL acquired
+[engine]    URL     : https://higgsfield.ai/test-22222222-2222-2222-2222-773937432495-min.webp
+[engine]    UUID    : 22222222-2222-2222-2222-773937432495
+[engine]    excluded: no ✅
+[engine] 💾 Slot 4 — downloading to: /Users/osminkin/Desktop/🚀 Antigravity Projects/Higsvild antigravity/output/temp/gen_4.jpg
+[engine] Extracted job_id: 22222222-2222-2222-2222-773937432495
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould skip already saved slots (Backfill logic) without firing generate clicks
+[22m[39m[engine] API response keys: undefined (no rawUrl found)
+
+[90mstdout[2m | tests/engine-actions.test.js[2m > [22m[2mEngine GeneratePrompt — Soft Pause Scenario[2m > [22m[2mshould gracefully stop generation loop when paused during progress
+[22m[39m[engine] Node fetch failed: HTTP 404
+
+[90mstdout[2m | tests/engine-actions.test.js[2m > [22m[2mEngine GeneratePrompt — Soft Pause Scenario[2m > [22m[2mshould gracefully stop generation loop when paused during progress
+[22m[39m[engine] ✅ Downloaded: gen_1.jpg (49KB) via browser
+
+[90mstdout[2m | tests/engine-actions.test.js[2m > [22m[2mEngine GeneratePrompt — Soft Pause Scenario[2m > [22m[2mshould gracefully stop generation loop when paused during progress
+[22m[39m[engine] ✓ Validation passed: 1465KB, format=jpeg, quality=acceptable
+[engine] ✅ SLOT 1 — SAVED (1465KB, acceptable)
+[engine] ⏸ pauseGeneration() called — soft pause requested
+
+[90mstdout[2m | tests/engine-actions.test.js[2m > [22m[2mEngine GeneratePrompt — Soft Pause Scenario[2m > [22m[2mshould gracefully stop generation loop when paused during progress
+[22m[39m[engine] ⚠️ Skip remaining slots, assigning state: paused
+[engine] ⏭ Пропуск оставшихся слотов (paused)
+
+[engine] ═══ SUMMARY: 1 saved, 0 failed, 3 paused, 0 cancelled out of 4 → promptStatus=paused ═══
+
+[90mstdout[2m | tests/engine-actions.test.js[2m > [22m[2mEngine GeneratePrompt — Soft Pause Scenario[2m > [22m[2mshould abort completely and mark aborted slots as cancelled on cancelGeneration
+[22m[39m
+[engine] ╔══════════════════════════════════════════════════════════════════════
+[engine] ║ GENERATE PROMPT START
+[engine] ║ prompt  : "test prompt"
+[engine] ║ model   : nano_banana_pro
+[engine] ║ aspect  : 1:1
+[engine] ║ images  : 4
+[engine] ║ output  : null
+[engine] ║ excludeFingerprints: 0 UUIDs
+[engine] ╚══════════════════════════════════════════════════════════════════════
+
+[90mstdout[2m | tests/engine-actions.test.js[2m > [22m[2mEngine GeneratePrompt — Soft Pause Scenario[2m > [22m[2mshould abort completely and mark aborted slots as cancelled on cancelGeneration
+[22m[39m
+[engine] ╔══════════ PREFLIGHT SETTINGS SYNC ══════════
+
+[90mstdout[2m | tests/engine-actions.test.js[2m > [22m[2mEngine GeneratePrompt — Soft Pause Scenario[2m > [22m[2mshould abort completely and mark aborted slots as cancelled on cancelGeneration
+[22m[39m[engine] Model verified via title: "Nano Banana Pro" ✓
+[engine] ✅ Active model confirmed: Nano Banana Pro (nano_banana_2)
+
+[90mstdout[2m | tests/engine-actions.test.js[2m > [22m[2mEngine GeneratePrompt — Soft Pause Scenario[2m > [22m[2mshould abort completely and mark aborted slots as cancelled on cancelGeneration
+[22m[39m[engine] clearPromptField: found selectors=["[contenteditable=\"true\"]"], allEditable=1
+
+[90mstdout[2m | tests/engine-actions.test.js[2m > [22m[2mEngine GeneratePrompt — Soft Pause Scenario[2m > [22m[2mshould abort completely and mark aborted slots as cancelled on cancelGeneration
+[22m[39m[engine] clearPromptField keyboard error: Cannot read properties of undefined (reading 'catch')
+
+[90mstdout[2m | tests/engine-actions.test.js[2m > [22m[2mEngine GeneratePrompt — Soft Pause Scenario[2m > [22m[2mshould abort completely and mark aborted slots as cancelled on cancelGeneration
+[22m[39m[engine] ✅ clearPromptField: field is empty
+
+[90mstdout[2m | tests/engine-actions.test.js[2m > [22m[2mEngine GeneratePrompt — Soft Pause Scenario[2m > [22m[2mshould abort completely and mark aborted slots as cancelled on cancelGeneration
+[22m[39m[engine] 🔍 isExtraFreeGensOn: state=undefined, strategy=undefined
+
+[90mstdout[2m | tests/engine-actions.test.js[2m > [22m[2mEngine GeneratePrompt — Soft Pause Scenario[2m > [22m[2mshould abort completely and mark aborted slots as cancelled on cancelGeneration
+[22m[39m[engine] Extra free gens: OFF
+
+[90mstdout[2m | tests/engine-actions.test.js[2m > [22m[2mEngine GeneratePrompt — Soft Pause Scenario[2m > [22m[2mshould abort completely and mark aborted slots as cancelled on cancelGeneration
+[22m[39m[engine] 🔍 isExtraFreeGensOn: state=undefined, strategy=undefined
+
+[90mstdout[2m | tests/engine-actions.test.js[2m > [22m[2mEngine GeneratePrompt — Soft Pause Scenario[2m > [22m[2mshould abort completely and mark aborted slots as cancelled on cancelGeneration
+[22m[39m[engine] Current batch: 1/4
+[engine] ✅ Batch already 1/4
+
+[90mstdout[2m | tests/engine-actions.test.js[2m > [22m[2mEngine GeneratePrompt — Soft Pause Scenario[2m > [22m[2mshould abort completely and mark aborted slots as cancelled on cancelGeneration
+[22m[39m[engine] Unlimited state: true
+
+[90mstdout[2m | tests/engine-actions.test.js[2m > [22m[2mEngine GeneratePrompt — Soft Pause Scenario[2m > [22m[2mshould abort completely and mark aborted slots as cancelled on cancelGeneration
+[22m[39m[engine] ✅ Quality already set to "1K"
+
+[90mstdout[2m | tests/engine-actions.test.js[2m > [22m[2mEngine GeneratePrompt — Soft Pause Scenario[2m > [22m[2mshould abort completely and mark aborted slots as cancelled on cancelGeneration
+[22m[39m[engine] ✅ Aspect ratio already 1:1
+
+[90mstdout[2m | tests/engine-actions.test.js[2m > [22m[2mEngine GeneratePrompt — Soft Pause Scenario[2m > [22m[2mshould abort completely and mark aborted slots as cancelled on cancelGeneration
+[22m[39m[engine] ║ Setting          │ Expected   │ Actual     │ Status
+[engine] ║──────────────────┼────────────┼────────────┼───────
+[engine] ║ Model            │ Nano Banana Pro │ Nano Banana Pro │ ✅ MATCH
+[engine] ║ Quality          │ 1K         │ 1K         │ ✅ MATCH
+[engine] ║ Aspect Ratio     │ 1:1        │ 1:1        │ ✅ MATCH
+[engine] ║ Batch            │ 1/4        │ 1/4        │ ✅ MATCH
+[engine] ║ Unlimited        │ ON         │ ON         │ ✅ MATCH
+[engine] ║ Extra Free Gens  │ OFF        │ OFF        │ ✅ MATCH
+[engine] ╚═════════════════════════════════════════════
+[engine] ✅ PREFLIGHT PASSED — all settings verified
+
+
+[90mstdout[2m | tests/engine-actions.test.js[2m > [22m[2mEngine GeneratePrompt — Soft Pause Scenario[2m > [22m[2mshould abort completely and mark aborted slots as cancelled on cancelGeneration
+[22m[39m[engine] === enterPrompt called ===
+[engine] Prompt text: "test prompt..."
+Unmatched page.evaluate: (text, sels) => {
+    let el = null;
+    for (cons
+
+[90mstdout[2m | tests/engine-actions.test.js[2m > [22m[2mEngine GeneratePrompt — Soft Pause Scenario[2m > [22m[2mshould abort completely and mark aborted slots as cancelled on cancelGeneration
+[22m[39m[engine] Method 1 (React execCommand): failed
+
+[90mstdout[2m | tests/engine-actions.test.js[2m > [22m[2mEngine GeneratePrompt — Soft Pause Scenario[2m > [22m[2mshould abort completely and mark aborted slots as cancelled on cancelGeneration
+[22m[39m[engine] Verify (m1): ok=true, actual="test prompt"
+[engine] ✅ Prompt VERIFIED (11 chars)
+
+[90mstdout[2m | tests/engine-actions.test.js[2m > [22m[2mEngine GeneratePrompt — Soft Pause Scenario[2m > [22m[2mshould abort completely and mark aborted slots as cancelled on cancelGeneration
+[22m[39m
+[engine] ═══ SLOT 1/4 — starting ═══
+
+[90mstdout[2m | tests/engine-actions.test.js[2m > [22m[2mEngine GeneratePrompt — Soft Pause Scenario[2m > [22m[2mshould abort completely and mark aborted slots as cancelled on cancelGeneration
+[22m[39m[engine] Model verified via title: "Nano Banana Pro" ✓
+[engine] ✅ Active model confirmed: Nano Banana Pro (nano_banana_2)
+
+[90mstdout[2m | tests/engine-actions.test.js[2m > [22m[2mEngine GeneratePrompt — Soft Pause Scenario[2m > [22m[2mshould abort completely and mark aborted slots as cancelled on cancelGeneration
+[22m[39m[engine] 🔍 isExtraFreeGensOn: state=undefined, strategy=undefined
+
+[90mstdout[2m | tests/engine-actions.test.js[2m > [22m[2mEngine GeneratePrompt — Soft Pause Scenario[2m > [22m[2mshould abort completely and mark aborted slots as cancelled on cancelGeneration
+[22m[39m[engine] ┌─── PRE-SLOT 1 (attempt 1) ────────────────────────
+[engine] │ batch       : 1/4
+[engine] │ extra_free  : OFF ✅
+[engine] │ unlimited   : ON ✅
+[engine] │ queued_now  : 0
+[engine] │ prompt_field: ""
+[engine] │ expected_pr : "test prompt"
+[engine] │ field_match : ⚠️ NO MATCH
+[engine] └──────────────────────────────────────────────────────
+
+[90mstdout[2m | tests/engine-actions.test.js[2m > [22m[2mEngine GeneratePrompt — Soft Pause Scenario[2m > [22m[2mshould abort completely and mark aborted slots as cancelled on cancelGeneration
+[22m[39m[engine] 📊 Slot 1 pre-click: feedCount=0, fingerprints=0 (ALL), exclude=0
+
+[90mstdout[2m | tests/engine-actions.test.js[2m > [22m[2mEngine GeneratePrompt — Soft Pause Scenario[2m > [22m[2mshould abort completely and mark aborted slots as cancelled on cancelGeneration
+[22m[39m[engine] ✅ Generate clicked (via true)
+
+[90mstdout[2m | tests/engine-actions.test.js[2m > [22m[2mEngine GeneratePrompt — Soft Pause Scenario[2m > [22m[2mshould abort completely and mark aborted slots as cancelled on cancelGeneration
+[22m[39m[engine] ✅ Slot 1 — Generate clicked
+
+[90mstdout[2m | tests/engine-actions.test.js[2m > [22m[2mEngine GeneratePrompt — Soft Pause Scenario[2m > [22m[2mshould abort completely and mark aborted slots as cancelled on cancelGeneration
+[22m[39m[engine] 📡 POST-CLICK (2s): inFlight=0 (Q=0 G=0), feed=1 (was 0), topUUID=11111111-1111-1111-1111-773937432504, isForbidden=false
+
+[90mstdout[2m | tests/engine-actions.test.js[2m > [22m[2mEngine GeneratePrompt — Soft Pause Scenario[2m > [22m[2mshould abort completely and mark aborted slots as cancelled on cancelGeneration
+[22m[39m[engine] ✅ Image 1 ready via UUID detection (0s, feedCount: 0→1, queued=0, uuid=11111111-1111-1111-1111-773937432504): https://higgsfield.ai/test-11111111-1111-1111-1111-773937432504-min.webp...
+[engine] ✅ Exit reason: uuid_detected (top url)
+
+[90mstdout[2m | tests/engine-actions.test.js[2m > [22m[2mEngine GeneratePrompt — Soft Pause Scenario[2m > [22m[2mshould abort completely and mark aborted slots as cancelled on cancelGeneration
+[22m[39m[engine] ✅ Slot 1 image URL acquired
+[engine]    URL     : https://higgsfield.ai/test-11111111-1111-1111-1111-773937432504-min.webp
+[engine]    UUID    : 11111111-1111-1111-1111-773937432504
+[engine]    excluded: no ✅
+[engine] 💾 Slot 1 — downloading to: /Users/osminkin/Desktop/🚀 Antigravity Projects/Higsvild antigravity/output/temp/gen_1.jpg
+[engine] Extracted job_id: 11111111-1111-1111-1111-773937432504
+
+[90mstdout[2m | tests/engine-actions.test.js[2m > [22m[2mEngine GeneratePrompt — Soft Pause Scenario[2m > [22m[2mshould abort completely and mark aborted slots as cancelled on cancelGeneration
+[22m[39m[engine] API response keys: undefined (no rawUrl found)
+
+[90mstdout[2m | tests/engine-actions.test.js[2m > [22m[2mEngine GeneratePrompt — Soft Pause Scenario[2m > [22m[2mshould abort completely and mark aborted slots as cancelled on cancelGeneration
+[22m[39m[engine] Node fetch failed: HTTP 404
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould skip already saved slots (Backfill logic) without firing generate clicks
+[22m[39m[engine] Node fetch failed: HTTP 404
+
+ [32m✓[39m tests/progress-state.test.js [2m([22m[2m6 tests[22m[2m)[22m[32m 106[2mms[22m[39m
+[90mstdout[2m | tests/engine-actions.test.js[2m > [22m[2mEngine GeneratePrompt — Soft Pause Scenario[2m > [22m[2mshould abort completely and mark aborted slots as cancelled on cancelGeneration
+[22m[39m[engine] Node fetch failed: HTTP 404
+
+[90mstdout[2m | tests/engine-actions.test.js[2m > [22m[2mEngine GeneratePrompt — Soft Pause Scenario[2m > [22m[2mshould abort completely and mark aborted slots as cancelled on cancelGeneration
+[22m[39m[engine] ✅ Downloaded: gen_1.jpg (49KB) via browser
+
+[90mstdout[2m | tests/engine-actions.test.js[2m > [22m[2mEngine GeneratePrompt — Soft Pause Scenario[2m > [22m[2mshould abort completely and mark aborted slots as cancelled on cancelGeneration
+[22m[39m[engine] ✓ Validation passed: 1465KB, format=jpeg, quality=acceptable
+[engine] ✅ SLOT 1 — SAVED (1465KB, acceptable)
+
+[90mstdout[2m | tests/engine-actions.test.js[2m > [22m[2mEngine GeneratePrompt — Soft Pause Scenario[2m > [22m[2mshould abort completely and mark aborted slots as cancelled on cancelGeneration
+[22m[39m
+[engine] ═══ SLOT 2/4 — starting ═══
+
+[90mstdout[2m | tests/engine-actions.test.js[2m > [22m[2mEngine GeneratePrompt — Soft Pause Scenario[2m > [22m[2mshould abort completely and mark aborted slots as cancelled on cancelGeneration
+[22m[39m[engine] Model verified via title: "Nano Banana Pro" ✓
+[engine] ✅ Active model confirmed: Nano Banana Pro (nano_banana_2)
+
+[90mstdout[2m | tests/engine-actions.test.js[2m > [22m[2mEngine GeneratePrompt — Soft Pause Scenario[2m > [22m[2mshould abort completely and mark aborted slots as cancelled on cancelGeneration
+[22m[39m[engine] 🔍 isExtraFreeGensOn: state=undefined, strategy=undefined
+
+[90mstdout[2m | tests/engine-actions.test.js[2m > [22m[2mEngine GeneratePrompt — Soft Pause Scenario[2m > [22m[2mshould abort completely and mark aborted slots as cancelled on cancelGeneration
+[22m[39m[engine] ┌─── PRE-SLOT 2 (attempt 1) ────────────────────────
+[engine] │ batch       : 1/4
+[engine] │ extra_free  : OFF ✅
+[engine] │ unlimited   : ON ✅
+[engine] │ queued_now  : 0
+[engine] │ prompt_field: ""
+[engine] │ expected_pr : "test prompt"
+[engine] │ field_match : ⚠️ NO MATCH
+[engine] └──────────────────────────────────────────────────────
+
+[90mstdout[2m | tests/engine-actions.test.js[2m > [22m[2mEngine GeneratePrompt — Soft Pause Scenario[2m > [22m[2mshould abort completely and mark aborted slots as cancelled on cancelGeneration
+[22m[39m[engine] 📊 Slot 2 pre-click: feedCount=1, fingerprints=1 (ALL), exclude=0
+
+[90mstdout[2m | tests/engine-actions.test.js[2m > [22m[2mEngine GeneratePrompt — Soft Pause Scenario[2m > [22m[2mshould abort completely and mark aborted slots as cancelled on cancelGeneration
+[22m[39m[engine] ✅ Generate clicked (via true)
+
+[90mstdout[2m | tests/engine-actions.test.js[2m > [22m[2mEngine GeneratePrompt — Soft Pause Scenario[2m > [22m[2mshould abort completely and mark aborted slots as cancelled on cancelGeneration
+[22m[39m[engine] ✅ Slot 2 — Generate clicked
+
+[90mstdout[2m | tests/engine-actions.test.js[2m > [22m[2mEngine GeneratePrompt — Soft Pause Scenario[2m > [22m[2mshould abort completely and mark aborted slots as cancelled on cancelGeneration
+[22m[39m[engine] 📡 POST-CLICK (2s): inFlight=0 (Q=0 G=0), feed=2 (was 1), topUUID=11111111-1111-1111-1111-773937432788, isForbidden=false
+[engine] ✕ cancelGeneration() called — hard cancel requested
+[engine] ✕ HARD CANCEL: slot 2 abandoned immediately
+[engine] 🛑 Exit reason: cancelled (слот сброшен)
+
+[90mstdout[2m | tests/engine-actions.test.js[2m > [22m[2mEngine GeneratePrompt — Soft Pause Scenario[2m > [22m[2mshould abort completely and mark aborted slots as cancelled on cancelGeneration
+[22m[39mUnmatched page.evaluate: () => {
+      // Only check toast/notification/ban
+
+[90mstdout[2m | tests/engine-actions.test.js[2m > [22m[2mEngine GeneratePrompt — Soft Pause Scenario[2m > [22m[2mshould abort completely and mark aborted slots as cancelled on cancelGeneration
+[22m[39m[engine] ❌ SLOT 2 attempt 1 FAILED [recoverable|timeout]: Timeout: новое изображение не появилось (слот 2)
+[engine] ⚠️ Slot 2 aborted due to flag. Assigning state: cancelled
+[engine] 🛑 Exit reason: cancelled (флаг активности)
+
+[90mstdout[2m | tests/engine-actions.test.js[2m > [22m[2mEngine GeneratePrompt — Soft Pause Scenario[2m > [22m[2mshould abort completely and mark aborted slots as cancelled on cancelGeneration
+[22m[39m[engine] ⚠️ Skip remaining slots, assigning state: cancelled
+[engine] ⏭ Пропуск оставшихся слотов (cancelled)
+
+[engine] ═══ SUMMARY: 1 saved, 0 failed, 0 paused, 3 cancelled out of 4 → promptStatus=cancelled ═══
+
+ [32m✓[39m tests/engine-actions.test.js [2m([22m[2m5 tests[22m[2m)[22m[33m 806[2mms[22m[39m
+     [33m[2m✓[22m[39m should gracefully stop generation loop when paused during progress [33m 500[2mms[22m[39m
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould skip already saved slots (Backfill logic) without firing generate clicks
+[22m[39m[engine] Node fetch failed: HTTP 404
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould skip already saved slots (Backfill logic) without firing generate clicks
+[22m[39m[engine] ✅ Downloaded: gen_4.jpg (49KB) via browser
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould skip already saved slots (Backfill logic) without firing generate clicks
+[22m[39m[engine] ✓ Validation passed: 1465KB, format=jpeg, quality=acceptable
+[engine] ✅ SLOT 4 — SAVED (1465KB, acceptable)
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould skip already saved slots (Backfill logic) without firing generate clicks
+[22m[39m
+[engine] ═══ SUMMARY: 4 saved, 0 failed, 0 paused, 0 cancelled out of 4 → promptStatus=done ═══
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould process slots strictly sequentially with precise event ordering
+[22m[39m
+[engine] ╔══════════════════════════════════════════════════════════════════════
+[engine] ║ GENERATE PROMPT START
+[engine] ║ prompt  : "test prompt"
+[engine] ║ model   : nano_banana_pro
+[engine] ║ aspect  : 1:1
+[engine] ║ images  : 3
+[engine] ║ output  : null
+[engine] ║ excludeFingerprints: 0 UUIDs
+[engine] ╚══════════════════════════════════════════════════════════════════════
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould process slots strictly sequentially with precise event ordering
+[22m[39m
+[engine] ╔══════════ PREFLIGHT SETTINGS SYNC ══════════
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould process slots strictly sequentially with precise event ordering
+[22m[39m[engine] Model verified via title: "Nano Banana Pro" ✓
+[engine] ✅ Active model confirmed: Nano Banana Pro (nano_banana_2)
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould process slots strictly sequentially with precise event ordering
+[22m[39m[engine] clearPromptField: found selectors=["[contenteditable=\"true\"]"], allEditable=1
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould process slots strictly sequentially with precise event ordering
+[22m[39m[engine] clearPromptField keyboard error: Cannot read properties of undefined (reading 'catch')
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould process slots strictly sequentially with precise event ordering
+[22m[39m[engine] ✅ clearPromptField: field is empty
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould process slots strictly sequentially with precise event ordering
+[22m[39m[engine] 🔍 isExtraFreeGensOn: state=undefined, strategy=undefined
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould process slots strictly sequentially with precise event ordering
+[22m[39m[engine] Extra free gens: OFF
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould process slots strictly sequentially with precise event ordering
+[22m[39m[engine] 🔍 isExtraFreeGensOn: state=undefined, strategy=undefined
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould process slots strictly sequentially with precise event ordering
+[22m[39m[engine] Current batch: 1/4
+[engine] ✅ Batch already 1/4
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould process slots strictly sequentially with precise event ordering
+[22m[39m[engine] Unlimited state: true
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould process slots strictly sequentially with precise event ordering
+[22m[39m[engine] ✅ Quality already set to "1K"
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould process slots strictly sequentially with precise event ordering
+[22m[39m[engine] ✅ Aspect ratio already 1:1
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould process slots strictly sequentially with precise event ordering
+[22m[39m[engine] ║ Setting          │ Expected   │ Actual     │ Status
+[engine] ║──────────────────┼────────────┼────────────┼───────
+[engine] ║ Model            │ Nano Banana Pro │ Nano Banana Pro │ ✅ MATCH
+[engine] ║ Quality          │ 1K         │ 1K         │ ✅ MATCH
+[engine] ║ Aspect Ratio     │ 1:1        │ 1:1        │ ✅ MATCH
+[engine] ║ Batch            │ 1/4        │ 1/4        │ ✅ MATCH
+[engine] ║ Unlimited        │ ON         │ ON         │ ✅ MATCH
+[engine] ║ Extra Free Gens  │ OFF        │ OFF        │ ✅ MATCH
+[engine] ╚═════════════════════════════════════════════
+[engine] ✅ PREFLIGHT PASSED — all settings verified
+
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould process slots strictly sequentially with precise event ordering
+[22m[39m[engine] === enterPrompt called ===
+[engine] Prompt text: "test prompt..."
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould process slots strictly sequentially with precise event ordering
+[22m[39m[engine] Method 1 (React execCommand): failed
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould process slots strictly sequentially with precise event ordering
+[22m[39m[engine] Verify (m1): ok=true, actual="test prompt"
+[engine] ✅ Prompt VERIFIED (11 chars)
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould process slots strictly sequentially with precise event ordering
+[22m[39m
+[engine] ═══ SLOT 1/3 — starting ═══
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould process slots strictly sequentially with precise event ordering
+[22m[39m[engine] Model verified via title: "Nano Banana Pro" ✓
+[engine] ✅ Active model confirmed: Nano Banana Pro (nano_banana_2)
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould process slots strictly sequentially with precise event ordering
+[22m[39m[engine] 🔍 isExtraFreeGensOn: state=undefined, strategy=undefined
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould process slots strictly sequentially with precise event ordering
+[22m[39m[engine] ┌─── PRE-SLOT 1 (attempt 1) ────────────────────────
+[engine] │ batch       : 1/4
+[engine] │ extra_free  : OFF ✅
+[engine] │ unlimited   : ON ✅
+[engine] │ queued_now  : 0
+[engine] │ prompt_field: ""
+[engine] │ expected_pr : "test prompt"
+[engine] │ field_match : ⚠️ NO MATCH
+[engine] └──────────────────────────────────────────────────────
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould process slots strictly sequentially with precise event ordering
+[22m[39m[engine] 📊 Slot 1 pre-click: feedCount=0, fingerprints=0 (ALL), exclude=0
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould process slots strictly sequentially with precise event ordering
+[22m[39m[engine] ✅ Generate clicked (via true)
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould process slots strictly sequentially with precise event ordering
+[22m[39m[engine] ✅ Slot 1 — Generate clicked
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould process slots strictly sequentially with precise event ordering
+[22m[39m[engine] 📡 POST-CLICK (2s): inFlight=0 (Q=0 G=0), feed=1 (was 0), topUUID=22222222-2222-2222-2222-773937432827, isForbidden=false
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould process slots strictly sequentially with precise event ordering
+[22m[39m[engine] ✅ Image 1 ready via UUID detection (0s, feedCount: 0→1, queued=0, uuid=22222222-2222-2222-2222-773937432827): https://higgsfield.ai/test-22222222-2222-2222-2222-773937432827-min.webp...
+[engine] ✅ Exit reason: uuid_detected (top url)
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould process slots strictly sequentially with precise event ordering
+[22m[39m[engine] ✅ Slot 1 image URL acquired
+[engine]    URL     : https://higgsfield.ai/test-22222222-2222-2222-2222-773937432827-min.webp
+[engine]    UUID    : 22222222-2222-2222-2222-773937432827
+[engine]    excluded: no ✅
+[engine] 💾 Slot 1 — downloading to: /Users/osminkin/Desktop/🚀 Antigravity Projects/Higsvild antigravity/output/temp/gen_1.jpg
+[engine] Extracted job_id: 22222222-2222-2222-2222-773937432827
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould process slots strictly sequentially with precise event ordering
+[22m[39m[engine] API response keys: undefined (no rawUrl found)
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould process slots strictly sequentially with precise event ordering
+[22m[39m[engine] Node fetch failed: HTTP 404
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould process slots strictly sequentially with precise event ordering
+[22m[39m[engine] Node fetch failed: HTTP 404
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould process slots strictly sequentially with precise event ordering
+[22m[39m[engine] ✅ Downloaded: gen_1.jpg (49KB) via browser
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould process slots strictly sequentially with precise event ordering
+[22m[39m[engine] ✓ Validation passed: 1465KB, format=jpeg, quality=acceptable
+[engine] ✅ SLOT 1 — SAVED (1465KB, acceptable)
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould process slots strictly sequentially with precise event ordering
+[22m[39m
+[engine] ═══ SLOT 2/3 — starting ═══
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould process slots strictly sequentially with precise event ordering
+[22m[39m[engine] Model verified via title: "Nano Banana Pro" ✓
+[engine] ✅ Active model confirmed: Nano Banana Pro (nano_banana_2)
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould process slots strictly sequentially with precise event ordering
+[22m[39m[engine] 🔍 isExtraFreeGensOn: state=undefined, strategy=undefined
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould process slots strictly sequentially with precise event ordering
+[22m[39m[engine] ┌─── PRE-SLOT 2 (attempt 1) ────────────────────────
+[engine] │ batch       : 1/4
+[engine] │ extra_free  : OFF ✅
+[engine] │ unlimited   : ON ✅
+[engine] │ queued_now  : 0
+[engine] │ prompt_field: ""
+[engine] │ expected_pr : "test prompt"
+[engine] │ field_match : ⚠️ NO MATCH
+[engine] └──────────────────────────────────────────────────────
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould process slots strictly sequentially with precise event ordering
+[22m[39m[engine] 📊 Slot 2 pre-click: feedCount=1, fingerprints=1 (ALL), exclude=0
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould process slots strictly sequentially with precise event ordering
+[22m[39m[engine] ✅ Generate clicked (via true)
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould process slots strictly sequentially with precise event ordering
+[22m[39m[engine] ✅ Slot 2 — Generate clicked
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould process slots strictly sequentially with precise event ordering
+[22m[39m[engine] 📡 POST-CLICK (2s): inFlight=0 (Q=0 G=0), feed=2 (was 1), topUUID=22222222-2222-2222-2222-773937433037, isForbidden=false
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould process slots strictly sequentially with precise event ordering
+[22m[39m[engine] ✅ Image 2 ready via UUID detection (0s, feedCount: 1→2, queued=0, uuid=22222222-2222-2222-2222-773937433037): https://higgsfield.ai/test-22222222-2222-2222-2222-773937433037-min.webp...
+[engine] ✅ Exit reason: uuid_detected (top url)
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould process slots strictly sequentially with precise event ordering
+[22m[39m[engine] ✅ Slot 2 image URL acquired
+[engine]    URL     : https://higgsfield.ai/test-22222222-2222-2222-2222-773937433037-min.webp
+[engine]    UUID    : 22222222-2222-2222-2222-773937433037
+[engine]    excluded: no ✅
+[engine] 💾 Slot 2 — downloading to: /Users/osminkin/Desktop/🚀 Antigravity Projects/Higsvild antigravity/output/temp/gen_2.jpg
+[engine] Extracted job_id: 22222222-2222-2222-2222-773937433037
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould process slots strictly sequentially with precise event ordering
+[22m[39m[engine] API response keys: undefined (no rawUrl found)
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould process slots strictly sequentially with precise event ordering
+[22m[39m[engine] Node fetch failed: HTTP 404
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould process slots strictly sequentially with precise event ordering
+[22m[39m[engine] Node fetch failed: HTTP 404
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould process slots strictly sequentially with precise event ordering
+[22m[39m[engine] ✅ Downloaded: gen_2.jpg (49KB) via browser
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould process slots strictly sequentially with precise event ordering
+[22m[39m[engine] ✓ Validation passed: 1465KB, format=jpeg, quality=acceptable
+[engine] ✅ SLOT 2 — SAVED (1465KB, acceptable)
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould process slots strictly sequentially with precise event ordering
+[22m[39m
+[engine] ═══ SLOT 3/3 — starting ═══
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould process slots strictly sequentially with precise event ordering
+[22m[39m[engine] Model verified via title: "Nano Banana Pro" ✓
+[engine] ✅ Active model confirmed: Nano Banana Pro (nano_banana_2)
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould process slots strictly sequentially with precise event ordering
+[22m[39m[engine] 🔍 isExtraFreeGensOn: state=undefined, strategy=undefined
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould process slots strictly sequentially with precise event ordering
+[22m[39m[engine] ┌─── PRE-SLOT 3 (attempt 1) ────────────────────────
+[engine] │ batch       : 1/4
+[engine] │ extra_free  : OFF ✅
+[engine] │ unlimited   : ON ✅
+[engine] │ queued_now  : 0
+[engine] │ prompt_field: ""
+[engine] │ expected_pr : "test prompt"
+[engine] │ field_match : ⚠️ NO MATCH
+[engine] └──────────────────────────────────────────────────────
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould process slots strictly sequentially with precise event ordering
+[22m[39m[engine] 📊 Slot 3 pre-click: feedCount=2, fingerprints=2 (ALL), exclude=0
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould process slots strictly sequentially with precise event ordering
+[22m[39m[engine] ✅ Generate clicked (via true)
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould process slots strictly sequentially with precise event ordering
+[22m[39m[engine] ✅ Slot 3 — Generate clicked
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould process slots strictly sequentially with precise event ordering
+[22m[39m[engine] 📡 POST-CLICK (2s): inFlight=0 (Q=0 G=0), feed=3 (was 2), topUUID=22222222-2222-2222-2222-773937433331, isForbidden=false
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould process slots strictly sequentially with precise event ordering
+[22m[39m[engine] ✅ Image 3 ready via UUID detection (0s, feedCount: 2→3, queued=0, uuid=22222222-2222-2222-2222-773937433331): https://higgsfield.ai/test-22222222-2222-2222-2222-773937433331-min.webp...
+[engine] ✅ Exit reason: uuid_detected (top url)
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould process slots strictly sequentially with precise event ordering
+[22m[39m[engine] ✅ Slot 3 image URL acquired
+[engine]    URL     : https://higgsfield.ai/test-22222222-2222-2222-2222-773937433331-min.webp
+[engine]    UUID    : 22222222-2222-2222-2222-773937433331
+[engine]    excluded: no ✅
+[engine] 💾 Slot 3 — downloading to: /Users/osminkin/Desktop/🚀 Antigravity Projects/Higsvild antigravity/output/temp/gen_3.jpg
+[engine] Extracted job_id: 22222222-2222-2222-2222-773937433331
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould process slots strictly sequentially with precise event ordering
+[22m[39m[engine] API response keys: undefined (no rawUrl found)
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould process slots strictly sequentially with precise event ordering
+[22m[39m[engine] Node fetch failed: HTTP 404
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould process slots strictly sequentially with precise event ordering
+[22m[39m[engine] Node fetch failed: HTTP 404
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould process slots strictly sequentially with precise event ordering
+[22m[39m[engine] ✅ Downloaded: gen_3.jpg (49KB) via browser
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould process slots strictly sequentially with precise event ordering
+[22m[39m[engine] ✓ Validation passed: 1465KB, format=jpeg, quality=acceptable
+[engine] ✅ SLOT 3 — SAVED (1465KB, acceptable)
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould process slots strictly sequentially with precise event ordering
+[22m[39m
+[engine] ═══ SUMMARY: 3 saved, 0 failed, 0 paused, 0 cancelled out of 3 → promptStatus=done ═══
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould not start new slots after soft pause hits
+[22m[39m
+[engine] ╔══════════════════════════════════════════════════════════════════════
+[engine] ║ GENERATE PROMPT START
+[engine] ║ prompt  : "test prompt"
+[engine] ║ model   : nano_banana_pro
+[engine] ║ aspect  : 1:1
+[engine] ║ images  : 4
+[engine] ║ output  : null
+[engine] ║ excludeFingerprints: 0 UUIDs
+[engine] ╚══════════════════════════════════════════════════════════════════════
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould not start new slots after soft pause hits
+[22m[39m
+[engine] ╔══════════ PREFLIGHT SETTINGS SYNC ══════════
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould not start new slots after soft pause hits
+[22m[39m[engine] Model verified via title: "Nano Banana Pro" ✓
+[engine] ✅ Active model confirmed: Nano Banana Pro (nano_banana_2)
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould not start new slots after soft pause hits
+[22m[39m[engine] clearPromptField: found selectors=["[contenteditable=\"true\"]"], allEditable=1
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould not start new slots after soft pause hits
+[22m[39m[engine] clearPromptField keyboard error: Cannot read properties of undefined (reading 'catch')
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould not start new slots after soft pause hits
+[22m[39m[engine] ✅ clearPromptField: field is empty
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould not start new slots after soft pause hits
+[22m[39m[engine] 🔍 isExtraFreeGensOn: state=undefined, strategy=undefined
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould not start new slots after soft pause hits
+[22m[39m[engine] Extra free gens: OFF
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould not start new slots after soft pause hits
+[22m[39m[engine] 🔍 isExtraFreeGensOn: state=undefined, strategy=undefined
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould not start new slots after soft pause hits
+[22m[39m[engine] Current batch: 1/4
+[engine] ✅ Batch already 1/4
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould not start new slots after soft pause hits
+[22m[39m[engine] Unlimited state: true
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould not start new slots after soft pause hits
+[22m[39m[engine] ✅ Quality already set to "1K"
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould not start new slots after soft pause hits
+[22m[39m[engine] ✅ Aspect ratio already 1:1
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould not start new slots after soft pause hits
+[22m[39m[engine] ║ Setting          │ Expected   │ Actual     │ Status
+[engine] ║──────────────────┼────────────┼────────────┼───────
+[engine] ║ Model            │ Nano Banana Pro │ Nano Banana Pro │ ✅ MATCH
+[engine] ║ Quality          │ 1K         │ 1K         │ ✅ MATCH
+[engine] ║ Aspect Ratio     │ 1:1        │ 1:1        │ ✅ MATCH
+[engine] ║ Batch            │ 1/4        │ 1/4        │ ✅ MATCH
+[engine] ║ Unlimited        │ ON         │ ON         │ ✅ MATCH
+[engine] ║ Extra Free Gens  │ OFF        │ OFF        │ ✅ MATCH
+[engine] ╚═════════════════════════════════════════════
+[engine] ✅ PREFLIGHT PASSED — all settings verified
+
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould not start new slots after soft pause hits
+[22m[39m[engine] === enterPrompt called ===
+[engine] Prompt text: "test prompt..."
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould not start new slots after soft pause hits
+[22m[39m[engine] Method 1 (React execCommand): failed
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould not start new slots after soft pause hits
+[22m[39m[engine] Verify (m1): ok=true, actual="test prompt"
+[engine] ✅ Prompt VERIFIED (11 chars)
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould not start new slots after soft pause hits
+[22m[39m
+[engine] ═══ SLOT 1/4 — starting ═══
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould not start new slots after soft pause hits
+[22m[39m[engine] Model verified via title: "Nano Banana Pro" ✓
+[engine] ✅ Active model confirmed: Nano Banana Pro (nano_banana_2)
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould not start new slots after soft pause hits
+[22m[39m[engine] 🔍 isExtraFreeGensOn: state=undefined, strategy=undefined
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould not start new slots after soft pause hits
+[22m[39m[engine] ┌─── PRE-SLOT 1 (attempt 1) ────────────────────────
+[engine] │ batch       : 1/4
+[engine] │ extra_free  : OFF ✅
+[engine] │ unlimited   : ON ✅
+[engine] │ queued_now  : 0
+[engine] │ prompt_field: ""
+[engine] │ expected_pr : "test prompt"
+[engine] │ field_match : ⚠️ NO MATCH
+[engine] └──────────────────────────────────────────────────────
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould not start new slots after soft pause hits
+[22m[39m[engine] 📊 Slot 1 pre-click: feedCount=0, fingerprints=0 (ALL), exclude=0
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould not start new slots after soft pause hits
+[22m[39m[engine] ✅ Generate clicked (via true)
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould not start new slots after soft pause hits
+[22m[39m[engine] ✅ Slot 1 — Generate clicked
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould not start new slots after soft pause hits
+[22m[39m[engine] 📡 POST-CLICK (2s): inFlight=0 (Q=0 G=0), feed=1 (was 0), topUUID=22222222-2222-2222-2222-773937434212, isForbidden=false
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould not start new slots after soft pause hits
+[22m[39m[engine] ✅ Image 1 ready via UUID detection (0s, feedCount: 0→1, queued=0, uuid=22222222-2222-2222-2222-773937434212): https://higgsfield.ai/test-22222222-2222-2222-2222-773937434212-min.webp...
+[engine] ✅ Exit reason: uuid_detected (top url)
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould not start new slots after soft pause hits
+[22m[39m[engine] ✅ Slot 1 image URL acquired
+[engine]    URL     : https://higgsfield.ai/test-22222222-2222-2222-2222-773937434212-min.webp
+[engine]    UUID    : 22222222-2222-2222-2222-773937434212
+[engine]    excluded: no ✅
+[engine] 💾 Slot 1 — downloading to: /Users/osminkin/Desktop/🚀 Antigravity Projects/Higsvild antigravity/output/temp/gen_1.jpg
+[engine] Extracted job_id: 22222222-2222-2222-2222-773937434212
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould not start new slots after soft pause hits
+[22m[39m[engine] API response keys: undefined (no rawUrl found)
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould not start new slots after soft pause hits
+[22m[39m[engine] Node fetch failed: HTTP 404
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould not start new slots after soft pause hits
+[22m[39m[engine] Node fetch failed: HTTP 404
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould not start new slots after soft pause hits
+[22m[39m[engine] ✅ Downloaded: gen_1.jpg (49KB) via browser
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould not start new slots after soft pause hits
+[22m[39m[engine] ✓ Validation passed: 1465KB, format=jpeg, quality=acceptable
+[engine] ✅ SLOT 1 — SAVED (1465KB, acceptable)
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould not start new slots after soft pause hits
+[22m[39m
+[engine] ═══ SLOT 2/4 — starting ═══
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould not start new slots after soft pause hits
+[22m[39m[engine] Model verified via title: "Nano Banana Pro" ✓
+[engine] ✅ Active model confirmed: Nano Banana Pro (nano_banana_2)
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould not start new slots after soft pause hits
+[22m[39m[engine] 🔍 isExtraFreeGensOn: state=undefined, strategy=undefined
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould not start new slots after soft pause hits
+[22m[39m[engine] ┌─── PRE-SLOT 2 (attempt 1) ────────────────────────
+[engine] │ batch       : 1/4
+[engine] │ extra_free  : OFF ✅
+[engine] │ unlimited   : ON ✅
+[engine] │ queued_now  : 0
+[engine] │ prompt_field: ""
+[engine] │ expected_pr : "test prompt"
+[engine] │ field_match : ⚠️ NO MATCH
+[engine] └──────────────────────────────────────────────────────
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould not start new slots after soft pause hits
+[22m[39m[engine] 📊 Slot 2 pre-click: feedCount=1, fingerprints=1 (ALL), exclude=0
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould not start new slots after soft pause hits
+[22m[39m[engine] ✅ Generate clicked (via true)
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould not start new slots after soft pause hits
+[22m[39m[engine] ✅ Slot 2 — Generate clicked
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould not start new slots after soft pause hits
+[22m[39m[engine] 📡 POST-CLICK (2s): inFlight=0 (Q=0 G=0), feed=2 (was 1), topUUID=22222222-2222-2222-2222-773937434437, isForbidden=false
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould not start new slots after soft pause hits
+[22m[39m[engine] ✅ Image 2 ready via UUID detection (0s, feedCount: 1→2, queued=0, uuid=22222222-2222-2222-2222-773937434437): https://higgsfield.ai/test-22222222-2222-2222-2222-773937434437-min.webp...
+[engine] ✅ Exit reason: uuid_detected (top url)
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould not start new slots after soft pause hits
+[22m[39m[engine] ✅ Slot 2 image URL acquired
+[engine]    URL     : https://higgsfield.ai/test-22222222-2222-2222-2222-773937434437-min.webp
+[engine]    UUID    : 22222222-2222-2222-2222-773937434437
+[engine]    excluded: no ✅
+[engine] 💾 Slot 2 — downloading to: /Users/osminkin/Desktop/🚀 Antigravity Projects/Higsvild antigravity/output/temp/gen_2.jpg
+[engine] Extracted job_id: 22222222-2222-2222-2222-773937434437
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould not start new slots after soft pause hits
+[22m[39m[engine] API response keys: undefined (no rawUrl found)
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould not start new slots after soft pause hits
+[22m[39m[engine] Node fetch failed: HTTP 404
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould not start new slots after soft pause hits
+[22m[39m[engine] Node fetch failed: HTTP 404
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould not start new slots after soft pause hits
+[22m[39m[engine] ✅ Downloaded: gen_2.jpg (49KB) via browser
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould not start new slots after soft pause hits
+[22m[39m[engine] ✓ Validation passed: 1465KB, format=jpeg, quality=acceptable
+[engine] ✅ SLOT 2 — SAVED (1465KB, acceptable)
+[engine] ⏸ pauseGeneration() called — soft pause requested
+
+[90mstdout[2m | tests/engine-queue.test.js[2m > [22m[2mEngine Slot Sequence & Backfill[2m > [22m[2mshould not start new slots after soft pause hits
+[22m[39m[engine] ⚠️ Skip remaining slots, assigning state: paused
+[engine] ⏭ Пропуск оставшихся слотов (paused)
+
+[engine] ═══ SUMMARY: 2 saved, 0 failed, 2 paused, 0 cancelled out of 4 → promptStatus=paused ═══
+
+ [32m✓[39m tests/engine-queue.test.js [2m([22m[2m3 tests[22m[2m)[22m[33m 3899[2mms[22m[39m
+     [33m[2m✓[22m[39m should skip already saved slots (Backfill logic) without firing generate clicks [33m 847[2mms[22m[39m
+     [33m[2m✓[22m[39m should process slots strictly sequentially with precise event ordering [33m 1375[2mms[22m[39m
+     [33m[2m✓[22m[39m should not start new slots after soft pause hits [33m 1674[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m7 passed[39m[22m[90m (7)[39m
+[2m      Tests [22m [1m[32m51 passed[39m[22m[90m (51)[39m
+[2m   Start at [22m 19:23:51
+[2m   Duration [22m 4.43s[2m (transform 452ms, setup 0ms, import 967ms, tests 5.23s, environment 815ms)[22m
+
+
+> mews@1.0.1 test:smoke
+> node tests/smoke-persistence.js
+
+
+▶ Test 1: config.json session round-trip
+  ✅ lastActiveProjectId persisted
+  ✅ lastScreen persisted
+  ✅ lastImagesPerPrompt persisted
+  ✅ isFirstLaunch persisted
+
+▶ Test 2: project.json selections round-trip
+  ✅ selections count = 4
+  ✅ selection prompt 0 = image 2
+  ✅ selection prompt 14 = image 3
+  ✅ selectionCurrentPrompt = 14
+  ✅ selectedModel persisted
+  ✅ selectedQuality persisted
+  ✅ selectedRatio persisted
+  ✅ imagesPerPrompt persisted
+  ✅ lastScreen persisted in project
+
+▶ Test 3: meta.json selected field round-trip
+  ✅ meta.json selected field persisted
+  ✅ meta.json files array length
+
+▶ Test 4: Large selections (50 prompts)
+  ✅ 50 selections survived round-trip
+  ✅ currentPrompt 49 survived
+  ✅ All 50 selection values match exactly
+
+▶ Test 5: Rapid config writes
+  ✅ Last rapid write wins
+  ✅ Final imagesPerPrompt = 20
+
+══════════════════════════════════════════════════
+🎉 All 20 smoke tests passed!

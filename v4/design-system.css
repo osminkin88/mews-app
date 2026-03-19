@@ -1175,11 +1175,27 @@ input:focus-visible {
   transform: scale(0.995);
 }
 
-.pc-icon {
+.pc-cover-wrap {
   width: 48px;
   height: 48px;
   border-radius: 12px;
   background: var(--bg-float);
+  overflow: hidden;
+  position: relative;
+  flex-shrink: 0;
+}
+
+.pc-cover {
+  width: 100%;
+  height: 100%;
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+}
+
+.pc-icon {
+  width: 100%;
+  height: 100%;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1197,19 +1213,52 @@ input:focus-visible {
   font-size: 15px;
   font-weight: 700;
   letter-spacing: -0.2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.pc-sub {
+.pc-active-set {
   font-size: 11px;
   color: var(--text-tertiary);
   margin-top: 2px;
 }
 
-.pc-pipeline {
+.pc-stats-row {
   display: flex;
   align-items: center;
-  gap: 4px;
-  margin-top: 8px;
+  gap: 6px;
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+.pc-stat {
+  display: inline-flex;
+  align-items: center;
+}
+
+.pc-stat-sep {
+  opacity: 0.3;
+}
+
+@keyframes pulseDot {
+  0% { transform: scale(0.85); opacity: 0.5; }
+  50% { transform: scale(1); opacity: 1; }
+  100% { transform: scale(0.85); opacity: 0.5; }
+}
+
+.status-pulse {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background-color: currentColor;
+  margin-right: 6px;
+  animation: pulseDot 2s ease-in-out infinite;
+  vertical-align: middle;
+  position: relative;
+  top: -1px;
 }
 
 .pc-right {
@@ -1222,6 +1271,7 @@ input:focus-visible {
 .pc-date {
   font-size: 10px;
   color: var(--text-tertiary);
+  transition: opacity 0.2s ease;
 }
 
 /* ── PIPELINE BADGES (Projects) ── */
@@ -1280,7 +1330,93 @@ input:focus-visible {
 }
 
 .project-card:hover {
-  padding-right: 42px;
+  padding-right: 190px;
+}
+
+.project-card:hover .pc-date {
+  opacity: 0.5;
+}
+
+.pc-quick-actions {
+  position: absolute;
+  right: 48px;
+  top: 50%;
+  transform: translateY(-50%) translateX(10px);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  opacity: 0;
+  pointer-events: none;
+  transition: all 0.2s ease;
+  z-index: 10;
+}
+
+.project-card:hover .pc-quick-actions {
+  opacity: 1;
+  transform: translateY(-50%) translateX(0);
+  pointer-events: auto;
+}
+
+.pc-qa-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-float);
+  border: 1px solid var(--border-2);
+  border-radius: 6px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15);
+}
+
+.pc-qa-btn:hover {
+  background: #48484A;
+  color: var(--text-primary);
+  border-color: var(--text-tertiary);
+}
+
+.pc-qa-btn:active {
+  transform: scale(0.96);
+}
+
+.pc-qa-primary {
+  padding: 0 12px;
+  height: 28px;
+  gap: 6px;
+  font-family: var(--font);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--bg);
+  background: var(--text-primary);
+  border: none;
+}
+
+.pc-qa-primary:hover {
+  background: white;
+  color: var(--bg);
+}
+
+.pc-qa-primary svg {
+  width: 12px;
+  height: 12px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 2.5;
+}
+
+.pc-qa-icon {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+}
+
+.pc-qa-icon svg {
+  width: 14px;
+  height: 14px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 2;
 }
 
 .pc-info {

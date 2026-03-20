@@ -52,12 +52,31 @@ const { getUnlimitedModelList, resolveCompatibleSettings } = require('./model-ca
 // ── Constants ────────────────────────────────────────────────
 const IS_DEV = !app.isPackaged;
 const APP_NAME = 'Mews';
+
+// Supported image extensions (ordered by preference: most common first)
+const IMAGE_EXTENSIONS = ['.jpg', '.png', '.webp'];
 const WINDOW_CONFIG = {
   width: 1440,
   height: 900,
   minWidth: 1024,
   minHeight: 700,
 };
+
+/**
+ * Find a slot image file in a prompt directory, checking all supported formats.
+ * Returns { filePath, ext, mime } or null if not found.
+ */
+function findSlotFile(dir, slotIndex) {
+  for (const ext of IMAGE_EXTENSIONS) {
+    const fp = path.join(dir, `gen_${slotIndex}${ext}`);
+    if (fs.existsSync(fp)) {
+      const mimeExt = ext.slice(1); // remove dot
+      const mime = mimeExt === 'jpg' ? 'image/jpeg' : `image/${mimeExt}`;
+      return { filePath: fp, ext: mimeExt, mime };
+    }
+  }
+  return null;
+}
 // OUTPUT_DIR is now managed by config-manager
 function getOutputDir() {
   return config.getOutputDir();
@@ -685,10 +704,10 @@ ipcMain.handle('generate:start', async (event, { prompts, settings, projectId })
             if (progress.step === 'saved' && progress.savedSlot && !progress._backfillSkipped) {
               try {
                 await new Promise(r => setTimeout(r, 300));
-                const filePath = path.join(promptDir, `gen_${progress.savedSlot}.jpg`);
-                if (fs.existsSync(filePath)) {
-                  const data = await fs.promises.readFile(filePath);
-                  enriched.previewDataUrl = `data:image/jpeg;base64,${data.toString('base64')}`;
+                const found = findSlotFile(promptDir, progress.savedSlot);
+                if (found) {
+                  const data = await fs.promises.readFile(found.filePath);
+                  enriched.previewDataUrl = `data:${found.mime};base64,${data.toString('base64')}`;
                   enriched.promptIndex = uiRunIndex;
                   enriched.slotIndex = progress.savedSlot;
                 }
@@ -926,17 +945,15 @@ ipcMain.handle('generate:start', async (event, { prompts, settings, projectId })
             try {
               // Small delay to ensure file is fully flushed to disk
               await new Promise(r => setTimeout(r, 300));
-              let filePath = path.join(promptDir, `gen_${progress.savedSlot}.jpg`);
-              // Fallback: try .webp if .jpg doesn't exist
-              if (!require('fs').existsSync(filePath)) {
-                const altPath = path.join(promptDir, `gen_${progress.savedSlot}.webp`);
-                if (require('fs').existsSync(altPath)) filePath = altPath;
+              const found = findSlotFile(promptDir, progress.savedSlot);
+              if (found) {
+                const data = await fs.promises.readFile(found.filePath);
+                enriched.previewDataUrl = `data:${found.mime};base64,${data.toString('base64')}`;
+                enriched.promptIndex = uiRunIndex;
+                enriched.slotIndex = progress.savedSlot;
+              } else {
+                throw new Error(`Slot file not found: gen_${progress.savedSlot}.*`);
               }
-              const data = await fs.promises.readFile(filePath);
-              const ext = path.extname(filePath).slice(1) || 'jpeg';
-              enriched.previewDataUrl = `data:image/${ext};base64,${data.toString('base64')}`;
-              enriched.promptIndex = uiRunIndex;
-              enriched.slotIndex = progress.savedSlot;
             } catch (e) {
               // File may not exist yet — non-fatal, progress.js will show placeholder
               console.warn('[main] Preview read error (tile will show placeholder):', e.message);
@@ -949,14 +966,9 @@ ipcMain.handle('generate:start', async (event, { prompts, settings, projectId })
               const retryRunIndex = uiRunIndex; // absolute prompt index for correct UI mapping
               setTimeout(async () => {
                 try {
-                  let fp = path.join(retryPromptDir, `gen_${retrySlot}.jpg`);
-                  if (!require('fs').existsSync(fp)) {
-                    const alt = path.join(retryPromptDir, `gen_${retrySlot}.webp`);
-                    if (require('fs').existsSync(alt)) fp = alt;
-                  }
-                  if (require('fs').existsSync(fp)) {
-                    const d = await fs.promises.readFile(fp);
-                    const ext = path.extname(fp).slice(1) || 'jpeg';
+                  const retryFound = findSlotFile(retryPromptDir, retrySlot);
+                  if (retryFound) {
+                    const d = await fs.promises.readFile(retryFound.filePath);
                     sendToRenderer('generate:progress', {
                       step: 'saved',
                       promptCurrent: uiRunIndex,
@@ -964,7 +976,7 @@ ipcMain.handle('generate:start', async (event, { prompts, settings, projectId })
                       promptIndex: uiRunIndex,
                       slotIndex: retrySlot,
                       savedSlot: retrySlot,
-                      previewDataUrl: `data:image/${ext};base64,${d.toString('base64')}`,
+                      previewDataUrl: `data:${retryFound.mime};base64,${d.toString('base64')}`,
                       _retryUpgrade: true, // marker so progress.js doesn't duplicate log/progress
                     });
                     console.log(`[main] ✅ Deferred preview retry succeeded for slot ${retrySlot}`);
@@ -1144,13 +1156,60 @@ ipcMain.handle('generate:start', async (event, { prompts, settings, projectId })
 
       console.error(`[main] Prompt ${uiRunIndex} FAILED [fatal=${isFatal}, reason=${reason}]: ${err.message}`);
 
+      // ── Recover slot data: prefer most complete source ──
+      // Priority: 1) imageResults from error  2) disk meta  3) empty fallback
+      let recoveredSlots = [];
+      let recoveredSource = 'none';
+
+      // Source 1: Engine attached imageResults to the error (Fix 1)
+      if (err.imageResults && err.imageResults.length > 0) {
+        recoveredSlots = err.imageResults.map(img => ({
+          slot: img.index,
+          state: img.state,
+          file: img.file || null,
+          attempts: img.attempts || 1,
+          errorReason: img.errorReason || null,
+          size: img.size || null,
+        }));
+        recoveredSource = 'error_object';
+      }
+
+      // Source 2: Intermediate meta on disk (engine writes it after every slot)
+      if (recoveredSlots.length === 0) {
+        try {
+          const diskMeta = JSON.parse(fs.readFileSync(path.join(promptDir, 'meta.json'), 'utf8'));
+          const diskImages = diskMeta.images || diskMeta.slots || [];
+          if (diskImages.length > 0) {
+            recoveredSlots = diskImages.map(r => ({
+              slot: r.index || r.slot,
+              state: r.state,
+              file: r.file || null,
+              attempts: r.attempts || 0,
+              errorReason: r.errorReason || null,
+              size: r.size || null,
+            }));
+            recoveredSource = 'disk_meta';
+          }
+        } catch {}
+      }
+
+      const recoveredSaved = recoveredSlots.filter(s => s.state === 'saved').length;
+      const recoveredFailed = recoveredSlots.filter(s => s.state === 'failed').length;
+      const recoveredFiles = recoveredSlots.filter(s => s.state === 'saved' && s.file).map(s => s.file);
+
+      console.log(`[main] 🔧 Slot recovery: source=${recoveredSource}, slots=${recoveredSlots.length}, saved=${recoveredSaved}, failed=${recoveredFailed}`);
+
       meta.status = 'error';
       meta.error = err.message;
       meta.error_reason = reason;
+      meta.slots = recoveredSlots;
+      meta.saved_count = recoveredSaved;
+      meta.failed_count = recoveredFailed;
+      meta.files = recoveredFiles;
       meta.timestamps.completed = new Date().toISOString();
       saveMeta(promptDir, meta);
 
-      results.push({ idx: folderIndex, id: prompt.id, status: 'error', error: err.message, errorReason: reason });
+      results.push({ idx: folderIndex, id: prompt.id, status: 'error', error: err.message, errorReason: reason, slots: recoveredSlots });
 
       console.log(`[main] ┌── RESULT PROMPT ${uiRunIndex} ─────────────────────────`);
       console.log(`[main] │ status: ERROR [${reason}]`);
@@ -1850,6 +1909,64 @@ ipcMain.handle('projects:load-prompts', (event, { projectId }) => {
     selections: activeSet?.selections || {},
     selectionCurrentPrompt: activeSet?.selectionCurrentPrompt || 0,
   };
+});
+
+// ── Get prompt statuses for selective run UI ──
+ipcMain.handle('projects:getPromptStatuses', (event, { projectId }) => {
+  const projects = loadProjects();
+  const project = projects.find(p => p.id === projectId);
+  if (!project) return { success: false, statuses: [] };
+
+  const activeSet = getActiveSet(project);
+  if (!activeSet || !activeSet.prompts) return { success: true, statuses: [] };
+
+  const baseOutputDir = (() => {
+    if (activeSet) {
+      return path.join(getSetDir(project, activeSet.id), 'generated');
+    }
+    return path.join(config.ensureOutputDir(), project.folderName || project.id, 'generated');
+  })();
+
+  const statuses = activeSet.prompts.map((prompt, i) => {
+    const absIdx = prompt.originalIndex !== undefined ? prompt.originalIndex : i;
+    const folderPath = path.join(baseOutputDir, String(absIdx + 1).padStart(3, '0'));
+    const metaPath = path.join(folderPath, 'meta.json');
+
+    let status = 'pending'; // no generation yet
+    let hasSelection = false;
+
+    try {
+      if (fs.existsSync(metaPath)) {
+        const meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+        const s = meta.status;
+        if (s === 'done') status = 'done';
+        else if (s === 'partial' || s === 'partial_desync' || s === 'paused' || s === 'backfilling') status = 'partial';
+        else if (s === 'error' || s === 'cancelled') status = 'error';
+        else if (s === 'in_progress' || s === 'generating' || s === 'preparing') status = 'in_progress';
+
+        // Check if this prompt has a selection
+        hasSelection = !!(meta.selected);
+      }
+    } catch {}
+
+    // Also check selections stored in the set itself
+    if (!hasSelection && activeSet.selections) {
+      const selKey = String(i);
+      if (activeSet.selections[selKey] !== undefined && activeSet.selections[selKey] !== null) {
+        hasSelection = true;
+      }
+    }
+
+    return {
+      index: i,
+      originalIndex: absIdx,
+      status,
+      hasSelection,
+      promptPreview: (prompt.prompt || '').substring(0, 80),
+    };
+  });
+
+  return { success: true, statuses };
 });
 
 // ── Switch active prompt set ──

@@ -1258,8 +1258,16 @@ export default {
     const project = state.currentProject;
     if (project) {
       const projs = await api.projects.loadPrompts(project.id);
-      const prompts = projs?.prompts || [];
+      const allPrompts = projs?.prompts || [];
       const cfg = await api.config.getAll() || {};
+
+      // ── Selective run: filter prompts if user selected a subset ──
+      const sel = state.selectedPromptIndices; // null = all, Array<number> = 0-based indices
+      const prompts = sel
+        ? allPrompts.filter((_, i) => sel.includes(i))
+        : allPrompts;
+      // Consume selection flag so re-mount doesn't re-apply stale filter
+      state.selectedPromptIndices = null;
 
       if (prompts.length > 0) {
         isRunning = true;

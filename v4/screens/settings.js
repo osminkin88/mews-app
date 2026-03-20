@@ -3,6 +3,11 @@ import { api, navigate, state, showToast } from '../app.js';
 
 let container = null;
 
+// Module-level selection state (survives re-renders within same mount)
+let selectedIndices = null;          // null = all, Set<number> = selected 0-based indices
+let promptStatuses = [];             // [{index, status, hasSelection, promptPreview}]
+let selectSectionOpen = false;       // collapse state
+
 async function render() {
   const project = state.currentProject;
   const cfg = await api.config.getAll() || {};
@@ -12,6 +17,16 @@ async function render() {
   const activeSetId = loadResult?.activePromptSetId || null;
   const sourceMeta = loadResult?.sourceMeta || null;
   const promptCount = prompts.length;
+
+  // ── Fetch prompt statuses for selective run UI ──
+  if (project && promptCount > 0) {
+    try {
+      const statusResult = await api.projects.getPromptStatuses(project.id);
+      promptStatuses = statusResult?.statuses || [];
+    } catch { promptStatuses = []; }
+  } else {
+    promptStatuses = [];
+  }
 
   const activeSet = promptSets.find(s => s.id === activeSetId) || null;
   const activeSetHasProgress = activeSet && activeSet.status && activeSet.status !== 'draft';
@@ -35,7 +50,9 @@ async function render() {
     aspect = caps.defaultAspect || caps.aspects[0] || '1:1';
   }
 
-  const totalImages = promptCount * imagesCount;
+  // ── Compute selected prompt count ──
+  const selectedCount = selectedIndices ? selectedIndices.size : promptCount;
+  const totalImages = selectedCount * imagesCount;
 
   // Build Iteration History HTML
   let setChipsHTML = '';
@@ -206,6 +223,62 @@ async function render() {
             `}
           </div>
 
+          <!-- Selective Prompt Run -->
+          ${promptCount > 0 ? (() => {
+            // Summary text for collapsed state
+            const summaryText = selectedIndices
+              ? `Выбрано ${selectedCount} из ${promptCount}`
+              : `Все ${promptCount} промптов`;
+
+            // Quick filter chip counts
+            const pendingCount = promptStatuses.filter(s => s.status === 'pending').length;
+            const errorCount = promptStatuses.filter(s => s.status === 'error' || s.status === 'partial').length;
+            const noSelectionCount = promptStatuses.filter(s => s.status === 'done' && !s.hasSelection).length;
+
+            // Build checkbox rows
+            const checkboxRows = promptStatuses.map(s => {
+              const checked = selectedIndices ? selectedIndices.has(s.index) : true;
+              const statusDot = s.status === 'done' ? '<span style="color:var(--green);font-size:9px">●</span>'
+                : s.status === 'error' || s.status === 'partial' ? '<span style="color:var(--red);font-size:9px">●</span>'
+                : s.status === 'in_progress' ? '<span style="color:var(--orange);font-size:9px">●</span>'
+                : '<span style="color:var(--text-tertiary);font-size:9px">○</span>';
+              const dimmed = s.status === 'done' && (selectedIndices ? !selectedIndices.has(s.index) : false) ? 'opacity:0.45;' : '';
+              return `<label class="sp-row" style="${dimmed}" data-idx="${s.index}">
+                <input type="checkbox" class="sp-check" data-idx="${s.index}" ${checked ? 'checked' : ''} />
+                <span class="sp-num">${s.index + 1}</span>
+                ${statusDot}
+                <span class="sp-text">${s.promptPreview || '—'}</span>
+              </label>`;
+            }).join('');
+
+            return `
+            <div class="sp-section" style="margin-top:20px;border-top:1px solid var(--border);padding-top:16px;">
+              <button id="sp-toggle" class="sp-toggle">
+                <svg id="sp-toggle-icon" viewBox="0 0 24 24" style="width:13px;height:13px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;transition:transform 0.2s;${selectSectionOpen ? 'transform:rotate(90deg)' : ''}"><polyline points="9 18 15 12 9 6"></polyline></svg>
+                <span class="sp-toggle-label">${summaryText}</span>
+                ${selectedIndices ? '<span class="sp-toggle-reset" id="sp-reset">Сбросить</span>' : ''}
+              </button>
+              <div id="sp-body" style="display:${selectSectionOpen ? 'block' : 'none'};margin-top:12px;">
+                <div class="sp-filters">
+                  <button class="sp-chip ${!selectedIndices ? 'sp-chip-active' : ''}" data-filter="all">Все</button>
+                  ${pendingCount > 0 ? `<button class="sp-chip" data-filter="pending">Без генераций <span class="sp-chip-count">${pendingCount}</span></button>` : ''}
+                  ${errorCount > 0 ? `<button class="sp-chip" data-filter="errors">Ошибки <span class="sp-chip-count">${errorCount}</span></button>` : ''}
+                  ${noSelectionCount > 0 ? `<button class="sp-chip" data-filter="no-final">Без финала <span class="sp-chip-count">${noSelectionCount}</span></button>` : ''}
+                </div>
+                <div class="sp-list-header">
+                  <label class="sp-select-all">
+                    <input type="checkbox" id="sp-check-all" ${!selectedIndices || selectedCount === promptCount ? 'checked' : ''} />
+                    <span>Выбрать все</span>
+                  </label>
+                  <span class="sp-list-count" id="sp-selected-count">${summaryText}</span>
+                </div>
+                <div class="sp-list" id="sp-list">
+                  ${checkboxRows}
+                </div>
+              </div>
+            </div>`;
+          })() : ''}
+
           <!-- Model + Quality -->
           <div class="field-row">
             <div class="field-col">
@@ -260,7 +333,7 @@ async function render() {
         <!-- Launch -->
         <div class="settings-footer">
           <div class="summary-row">
-            <div class="summary-col"><div class="summary-value">${promptCount}</div><div class="summary-label">промптов</div></div>
+            <div class="summary-col"><div class="summary-value">${selectedCount}</div><div class="summary-label">${selectedIndices ? `из ${promptCount}` : 'промптов'}</div></div>
             <div class="summary-col"><div class="summary-value">×${imagesCount}</div><div class="summary-label">вариантов</div></div>
             <div class="summary-col"><div class="summary-value" style="color:var(--accent)">${totalImages}</div><div class="summary-label">всего</div></div>
           </div>
@@ -279,23 +352,23 @@ async function render() {
             return `<div class="settings-conn-hint" data-nav="connection">
               <span class="sch-dot"></span>
               <span class="sch-msg">${msg}</span>
-              <span class="sch-link">Подключить →</span>
+              <span class="sch-link">Подключить →</span>
             </div>`;
           })()}
           ${activeSetHasProgress ? `
             <div style="display:flex;gap:12px;width:100%">
-              <button id="btn-launch" class="btn-launch" style="flex:1" ${promptCount === 0 ? 'disabled' : ''}>
+              <button id="btn-launch" class="btn-launch" style="flex:1" ${selectedCount === 0 ? 'disabled' : ''}>
                 <svg viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-                Продолжить генерацию
+                ${selectedIndices ? `Запустить ${selectedCount} промптов` : 'Продолжить генерацию'}
               </button>
-              <button id="btn-restart" class="btn-launch" style="flex:0.6;background:var(--bg-elevated);color:var(--text-secondary);border:1px solid var(--border-2)" ${promptCount === 0 ? 'disabled' : ''}>
+              <button id="btn-restart" class="btn-launch" style="flex:0.6;background:var(--bg-elevated);color:var(--text-secondary);border:1px solid var(--border-2)" ${selectedCount === 0 ? 'disabled' : ''}>
                 ↺ Начать заново
               </button>
             </div>
           ` : `
-            <button id="btn-launch" class="btn-launch" ${promptCount === 0 ? 'disabled' : ''}>
+            <button id="btn-launch" class="btn-launch" ${selectedCount === 0 ? 'disabled' : ''}>
               <svg viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-              Запустить генерацию
+              ${selectedIndices ? `Запустить ${selectedCount} промптов` : 'Запустить генерацию'}
             </button>
           `}
         </div>
@@ -317,6 +390,9 @@ async function render() {
     const importedPrompts = result.rows || result.prompts;
     if (result.success && importedPrompts && project) {
       await api.projects.savePrompts(project.id, importedPrompts, filePath);
+      // Reset selection on new file import
+      selectedIndices = null;
+      state.selectedPromptIndices = null;
       // Reload project to get updated promptSets
       const projects = await api.projects.list();
       const updatedProject = projects.find(p => p.id === project.id);
@@ -344,6 +420,79 @@ async function render() {
     }
   };
   container.querySelector('#btn-download-template')?.addEventListener('click', downloadTemplate);
+
+  // ── Selective Prompt Picker events ──
+  // Toggle expand/collapse
+  container.querySelector('#sp-toggle')?.addEventListener('click', (e) => {
+    // Don't toggle if clicking reset button
+    if (e.target.closest('#sp-reset')) return;
+    selectSectionOpen = !selectSectionOpen;
+    const body = container.querySelector('#sp-body');
+    const icon = container.querySelector('#sp-toggle-icon');
+    if (body) body.style.display = selectSectionOpen ? 'block' : 'none';
+    if (icon) icon.style.transform = selectSectionOpen ? 'rotate(90deg)' : '';
+  });
+
+  // Reset selection
+  container.querySelector('#sp-reset')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    selectedIndices = null;
+    state.selectedPromptIndices = null;
+    render();
+  });
+
+  // Quick filter chips
+  container.querySelectorAll('.sp-chip').forEach(chip => {
+    chip.addEventListener('click', () => {
+      const filter = chip.dataset.filter;
+      if (filter === 'all') {
+        selectedIndices = null;
+      } else {
+        const indices = new Set();
+        promptStatuses.forEach(s => {
+          if (filter === 'pending' && s.status === 'pending') indices.add(s.index);
+          if (filter === 'errors' && (s.status === 'error' || s.status === 'partial')) indices.add(s.index);
+          if (filter === 'no-final' && s.status === 'done' && !s.hasSelection) indices.add(s.index);
+        });
+        selectedIndices = indices.size > 0 ? indices : null;
+      }
+      state.selectedPromptIndices = selectedIndices ? [...selectedIndices] : null;
+      render();
+    });
+  });
+
+  // Individual checkboxes
+  container.querySelectorAll('.sp-check').forEach(cb => {
+    cb.addEventListener('change', () => {
+      const idx = parseInt(cb.dataset.idx);
+      // Initialize from current state if needed
+      if (!selectedIndices) {
+        selectedIndices = new Set(promptStatuses.map(s => s.index));
+      }
+      if (cb.checked) {
+        selectedIndices.add(idx);
+      } else {
+        selectedIndices.delete(idx);
+      }
+      // If all selected, reset to null (= all)
+      if (selectedIndices.size === promptStatuses.length) {
+        selectedIndices = null;
+      }
+      state.selectedPromptIndices = selectedIndices ? [...selectedIndices] : null;
+      render();
+    });
+  });
+
+  // Select all checkbox
+  container.querySelector('#sp-check-all')?.addEventListener('change', (e) => {
+    if (e.target.checked) {
+      selectedIndices = null;
+    } else {
+      selectedIndices = new Set(); // empty = nothing selected
+    }
+    state.selectedPromptIndices = selectedIndices ? [...selectedIndices] : null;
+    render();
+  });
 
   // Switch Set
   container.querySelectorAll('.history-btn-switch').forEach(btn => {
@@ -646,6 +795,7 @@ async function render() {
     }
 
     state.generationRequested = true;
+    state.selectedPromptIndices = selectedIndices ? [...selectedIndices] : null;
     navigate('progress');
   };
 

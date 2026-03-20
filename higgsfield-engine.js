@@ -23,6 +23,10 @@ const POLL_INTERVAL = 3000;         // 3s polling
 const DEFAULT_MODEL = 'nano_banana_pro';
 const PREFLIGHT_STEP_TIMEOUT = 15000; // 15s — max time for any single preflight step
 
+// ── Image format → file extension mapping ────────────────────
+// Used after validateDownload() to rename .tmp → correct extension
+const FORMAT_EXT_MAP = { jpeg: '.jpg', png: '.png', webp: '.webp' };
+
 // ── Timeout wrapper ──
 function withTimeout(promise, ms, label) {
   return Promise.race([
@@ -371,8 +375,8 @@ async function generatePrompt(prompt, options = {}) {
           // ═══ DOWNLOAD ═══
           img.state = 'downloading';
           const destPath = outputDir
-            ? path.join(outputDir, `gen_${img.index}.jpg`)
-            : path.join(__dirname, 'output', 'temp', `gen_${img.index}.jpg`);
+            ? path.join(outputDir, `gen_${img.index}.tmp`)
+            : path.join(__dirname, 'output', 'temp', `gen_${img.index}.tmp`);
           console.log(`[engine] 💾 Slot ${img.index} — downloading to: ${destPath}`);
           onProgress({ step: 'downloading', message: `Слот ${img.index}/${imagesCount}: скачиваю...`, state: 'downloading' });
 
@@ -405,9 +409,24 @@ async function generatePrompt(prompt, options = {}) {
             }
           }
 
+          // ═══ RENAME .tmp → real extension ═══
+          let realExt = FORMAT_EXT_MAP[validation.format] || '.jpg';
+          const finalPath = destPath.replace(/\.tmp$/, realExt);
+          if (finalPath !== destPath) {
+            try {
+              fs.renameSync(destPath, finalPath);
+              console.log(`[engine] 📝 Renamed: ${path.basename(destPath)} → ${path.basename(finalPath)}`);
+            } catch (renameErr) {
+              // Graceful fallback: if rename fails (mock FS, race condition),
+              // keep the .jpg extension for metadata but log the issue
+              console.warn(`[engine] ⚠️ Rename failed (${renameErr.code || renameErr.message}), using .jpg fallback`);
+              realExt = '.jpg';
+            }
+          }
+
           // ═══ SAVED ✅ ═══
           img.state = 'saved';
-          img.file = `gen_${img.index}.jpg`;
+          img.file = `gen_${img.index}${realExt}`;
           img.size = validation.size;
           img.quality = validation.quality;
           slotSucceeded = true;
@@ -603,7 +622,11 @@ async function generatePrompt(prompt, options = {}) {
     console.log(`\n[engine] ═══ SUMMARY: ${savedCount} saved, ${failedCount} failed, ${pausedCount} paused, ${cancelledCount} cancelled out of ${imagesCount} → promptStatus=${promptStatus} ═══`);
 
     if (savedCount === 0 && !shouldPause && !shouldCancel) {
-      throw new Error(`Ни одного изображения не сохранено (${failedCount} failed)`);
+      const zeroSavedErr = new Error(`Ни одного изображения не сохранено (${failedCount} failed)`);
+      zeroSavedErr.errorReason = 'all_slots_failed';
+      zeroSavedErr.imageResults = imageResults;
+      zeroSavedErr.promptStatus = promptStatus;
+      throw zeroSavedErr;
     }
 
     onProgress({
@@ -2819,7 +2842,7 @@ function saveIntermediateMeta(outputDir, prompt, model, aspect, quality, imageRe
     status: 'in_progress',
     total: totalImages || 4,
     savedCount: imageResults.filter(r => r.state === 'saved').length,
-    errorCount: imageResults.filter(r => r.state === 'error').length,
+    errorCount: imageResults.filter(r => r.state === 'failed' || r.state === 'error').length,
     images: imageResults.map(r => ({
       index: r.index,
       state: r.state,

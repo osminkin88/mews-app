@@ -47,6 +47,7 @@ const state = {
   selections: {},
   selectionCurrentPrompt: 0,
   generationRequested: false, // Set by settings launch, consumed by progress mount
+  selectedPromptIndices: null, // null = all prompts, Array<number> = selected 0-based indices
 };
 
 // ── Event Bus ──

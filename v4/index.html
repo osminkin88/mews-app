@@ -32,8 +32,19 @@
   <!-- Topbar -->
   <div class="topbar">
     <div class="topbar-traffic-spacer"></div>
-    <div class="topbar-brand">Mews</div>
-    <span class="topbar-brand-sep">·</span>
+    <div class="topbar-brand-block">
+      <svg class="topbar-brand-mark" viewBox="0 0 18 14" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M1 13 L5.5 3 L9 9 L12.5 3 L17 13" stroke="url(#tb-grad)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        <defs>
+          <linearGradient id="tb-grad" x1="1" y1="3" x2="17" y2="13" gradientUnits="userSpaceOnUse">
+            <stop stop-color="#0A84FF"/>
+            <stop offset="1" stop-color="#6366F1"/>
+          </linearGradient>
+        </defs>
+      </svg>
+      <span class="topbar-brand-word">Mews</span>
+    </div>
+    <div class="topbar-brand-divider"></div>
     <div id="topbar-nav" class="topbar-nav"></div>
     <div class="topbar-spacer"></div>
     <span id="topbar-step" class="topbar-step topbar-step-blue" style="display:none"></span>

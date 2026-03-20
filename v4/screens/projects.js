@@ -141,26 +141,38 @@ async function render() {
 }
 
 function renderProjectCard(p) {
-  const date = p.createdAt ? new Date(p.createdAt).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' }) : '';
+  const date = p.createdAt ? new Date(p.createdAt).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', year: 'numeric' }) : '';
 
   const activeSet = (p.promptSets || []).find(s => s.id === p.activePromptSetId);
   const pc = activeSet?.promptCount || p.promptCount || 0;
   const setsCount = (p.promptSets || []).length;
-  
+
   const stats = p.stats || { generated: 0, selected: 0 };
-  
-  const coverHtml = p.coverUrl 
-    ? `<div class="pc-cover" style="background-image: url('${p.coverUrl}')"></div>`
-    : `<div class="pc-icon">${getIconSvg(p.icon)}</div>`;
 
-  const activeSetHtml = setsCount > 1 && activeSet ? `<div class="pc-active-set">Сет: ${activeSet.name}</div>` : '';
+  // ── THUMB: cover image or monogram fallback ──
+  const thumbHtml = (() => {
+    if (p.coverUrl) {
+      return `<div class="pc-thumb"><div class="pc-thumb-cover" style="background-image: url('${p.coverUrl}')"></div></div>`;
+    }
+    // Deterministic hue from project id
+    const hue = [...(p.id || 'x')].reduce((h, c) => (h * 31 + c.charCodeAt(0)) & 0xfffff, 0) % 360;
+    const letter = (p.name || '?').charAt(0).toUpperCase();
+    return `<div class="pc-thumb"><div class="pc-thumb-mono" style="background: linear-gradient(135deg, hsl(${hue},45%,28%) 0%, hsl(${(hue+30)%360},40%,22%) 100%)">${letter}</div></div>`;
+  })();
 
+  // ── ACTIVE SET subtitle ──
+  const activeSetHtml = setsCount > 1 && activeSet
+    ? `<div class="pc-active-set">Сет: ${activeSet.name}</div>`
+    : '';
+
+  // ── PRIMARY ACTION ──
   const primaryAction = (() => {
     if (p.status === 'draft') return { label: 'Настроить', icon: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33h.09a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>', action: 'primary-settings' };
     if (p.status === 'in_progress') return { label: 'Смотреть', icon: '<svg viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"/></svg>', action: 'primary-progress' };
-    return { label: 'К результатам', icon: '<svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 21V9"/></svg>', action: 'primary-results' };
+    return { label: 'Результаты', icon: '<svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 21V9"/></svg>', action: 'primary-results' };
   })();
 
+  // ── QUICK ACTIONS ──
   const qaHtml = `
     <div class="pc-quick-actions">
       <button class="pc-qa-btn pc-qa-icon" data-action="folder" data-id="${p.id}" title="Открыть папку">
@@ -180,30 +192,38 @@ function renderProjectCard(p) {
     </div>
   `;
 
+  // ── METRICS (text-only, Variant B) ──
+  const metricsHtml = `
+    <div class="pc-metrics">
+      <span class="pc-metric"><span class="pc-metric-val">${pc}</span> промптов</span>
+      <span class="pc-metric-dot">·</span>
+      <span class="pc-metric"><span class="pc-metric-val">${stats.generated}</span> генераций</span>
+      <span class="pc-metric-dot">·</span>
+      <span class="pc-metric"><span class="pc-metric-val">${stats.selected}</span> финалов</span>
+    </div>
+  `;
+
   return `
     <div class="project-card" data-id="${p.id}">
-      <div class="pc-cover-wrap">${coverHtml}</div>
+      ${thumbHtml}
       <div class="pc-info">
-        <div class="pc-title" data-id="${p.id}">${p.name}</div>
+        <div class="pc-top-row">
+          <div class="pc-title" data-id="${p.id}">${p.name}</div>
+          <div class="pc-status-date">
+            ${renderBadge(p.status)}
+            <span class="pc-date">${date}</span>
+          </div>
+        </div>
         ${activeSetHtml}
-        <div class="pc-stats-row">
-          <span class="pc-stat" title="Промпты">📝 ${pc}</span>
-          <span class="pc-stat-sep">·</span>
-          <span class="pc-stat" title="Сгенерировано">🔄 ${stats.generated}</span>
-          <span class="pc-stat-sep">·</span>
-          <span class="pc-stat" title="Отобрано">✅ ${stats.selected}</span>
+        <div class="pc-bottom-row">
+          ${metricsHtml}
+          ${qaHtml}
         </div>
-      </div>
-      <div class="pc-right">
-        <div class="pc-status-wrap">
-          ${renderBadge(p.status)}
-          <span class="pc-date">${date}</span>
-        </div>
-        ${qaHtml}
       </div>
     </div>
   `;
 }
+
 
 // ════════════════════════════════════════════════
 // Create Project Modal

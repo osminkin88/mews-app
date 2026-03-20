@@ -3724,3 +3724,200 @@ input:focus-visible {
   font-size: 12px;
   color: var(--text-secondary);
 }
+
+/* ══════════════════════════════════════════
+   GOOGLE SHEETS — Source Tabs & Input
+   ══════════════════════════════════════════ */
+
+/* Source type tabs (CSV / Sheets) */
+.source-tab {
+  flex: 1;
+  padding: 10px 14px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text-tertiary);
+  font-family: var(--font);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+  text-align: center;
+}
+
+.source-tab:hover {
+  border-color: var(--text-tertiary);
+  color: var(--text-secondary);
+  background: var(--bg-float);
+}
+
+.source-tab-active,
+.source-tab-active:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+/* Sheets icon in source-file header */
+.sheets-icon {
+  background: rgba(52, 168, 83, 0.12) !important;
+  color: #34A853 !important;
+}
+
+.sheets-source {
+  border-color: rgba(52, 168, 83, 0.2);
+}
+
+/* URL input row */
+.sheets-url-row {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.sheets-url-input {
+  flex: 1;
+  padding: 8px 12px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text-primary);
+  font-family: var(--font);
+  font-size: 12px;
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.sheets-url-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.12);
+}
+
+.sheets-url-input::placeholder {
+  color: var(--text-tertiary);
+  font-size: 11px;
+}
+
+.sheets-check-btn {
+  flex-shrink: 0;
+  padding: 8px 16px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* Error message */
+.sheets-error {
+  padding: 8px 12px;
+  margin-top: 10px;
+  border-radius: var(--r-sm);
+  background: rgba(255, 59, 48, 0.08);
+  border: 1px solid rgba(255, 59, 48, 0.2);
+  color: var(--red, #FF3B30);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.5;
+}
+
+/* Preview card */
+.sheets-preview {
+  margin-top: 12px;
+}
+
+.sheets-preview-card {
+  background: var(--bg-float);
+  border: 1px solid var(--border-2);
+  border-radius: var(--r-md);
+  padding: 14px 16px;
+  animation: liveTileFadeIn 0.2s ease;
+}
+
+.sheets-preview-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.sheets-preview-stat {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.sheets-preview-count {
+  font-size: 18px;
+  font-weight: 800;
+  letter-spacing: -0.5px;
+  color: var(--accent);
+  margin-right: 4px;
+}
+
+.sheets-preview-skipped {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--text-tertiary);
+  margin-left: 6px;
+}
+
+.sheets-preview-col {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  font-weight: 500;
+}
+
+.sheets-preview-col strong {
+  color: var(--text-secondary);
+}
+
+.sheets-preview-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 14px;
+}
+
+.sheets-preview-line {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  padding: 4px 8px;
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sheets-preview-num {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-tertiary);
+  min-width: 16px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+
+/* Sync button */
+.sheets-sync-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 10px 16px;
+  font-size: 13px;
+  font-weight: 700;
+  border-radius: var(--r-sm);
+}
+
+.sheets-sync-btn svg {
+  transition: transform 0.3s ease;
+}
+
+.sheets-sync-btn:hover svg {
+  transform: rotate(180deg);
+}

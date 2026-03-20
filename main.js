@@ -46,6 +46,7 @@ function initForensicLog() {
 const chrome = require('./chrome-manager');
 const engine = require('./higgsfield-engine');
 const { importFile } = require('./file-importer');
+const sheetsImporter = require('./sheets-importer');
 const config = require('./config-manager');
 const { getUnlimitedModelList, resolveCompatibleSettings } = require('./model-capabilities');
 
@@ -2627,3 +2628,104 @@ ipcMain.handle('app:quit', () => {
 // ── Model Capabilities ──────────────────────────────────────
 ipcMain.handle('models:get-unlimited-list', () => getUnlimitedModelList());
 ipcMain.handle('models:resolve-settings', (event, settings) => resolveCompatibleSettings(settings));
+
+// ── Google Sheets Integration ────────────────────────────────
+ipcMain.handle('sheets:validate', (event, { url }) => {
+  return sheetsImporter.parseUrl(url);
+});
+
+ipcMain.handle('sheets:preview', async (event, { url, column }) => {
+  const result = await sheetsImporter.fetchAndParse(url, column || undefined);
+  if (!result.success) {
+    return { success: false, error: result.error, columns: result.columns || [] };
+  }
+  // Return preview data without full prompts array (keep it light)
+  const d = result.data;
+  return {
+    success: true,
+    spreadsheetId: d.spreadsheetId,
+    gid: d.gid,
+    promptColumn: d.promptColumn,
+    allColumns: d.allColumns,
+    totalRows: d.totalRows,
+    skippedCount: d.skippedCount,
+    promptCount: d.promptCount,
+    preview: d.preview,
+  };
+});
+
+ipcMain.handle('sheets:sync', async (event, { projectId, url, column }) => {
+  const projects = loadProjects();
+  const project = projects.find(p => p.id === projectId);
+  if (!project) return { success: false, error: 'Проект не найден' };
+
+  // Fetch and parse
+  const result = await sheetsImporter.fetchAndParse(url, column || undefined);
+  if (!result.success) {
+    return { success: false, error: result.error };
+  }
+
+  const d = result.data;
+  const prompts = d.prompts;
+
+  // Create a new prompt set (same as CSV import — never overwrite)
+  const names = generateSetNames(project, `Sheets sync`);
+  const setId = generateSetId();
+  const setFolderName = names.folderName;
+  const projectDir = path.join(config.ensureOutputDir(), project.folderName || projectId);
+  const setDir = path.join(projectDir, 'sets', setFolderName);
+  fs.mkdirSync(path.join(setDir, 'generated'), { recursive: true });
+  fs.mkdirSync(path.join(setDir, 'selected'), { recursive: true });
+
+  // Save fetched CSV as local backup
+  try {
+    const csvLines = ['id,prompt,category,style,comment'];
+    for (const p of prompts) {
+      const escape = (s) => `"${(s || '').replace(/"/g, '""')}"`;
+      csvLines.push([escape(p.id), escape(p.prompt), escape(p.category), escape(p.style), escape(p.comment)].join(','));
+    }
+    fs.writeFileSync(path.join(setDir, 'prompts.csv'), csvLines.join('\n'), 'utf-8');
+  } catch (e) {
+    console.warn('[sheets] Could not save CSV backup:', e.message);
+  }
+
+  const promptSet = {
+    id: setId,
+    folderName: setFolderName,
+    name: names.uiName,
+    prompts,
+    promptCount: prompts.length,
+    sourceMeta: {
+      type: 'google_sheets',
+      originalFileName: 'Google Sheets',
+      importedAt: new Date().toISOString(),
+      sheets: {
+        url: url,
+        spreadsheetId: d.spreadsheetId,
+        gid: d.gid,
+        promptColumn: d.promptColumn,
+        lastSyncAt: new Date().toISOString(),
+        lastSyncRowCount: d.promptCount,
+        syncBeforeLaunch: false,
+      },
+    },
+    status: 'draft',
+    selections: {},
+    selectionCurrentPrompt: 0,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+
+  if (!project.promptSets) project.promptSets = [];
+  project.promptSets.push(promptSet);
+  project.activePromptSetId = setId;
+  saveProject(project);
+
+  console.log(`[sheets] Synced from Google Sheets: "${promptSet.name}" (${setId}), ${prompts.length} prompts`);
+  return {
+    success: true,
+    setId,
+    promptCount: prompts.length,
+    skippedCount: d.skippedCount,
+  };
+});

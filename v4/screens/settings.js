@@ -8,6 +8,11 @@ let selectedIndices = null;          // null = all, Set<number> = selected 0-bas
 let promptStatuses = [];             // [{index, status, hasSelection, promptPreview}]
 let selectSectionOpen = false;       // collapse state
 
+// Google Sheets state
+let sheetsMode = false;              // true = showing sheets input form (when no prompts)
+let sheetsLoading = false;           // true during fetch/sync
+let sheetsPreview = null;            // cached preview data from API
+
 async function render() {
   const project = state.currentProject;
   const cfg = await api.config.getAll() || {};
@@ -185,22 +190,58 @@ async function render() {
         <div class="settings-body">
           <!-- Source file -->
           <div id="source-area">
-            ${promptCount > 0 ? `
-              <div class="source-file">
-                <div class="source-icon">
-                  <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-                </div>
-                <div class="source-info">
-                  <div class="source-name">${sourceMeta?.originalFileName || 'prompts.csv'}</div>
-                  <div class="source-meta">${promptCount} промптов</div>
-                </div>
-                <button id="btn-replace-file" class="source-replace">Добавить новый</button>
-              </div>
-              <div class="template-hint template-hint-subtle" style="margin-top:12px;margin-bottom:0">
-                <a id="btn-download-template" class="template-link" style="font-size:11px;padding:4px 8px;border-radius:6px;background:rgba(255,255,255,0.04);border:1px solid var(--border);">↓ Скачать шаблон</a>
-              </div>
-              ${setChipsHTML}
-            ` : `
+            ${promptCount > 0 ? (() => {
+              const isSheets = sourceMeta?.type === 'google_sheets';
+              const sheetsMeta = sourceMeta?.sheets;
+              if (isSheets && sheetsMeta) {
+                // ── Google Sheets source display ──
+                const syncTime = sheetsMeta.lastSyncAt ? new Date(sheetsMeta.lastSyncAt).toLocaleString('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—';
+                return `
+                  <div class="source-file sheets-source">
+                    <div class="source-icon sheets-icon">
+                      <svg viewBox="0 0 24 24" style="fill:none;stroke:currentColor;stroke-width:1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/><line x1="9" y1="3" x2="9" y2="21"/></svg>
+                    </div>
+                    <div class="source-info">
+                      <div class="source-name">Google Sheets</div>
+                      <div class="source-meta">${promptCount} промптов · столбец «${sheetsMeta.promptColumn || 'prompt'}»</div>
+                      <div class="source-meta" style="margin-top:2px;font-size:10px;color:var(--text-tertiary)">Синхронизировано: ${syncTime}</div>
+                    </div>
+                    <div style="display:flex;gap:6px;flex-shrink:0">
+                      <button id="btn-sheets-refresh" class="source-replace" style="font-size:11px">🔄 Обновить</button>
+                      <button id="btn-replace-file" class="source-replace" style="font-size:11px;color:var(--text-tertiary);border-color:var(--border)">CSV</button>
+                    </div>
+                  </div>
+                  <div class="sheets-sync-options" style="margin-top:10px;display:flex;align-items:center;gap:10px">
+                    <label class="sheets-checkbox" style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:11px;color:var(--text-secondary)">
+                      <input type="checkbox" id="chk-sync-before-launch" ${sheetsMeta.syncBeforeLaunch ? 'checked' : ''} style="accent-color:var(--accent)" />
+                      Обновлять перед запуском
+                    </label>
+                  </div>
+                  ${setChipsHTML}
+                `;
+              } else {
+                // ── CSV source display (original) ──
+                return `
+                  <div class="source-file">
+                    <div class="source-icon">
+                      <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                    </div>
+                    <div class="source-info">
+                      <div class="source-name">${sourceMeta?.originalFileName || 'prompts.csv'}</div>
+                      <div class="source-meta">${promptCount} промптов</div>
+                    </div>
+                    <div style="display:flex;gap:6px;flex-shrink:0">
+                      <button id="btn-replace-file" class="source-replace">Добавить новый</button>
+                      <button id="btn-sheets-connect" class="source-replace" style="font-size:11px;color:var(--text-tertiary);border-color:var(--border)">из Sheets</button>
+                    </div>
+                  </div>
+                  <div class="template-hint template-hint-subtle" style="margin-top:12px;margin-bottom:0">
+                    <a id="btn-download-template" class="template-link" style="font-size:11px;padding:4px 8px;border-radius:6px;background:rgba(255,255,255,0.04);border:1px solid var(--border);">↓ Скачать шаблон</a>
+                  </div>
+                  ${setChipsHTML}
+                `;
+              }
+            })() : `
               <div class="settings-onboarding-hint">
                 <span class="soh-step soh-step-done">✓ Проект создан</span>
                 <span class="soh-arrow">→</span>
@@ -210,16 +251,36 @@ async function render() {
                 <span class="soh-arrow">→</span>
                 <span class="soh-step soh-step-next">Запустите</span>
               </div>
-              <div id="drop-zone" class="drop-zone drop-zone-onboarding">
-                <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-                <div style="font-size:13px;font-weight:600">Загрузите промпты</div>
-                <div style="font-size:11px;color:var(--text-tertiary);margin-top:2px">CSV или XLSX — кликните или перетащите</div>
+              <div class="source-tabs" style="display:flex;gap:10px;margin-bottom:14px">
+                <button class="source-tab ${!sheetsMode ? 'source-tab-active' : ''}" id="tab-csv">📄 CSV / XLSX</button>
+                <button class="source-tab ${sheetsMode ? 'source-tab-active' : ''}" id="tab-sheets">📊 Google Sheets</button>
               </div>
-              <div class="template-hint-inline">
-                <span>Нет файла?</span>
-                <a id="btn-download-template" class="template-link">Скачайте шаблон</a>
-                <span style="color:var(--text-tertiary)">&nbsp;— заполните и загрузите</span>
-              </div>
+              ${!sheetsMode ? `
+                <div id="drop-zone" class="drop-zone drop-zone-onboarding">
+                  <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                  <div style="font-size:13px;font-weight:600">Загрузите промпты</div>
+                  <div style="font-size:11px;color:var(--text-tertiary);margin-top:2px">CSV или XLSX — кликните или перетащите</div>
+                </div>
+                <div class="template-hint-inline">
+                  <span>Нет файла?</span>
+                  <a id="btn-download-template" class="template-link">Скачайте шаблон</a>
+                  <span style="color:var(--text-tertiary)">&nbsp;— заполните и загрузите</span>
+                </div>
+              ` : `
+                <div class="sheets-input-area">
+                  <div style="font-size:12px;color:var(--text-secondary);margin-bottom:10px;line-height:1.5">
+                    Вставьте ссылку на Google Sheets. Таблица должна быть открыта для всех по ссылке.
+                  </div>
+                  <div class="sheets-url-row">
+                    <input type="text" id="sheets-url" class="sheets-url-input" placeholder="https://docs.google.com/spreadsheets/d/..." autocomplete="off" spellcheck="false" />
+                    <button id="btn-sheets-check" class="btn btn-primary sheets-check-btn" ${sheetsLoading ? 'disabled' : ''}>${sheetsLoading ? '…' : 'Проверить'}</button>
+                  </div>
+                  <div id="sheets-error" class="sheets-error" style="display:none"></div>
+                  <div id="sheets-preview" class="sheets-preview" style="display:${sheetsPreview ? 'block' : 'none'}">
+                    ${sheetsPreview ? buildSheetsPreviewHTML(sheetsPreview) : ''}
+                  </div>
+                </div>
+              `}
             `}
           </div>
 
@@ -393,6 +454,8 @@ async function render() {
       // Reset selection on new file import
       selectedIndices = null;
       state.selectedPromptIndices = null;
+      sheetsPreview = null;
+      sheetsMode = false;
       // Reload project to get updated promptSets
       const projects = await api.projects.list();
       const updatedProject = projects.find(p => p.id === project.id);
@@ -420,6 +483,123 @@ async function render() {
     }
   };
   container.querySelector('#btn-download-template')?.addEventListener('click', downloadTemplate);
+
+  // ── Source Tabs (CSV ↔ Google Sheets) ──
+  container.querySelector('#tab-csv')?.addEventListener('click', () => {
+    sheetsMode = false;
+    sheetsPreview = null;
+    render();
+  });
+  container.querySelector('#tab-sheets')?.addEventListener('click', () => {
+    sheetsMode = true;
+    render();
+  });
+
+  // ── Google Sheets: Check URL ──
+  container.querySelector('#btn-sheets-check')?.addEventListener('click', async () => {
+    const urlInput = container.querySelector('#sheets-url');
+    const errorEl = container.querySelector('#sheets-error');
+    const previewEl = container.querySelector('#sheets-preview');
+    const checkBtn = container.querySelector('#btn-sheets-check');
+    if (!urlInput) return;
+
+    const url = urlInput.value.trim();
+    if (!url) {
+      showSheetsError(errorEl, 'Вставьте ссылку на Google Sheets');
+      return;
+    }
+
+    // Show loading
+    if (checkBtn) { checkBtn.disabled = true; checkBtn.textContent = '…'; }
+    if (errorEl) errorEl.style.display = 'none';
+    sheetsLoading = true;
+
+    try {
+      const result = await api.sheets.preview(url);
+      sheetsLoading = false;
+      if (checkBtn) { checkBtn.disabled = false; checkBtn.textContent = 'Проверить'; }
+
+      if (!result.success) {
+        sheetsPreview = null;
+        showSheetsError(errorEl, result.error);
+        if (previewEl) previewEl.style.display = 'none';
+        return;
+      }
+
+      // Show preview
+      sheetsPreview = { ...result, url };
+      if (previewEl) {
+        previewEl.innerHTML = buildSheetsPreviewHTML(sheetsPreview);
+        previewEl.style.display = 'block';
+      }
+
+      // Bind sync button inside preview
+      bindSheetsSync(project);
+    } catch (err) {
+      sheetsLoading = false;
+      if (checkBtn) { checkBtn.disabled = false; checkBtn.textContent = 'Проверить'; }
+      showSheetsError(errorEl, 'Ошибка соединения');
+    }
+  });
+
+  // Enter key in URL input triggers check
+  container.querySelector('#sheets-url')?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      container.querySelector('#btn-sheets-check')?.click();
+    }
+  });
+
+  // ── Google Sheets: Connect from existing CSV view ──
+  container.querySelector('#btn-sheets-connect')?.addEventListener('click', () => {
+    sheetsMode = true;
+    // Force re-render to show sheets input (even when prompts exist, we'll show the form below)
+    // For simplicity: create a small inline form
+    showInlineSheetsForm(project);
+  });
+
+  // ── Google Sheets: Refresh from connected source ──
+  container.querySelector('#btn-sheets-refresh')?.addEventListener('click', async () => {
+    if (!project || !sourceMeta?.sheets) return;
+    const refreshBtn = container.querySelector('#btn-sheets-refresh');
+    if (refreshBtn) { refreshBtn.disabled = true; refreshBtn.textContent = '…'; }
+
+    try {
+      const result = await api.sheets.sync(project.id, sourceMeta.sheets.url, sourceMeta.sheets.promptColumn);
+      if (!result.success) {
+        showToast(result.error || 'Не удалось обновить');
+        if (refreshBtn) { refreshBtn.disabled = false; refreshBtn.textContent = '🔄 Обновить'; }
+        return;
+      }
+
+      showToast(`✓ Синхронизировано: ${result.promptCount} промптов`);
+      selectedIndices = null;
+      state.selectedPromptIndices = null;
+      const projects = await api.projects.list();
+      const updatedProject = projects.find(p => p.id === project.id);
+      if (updatedProject) state.currentProject = updatedProject;
+      render();
+    } catch {
+      showToast('Ошибка синхронизации');
+      if (refreshBtn) { refreshBtn.disabled = false; refreshBtn.textContent = '🔄 Обновить'; }
+    }
+  });
+
+  // ── Sync Before Launch checkbox ──
+  container.querySelector('#chk-sync-before-launch')?.addEventListener('change', async (e) => {
+    if (!project || !sourceMeta?.sheets) return;
+    // Update syncBeforeLaunch in the active set's sourceMeta
+    const activeSet = (await api.projects.loadPrompts(project.id));
+    if (activeSet?.sourceMeta?.sheets) {
+      activeSet.sourceMeta.sheets.syncBeforeLaunch = e.target.checked;
+      // Persist via project update (we update the whole sourceMeta)
+      // For simplicity, store in config as a per-project flag
+      await api.config.set(`syncBeforeLaunch_${project.id}`, e.target.checked);
+    }
+  });
+
+  // If there's an existing preview and sync button, bind it
+  bindSheetsSync(project);
 
   // ── Selective Prompt Picker events ──
   // Toggle expand/collapse
@@ -726,6 +906,28 @@ async function render() {
   const handleLaunch = async (isRestart = false) => {
     if (promptCount === 0) return;
 
+    // ── Pre-launch: Sync from Google Sheets if enabled ──
+    if (sourceMeta?.type === 'google_sheets' && sourceMeta?.sheets) {
+      const syncFlag = await api.config.get(`syncBeforeLaunch_${project.id}`);
+      if (syncFlag || sourceMeta.sheets.syncBeforeLaunch) {
+        showToast('Обновляю промпты из Google Sheets…', 3000);
+        try {
+          const syncResult = await api.sheets.sync(project.id, sourceMeta.sheets.url, sourceMeta.sheets.promptColumn);
+          if (syncResult.success) {
+            showToast(`✓ Синхронизировано: ${syncResult.promptCount} промптов`);
+            // Reload project to pick up new set
+            const projects = await api.projects.list();
+            const updatedProject = projects.find(p => p.id === project.id);
+            if (updatedProject) state.currentProject = updatedProject;
+          } else {
+            showToast(`⚠ Sheets: ${syncResult.error}. Запуск со старыми промптами.`, 4000);
+          }
+        } catch {
+          showToast('⚠ Не удалось обновить из Sheets. Запуск со старыми промптами.', 4000);
+        }
+      }
+    }
+
     // Pre-launch validation: resolve settings against model capabilities
     const launchSettings = {
       model: selectedModel,
@@ -984,6 +1186,154 @@ function showArchiveActiveSetModal(setId, setName, project, nextSet) {
     });
     overlay.addEventListener('click', (e) => { if (e.target === overlay) cleanup(false); });
     overlay.addEventListener('keydown', (e) => { if (e.key === 'Escape') cleanup(false); });
+  });
+}
+// ── Google Sheets helper functions ──
+
+function buildSheetsPreviewHTML(preview) {
+  if (!preview) return '';
+  const previewLines = (preview.preview || []).map((p, i) =>
+    `<div class="sheets-preview-line"><span class="sheets-preview-num">${i + 1}</span>${p.length > 80 ? p.substring(0, 80) + '…' : p}</div>`
+  ).join('');
+
+  return `
+    <div class="sheets-preview-card">
+      <div class="sheets-preview-header">
+        <div class="sheets-preview-stat">
+          <span class="sheets-preview-count">${preview.promptCount}</span> промптов
+          ${preview.skippedCount > 0 ? `<span class="sheets-preview-skipped">(${preview.skippedCount} пустых пропущено)</span>` : ''}
+        </div>
+        <div class="sheets-preview-col">Столбец: <strong>${preview.promptColumn || '?'}</strong></div>
+      </div>
+      <div class="sheets-preview-body">
+        ${previewLines}
+      </div>
+      <button id="btn-sheets-sync" class="btn btn-primary sheets-sync-btn">
+        <svg viewBox="0 0 24 24" style="width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:2;margin-right:6px"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+        Синхронизировать
+      </button>
+    </div>
+  `;
+}
+
+function showSheetsError(errorEl, message) {
+  if (!errorEl) return;
+  errorEl.textContent = message;
+  errorEl.style.display = 'block';
+}
+
+function bindSheetsSync(project) {
+  if (!container) return;
+  const syncBtn = container.querySelector('#btn-sheets-sync');
+  if (!syncBtn || syncBtn._bound) return;
+  syncBtn._bound = true;
+
+  syncBtn.addEventListener('click', async () => {
+    if (!project || !sheetsPreview) return;
+    syncBtn.disabled = true;
+    syncBtn.innerHTML = '…';
+
+    try {
+      const result = await api.sheets.sync(project.id, sheetsPreview.url, sheetsPreview.promptColumn);
+      if (!result.success) {
+        showToast(result.error || 'Ошибка синхронизации');
+        syncBtn.disabled = false;
+        syncBtn.innerHTML = 'Синхронизировать';
+        return;
+      }
+
+      showToast(`✓ Синхронизировано: ${result.promptCount} промптов`);
+      selectedIndices = null;
+      state.selectedPromptIndices = null;
+      sheetsPreview = null;
+      sheetsMode = false;
+
+      // Reload project
+      const projects = await api.projects.list();
+      const updatedProject = projects.find(p => p.id === project.id);
+      if (updatedProject) state.currentProject = updatedProject;
+      render();
+    } catch {
+      showToast('Ошибка синхронизации');
+      syncBtn.disabled = false;
+      syncBtn.innerHTML = 'Синхронизировать';
+    }
+  });
+}
+
+function showInlineSheetsForm(project) {
+  if (!container) return;
+
+  // Create inline form below existing source info
+  const sourceArea = container.querySelector('#source-area');
+  if (!sourceArea) return;
+
+  // Remove existing inline form if any
+  sourceArea.querySelector('.sheets-inline-form')?.remove();
+
+  const form = document.createElement('div');
+  form.className = 'sheets-inline-form';
+  form.style.cssText = 'margin-top:14px;border-top:1px solid var(--border);padding-top:14px;';
+  form.innerHTML = `
+    <div style="font-size:12px;color:var(--text-secondary);margin-bottom:10px;line-height:1.5">
+      Вставьте ссылку на Google Sheets. Таблица должна быть открыта для всех по ссылке.
+    </div>
+    <div class="sheets-url-row">
+      <input type="text" id="sheets-url-inline" class="sheets-url-input" placeholder="https://docs.google.com/spreadsheets/d/..." autocomplete="off" spellcheck="false" />
+      <button id="btn-sheets-check-inline" class="btn btn-primary sheets-check-btn">Проверить</button>
+    </div>
+    <div id="sheets-error-inline" class="sheets-error" style="display:none"></div>
+    <div id="sheets-preview-inline" class="sheets-preview" style="display:none"></div>
+  `;
+  sourceArea.appendChild(form);
+
+  // Focus input
+  form.querySelector('#sheets-url-inline')?.focus();
+
+  // Check button handler
+  form.querySelector('#btn-sheets-check-inline')?.addEventListener('click', async () => {
+    const urlInput = form.querySelector('#sheets-url-inline');
+    const errorEl = form.querySelector('#sheets-error-inline');
+    const previewEl = form.querySelector('#sheets-preview-inline');
+    const checkBtn = form.querySelector('#btn-sheets-check-inline');
+    const url = urlInput?.value?.trim();
+
+    if (!url) {
+      showSheetsError(errorEl, 'Вставьте ссылку на Google Sheets');
+      return;
+    }
+
+    if (checkBtn) { checkBtn.disabled = true; checkBtn.textContent = '…'; }
+    if (errorEl) errorEl.style.display = 'none';
+
+    try {
+      const result = await api.sheets.preview(url);
+      if (checkBtn) { checkBtn.disabled = false; checkBtn.textContent = 'Проверить'; }
+
+      if (!result.success) {
+        showSheetsError(errorEl, result.error);
+        if (previewEl) previewEl.style.display = 'none';
+        return;
+      }
+
+      sheetsPreview = { ...result, url };
+      if (previewEl) {
+        previewEl.innerHTML = buildSheetsPreviewHTML(sheetsPreview);
+        previewEl.style.display = 'block';
+      }
+      bindSheetsSync(project);
+    } catch {
+      if (checkBtn) { checkBtn.disabled = false; checkBtn.textContent = 'Проверить'; }
+      showSheetsError(errorEl, 'Ошибка соединения');
+    }
+  });
+
+  // Enter key
+  form.querySelector('#sheets-url-inline')?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      form.querySelector('#btn-sheets-check-inline')?.click();
+    }
   });
 }
 

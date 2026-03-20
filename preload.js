@@ -116,4 +116,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getUnlimitedList: () => ipcRenderer.invoke('models:get-unlimited-list'),
     resolveSettings: (settings) => ipcRenderer.invoke('models:resolve-settings', settings),
   },
+
+  // ── Google Sheets ──
+  sheets: {
+    validate: (url) => ipcRenderer.invoke('sheets:validate', { url }),
+    preview: (url, column) => ipcRenderer.invoke('sheets:preview', { url, column }),
+    sync: (projectId, url, column) =>
+      ipcRenderer.invoke('sheets:sync', { projectId, url, column }),
+  },
 });

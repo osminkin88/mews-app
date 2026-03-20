@@ -67,6 +67,11 @@ const STUBS = {
     ],
     resolveSettings: async (s) => ({ effective: s, warnings: [], blocked: false }),
   },
+  sheets: {
+    validate: async () => ({ valid: false, error: 'Stub: not in Electron' }),
+    preview: async () => ({ success: false, error: 'Stub: not in Electron' }),
+    sync: async () => ({ success: false, error: 'Stub: not in Electron' }),
+  },
 };
 
 // ── Export: real API or stubs ──

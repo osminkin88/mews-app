@@ -1,7 +1,7 @@
 {
   "name": "mews",
   "productName": "Mews",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "Mews — AI Image Generation Desktop App",
   "main": "main.js",
   "scripts": {
@@ -76,6 +76,7 @@
       "chrome-manager.js",
       "higgsfield-engine.js",
       "file-importer.js",
+      "sheets-importer.js",
       "config-manager.js",
       "model-capabilities.js",
       "utils.js",

@@ -1,7 +1,7 @@
 {
   "name": "mews",
   "productName": "Mews",
-  "version": "1.0.1",
+  "version": "2.0.0",
   "description": "Mews — AI Image Generation Desktop App",
   "main": "main.js",
   "scripts": {
@@ -82,7 +82,8 @@
       "icon.png",
       "Шаблон_промптов.xlsx",
       "v4/**/*",
-      "!v4/**/*.map"
+      "!v4/**/*.map",
+      "assets/**/*"
     ],
     "extraResources": [],
     "directories": {

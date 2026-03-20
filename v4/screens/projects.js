@@ -58,13 +58,16 @@ async function render() {
 
   const emptyStateHtml = `
     <div class="projects-welcome">
-      <div class="projects-welcome-icon">
-        <svg viewBox="0 0 56 56" fill="none">
-          <rect width="56" height="56" rx="16" fill="rgba(10,132,255,0.1)"/>
-          <path d="M14 28 L22 20 L28 26 L34 18 L42 28" stroke="#0A84FF" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-          <circle cx="28" cy="36" r="6" stroke="#5E5CE6" stroke-width="2" fill="none"/>
-          <path d="M26 36 L27.5 37.5 L30.5 34.5" stroke="#5E5CE6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-        </svg>
+      <div class="projects-welcome-video" id="welcome-video-wrap">
+        <video
+          id="welcome-mascot-video"
+          poster="../assets/welcome-mascot-poster.jpg"
+          muted
+          playsinline
+          preload="none"
+        >
+          <source src="../assets/welcome-mascot.mp4" type="video/mp4">
+        </video>
       </div>
       <div class="projects-welcome-title">Начните с нового проекта</div>
       <div class="projects-welcome-desc">Загрузите CSV с промптами и запустите массовую генерацию изображений через Higgsfield</div>
@@ -138,6 +141,22 @@ async function render() {
   `;
 
   bindEvents();
+
+  // ── Lazy-load mascot video only when empty state is shown ──
+  const mascotVideo = container.querySelector('#welcome-mascot-video');
+  if (mascotVideo) {
+    // Defer load so it doesn't block initial render
+    requestAnimationFrame(() => {
+      mascotVideo.preload = 'auto';
+      mascotVideo.load();
+      mascotVideo.addEventListener('canplaythrough', () => {
+        // Gentle fade-in: poster is visible, then video fades in on play
+        const wrap = container.querySelector('#welcome-video-wrap');
+        if (wrap) wrap.classList.add('loaded');
+        mascotVideo.play().catch(() => {});
+      }, { once: true });
+    });
+  }
 }
 
 function renderProjectCard(p) {
